@@ -3,6 +3,7 @@
   import Button from './Button.svelte';
   import { Trash2, Edit, Filter, X, Download } from 'lucide-svelte';
   import { exportToCSV } from '$lib/utils/exportUtils';
+  import { formatDateGB } from '$lib/utils/formatDate';
 
   export let data: any[] = [];
   export let columns: Array<{
@@ -70,7 +71,7 @@
       
       // Format based on column type
       if (col.type === 'date' && value) {
-        value = formatDate(value);
+        value = formatDateGB(value);
       } else if (col.type === 'status') {
         value = value ? 'Active' : 'Inactive';
       }
@@ -171,16 +172,6 @@
       return '↕️';
     }
     return sortDirection === 'asc' ? '↑' : '↓';
-  }
-
-  function formatDate(dateString: string): string {
-    if (!dateString) return '';
-    const date = new Date(dateString);
-    return date.toLocaleDateString('en-GB', {
-      day: '2-digit',
-      month: 'short',
-      year: 'numeric'
-    });
   }
 
   function filterByDate(rowValue: any, filterValue: string, filterOp: string): boolean {
@@ -426,7 +417,7 @@
                 {#each columns as column}
                   <td class="px-6 py-4 whitespace-nowrap text-sm theme-text-primary">
                     {#if column.type === 'date'}
-                      {formatDate(row[column.key])}
+                      {formatDateGB(row[column.key])}
                     {:else if column.type === 'status'}
                       <span class={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
                         row[column.key] 

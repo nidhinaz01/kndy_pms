@@ -48,6 +48,7 @@
 		"@supabase/supabase-js": "^2.52.0",
 		"apexcharts": "^5.2.0",
 		"date-fns": "^4.1.0",
+		"jspdf": "^3.0.3",
 		"lucide-svelte": "^0.525.0",
 		"svelte-apexcharts": "^1.0.2",
 		"xlsx": "^0.18.5"

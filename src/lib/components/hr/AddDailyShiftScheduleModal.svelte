@@ -190,6 +190,7 @@
             Cancel
           </button>
           <Button
+            type="submit"
             variant="primary"
             disabled={isSubmitting || isLoadingShifts}
           >

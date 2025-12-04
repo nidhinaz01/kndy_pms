@@ -1,427 +1,480 @@
 <script lang="ts">
-  import { createEventDispatcher, onMount } from 'svelte';
+  import { createEventDispatcher } from 'svelte';
   import Button from '$lib/components/common/Button.svelte';
-  import TimePicker from '$lib/components/common/TimePicker.svelte';
-  import { X, Clock, User, AlertTriangle } from 'lucide-svelte';
+  import { X } from 'lucide-svelte';
   import { supabase } from '$lib/supabaseClient';
-  import { createWorkPlanning } from '$lib/api/production';
+  import { calculatePlannedHours, calculateBreakTimeInSlot, autoCalculateEndTime, getIndividualSkills, getSkillShort, generateTimeSlots } from '$lib/utils/planWorkUtils';
+  import { formatTime } from '$lib/utils/timeFormatUtils';
+  import { checkTimeOverlap, checkTimeExcess, checkSkillMismatch } from '$lib/utils/planWorkValidation';
+  import { loadWorkers, loadWorkContinuation, loadExistingPlans, loadShiftInfo, checkAlternativeSkillCombinations } from '$lib/services/planWorkService';
+  import { checkWorkerConflicts } from '$lib/services/planWorkConflictService';
+  import { saveWorkPlanning } from '$lib/services/planWorkSaveService';
+  import type { Worker, SelectedWorker, WorkContinuation, ShiftInfo, PlanWorkWarnings, PlanWorkFormData } from '$lib/types/planWork';
+  import { initialPlanWorkFormData, initialWarnings } from '$lib/types/planWork';
+  import WorkDetailsDisplay from './plan-work/WorkDetailsDisplay.svelte';
+  import WorkerSelection from './plan-work/WorkerSelection.svelte';
+  import TimePlanning from './plan-work/TimePlanning.svelte';
+  import WarningsDisplay from './plan-work/WarningsDisplay.svelte';
 
   export let isOpen: boolean = false;
   export let work: any = null;
   export let selectedDate: string = '';
   export let stageCode: string = '';
+  export let shiftCode: string = '';
 
   const dispatch = createEventDispatcher();
 
+  // Form data
+  let formData: PlanWorkFormData = { ...initialPlanWorkFormData };
+  let warnings: PlanWorkWarnings = { ...initialWarnings };
+
   // Modal state
   let isLoading = false;
-  let availableWorkers: Array<{ emp_id: string; emp_name: string; skill_short: string }> = [];
-  let selectedWorkers: { [skill: string]: { emp_id: string; emp_name: string; skill_short: string } | null } = {};
-  let fromTime = '';
-  let toTime = '';
-  let plannedHours = 0;
-  let showSkillMismatchWarning = false;
-  let skillMismatchDetails = '';
-
-  // Work continuation data
-  let workContinuation = {
+  let currentStep: 1 | 2 = 1; // Step 1: Time Selection, Step 2: Worker Selection
+  let availableWorkers: Worker[] = [];
+  let filteredAvailableWorkers: Worker[] = []; // Workers filtered by time availability
+  let workContinuation: WorkContinuation = {
     hasPreviousWork: false,
     timeWorkedTillDate: 0,
     remainingTime: 0,
-    previousReports: [] as any[]
+    previousReports: []
   };
-
-  // Time overlap prevention
   let existingPlans: any[] = [];
-  let showTimeOverlapWarning = false;
-  let timeOverlapDetails = '';
-
-  // Time validation
-  let showTimeExcessWarning = false;
-  let timeExcessDetails = '';
-
-  // Shift information for auto-calculating end time
-  let shiftInfo: any = null;
-
-  // Validation for alternative skill combinations
-  let hasAlternativePlanningConflict = false;
-  let alternativeConflictDetails = '';
-  
-  // Track which skill combination is selected (only one at a time)
-  let selectedSkillMappingIndex = -1;
+  let shiftInfo: ShiftInfo | null = null;
+  let shiftBreakTimes: Array<{ start_time: string; end_time: string }> = [];
   let previousSelectedSkillMappingIndex = -1;
+  let lastAutoCalculatedToTime: string | null = null;
+  let originalDurationMinutes: number | null = null; // Track original duration when editing
 
   // Watch for work changes
-  $: if (work) {
+  $: if (work && isOpen) {
     console.log('PlanWorkModal: Work changed:', work);
-    loadWorkers();
-    loadWorkContinuation();
-    loadExistingPlans();
-    loadShiftInfo();
-    calculatePlannedHours();
-    checkAlternativeSkillCombinations();
+    loadAllData();
     
-    // Reset selected skill mapping and workers
-    selectedSkillMappingIndex = -1;
+    // Check if this is edit mode (has existing draft plans)
+    const isEditMode = work?.existingDraftPlans && Array.isArray(work.existingDraftPlans) && work.existingDraftPlans.length > 0;
+    
+    if (isEditMode) {
+      // Pre-fill form with existing plan data (will be called again after workers load)
+      // Don't prefill workers yet - wait for availableWorkers to load
+      prefillFormFromExistingPlans(work.existingDraftPlans, false);
+    } else {
+      // Reset form and step for new planning
+    formData = { ...initialPlanWorkFormData };
+    warnings = { ...initialWarnings };
     previousSelectedSkillMappingIndex = -1;
-    selectedWorkers = {};
+    lastAutoCalculatedToTime = null;
+    currentStep = 1;
+    filteredAvailableWorkers = [];
     
     // Auto-select if only one skill mapping
     if (work?.skill_mappings && work.skill_mappings.length === 1) {
-      selectedSkillMappingIndex = 0;
+      formData.selectedSkillMappingIndex = 0;
       previousSelectedSkillMappingIndex = 0;
+      }
     }
   }
-
-  // Debug modal state
-  $: console.log('PlanWorkModal: isOpen =', isOpen, 'work =', work);
+  
+  // Pre-fill workers after they are loaded (for edit mode)
+  let hasPrefilledWorkers = false;
+  $: if (work?.existingDraftPlans && Array.isArray(work.existingDraftPlans) && work.existingDraftPlans.length > 0 
+      && availableWorkers.length > 0 && isOpen && !hasPrefilledWorkers) {
+    // Workers are now loaded, pre-fill them
+    prefillFormFromExistingPlans(work.existingDraftPlans, true);
+    hasPrefilledWorkers = true;
+  }
+  
+  // Reset flag when modal closes or work changes
+  $: if (!isOpen || !work) {
+    hasPrefilledWorkers = false;
+  }
+  
+  function prefillFormFromExistingPlans(existingPlans: any[], fillWorkers: boolean = true) {
+    if (!existingPlans || existingPlans.length === 0) return;
+    
+    // Get the first plan item to extract time information
+    // All plans in a group should have the same from_time/to_time
+    const firstPlan = existingPlans[0];
+    
+    // Pre-fill time slots from the first plan
+    // Use the earliest from_time and latest to_time if they differ
+    const allFromTimes = existingPlans.map((p: any) => p.from_time).filter(Boolean);
+    const allToTimes = existingPlans.map((p: any) => p.to_time).filter(Boolean);
+    
+    // Normalize time format: convert HH:MM:SS to HH:MM
+    function normalizeTime(timeStr: string): string {
+      if (!timeStr) return '';
+      // Remove seconds if present (HH:MM:SS -> HH:MM)
+      const parts = timeStr.split(':');
+      if (parts.length >= 2) {
+        return `${parts[0].padStart(2, '0')}:${parts[1].padStart(2, '0')}`;
+      }
+      return timeStr;
+    }
+    
+    // Find closest matching time slot (time slots are in 15-minute intervals)
+    function findClosestTimeSlot(targetTime: string, shiftStart: string, shiftEnd: string): string {
+      if (!targetTime || !shiftStart || !shiftEnd) return targetTime;
+      
+      try {
+        const timeSlots = generateTimeSlots(shiftStart, shiftEnd);
+        
+        if (timeSlots.length === 0) return targetTime;
+        
+        // Convert target time to minutes
+        const [targetHour, targetMin] = targetTime.split(':').map(Number);
+        const targetMinutes = targetHour * 60 + targetMin;
+        
+        // Find the closest slot
+        let closestSlot = timeSlots[0];
+        let minDiff = Infinity;
+        
+        for (const slot of timeSlots) {
+          const [slotHour, slotMin] = slot.value.split(':').map(Number);
+          const slotMinutes = slotHour * 60 + slotMin;
+          const diff = Math.abs(slotMinutes - targetMinutes);
+          
+          if (diff < minDiff) {
+            minDiff = diff;
+            closestSlot = slot;
+          }
+        }
+        
+        return closestSlot.value;
+      } catch (error) {
+        console.error('Error finding closest time slot:', error);
+        return targetTime;
+      }
+    }
+    
+    if (allFromTimes.length > 0 && allToTimes.length > 0) {
+      // Use the earliest from_time and latest to_time, normalized to HH:MM format
+      const normalizedTimes = allFromTimes.map(normalizeTime);
+      const normalizedToTimes = allToTimes.map(normalizeTime);
+      const earliestTime = normalizedTimes.sort()[0];
+      const latestTime = normalizedToTimes.sort().reverse()[0];
+      
+      // Calculate and store the original duration in minutes
+      const [fromHour, fromMin] = earliestTime.split(':').map(Number);
+      const [toHour, toMin] = latestTime.split(':').map(Number);
+      const fromMinutes = fromHour * 60 + fromMin;
+      const toMinutes = toHour * 60 + toMin;
+      let durationMinutes = toMinutes - fromMinutes;
+      if (durationMinutes < 0) {
+        durationMinutes += 24 * 60; // Handle overnight
+      }
+      originalDurationMinutes = durationMinutes;
+      console.log('✅ Stored original duration:', originalDurationMinutes, 'minutes (', formatTime(originalDurationMinutes / 60), ')');
+      
+      // Find closest matching time slot if shift info is available
+      if (shiftInfo?.hr_shift_master?.start_time && shiftInfo?.hr_shift_master?.end_time) {
+        formData.fromTime = findClosestTimeSlot(
+          earliestTime,
+          shiftInfo.hr_shift_master.start_time,
+          shiftInfo.hr_shift_master.end_time
+        );
+      } else {
+        // If shift info not loaded yet, use normalized time directly
+        // It will be matched to closest slot when shift info loads
+        formData.fromTime = earliestTime;
+      }
+      
+      // For toTime, we can use the exact value since TimePicker accepts any time
+      formData.toTime = latestTime;
+      lastAutoCalculatedToTime = formData.toTime;
+      console.log('✅ Pre-filled fromTime:', formData.fromTime, 'toTime:', formData.toTime);
+    }
+    
+    // First, try to determine the selected skill mapping index
+    // Match the skill mappings from the work with the skills used in the plans
+    let selectedMappingIndex = -1;
+    if (work?.skill_mappings && work.skill_mappings.length > 0) {
+      // Get all unique skills from the existing plans
+      const planSkills = new Set(
+        existingPlans
+          .map((p: any) => p.sc_required || p.hr_emp?.skill_short || p.skill_short)
+          .filter(Boolean)
+      );
+      
+      // Find the skill mapping that contains all the planned skills
+      const matchingIndex = work.skill_mappings.findIndex((mapping: any) => {
+        try {
+          // Get individual skills from this mapping
+          const mappingSkills = getIndividualSkills(mapping);
+          const mappingSkillSet = new Set(mappingSkills);
+          
+          // Also check skill_short from skill_combination if available
+          if (mapping.std_skill_combinations?.skill_combination) {
+            const combination = Array.isArray(mapping.std_skill_combinations.skill_combination)
+              ? mapping.std_skill_combinations.skill_combination
+              : [mapping.std_skill_combinations.skill_combination];
+            
+            combination.forEach((skill: any) => {
+              if (skill.skill_short) mappingSkillSet.add(skill.skill_short);
+              if (skill.skill_name) mappingSkillSet.add(skill.skill_name);
+            });
+          }
+          
+          // Check if all planned skills are in this mapping
+          return Array.from(planSkills).every(skill => mappingSkillSet.has(skill));
+        } catch (error) {
+          console.error('Error matching skill mapping:', error);
+          return false;
+        }
+      });
+      
+      if (matchingIndex >= 0) {
+        selectedMappingIndex = matchingIndex;
+        formData.selectedSkillMappingIndex = matchingIndex;
+        previousSelectedSkillMappingIndex = matchingIndex;
+      } else if (work.skill_mappings.length === 1) {
+        // Fallback: if only one mapping, select it
+        selectedMappingIndex = 0;
+        formData.selectedSkillMappingIndex = 0;
+        previousSelectedSkillMappingIndex = 0;
+      }
+    }
+    
+    // Now pre-fill workers based on existing plans using the correct key format
+    const selectedWorkers: { [skill: string]: SelectedWorker | null } = {};
+    
+    // Get the selected skill mapping
+    let selectedMapping: any = null;
+    if (selectedMappingIndex >= 0 && work?.skill_mappings) {
+      selectedMapping = work.skill_mappings[selectedMappingIndex];
+    }
+    
+    if (selectedMapping) {
+      // Get individual skills from the selected mapping
+      const individualSkills = getIndividualSkills(selectedMapping);
+      
+      // Map existing plans to the correct worker keys
+      // WorkerSelection uses keys like `${individualSkill}-${skillIndex}` for multiple skills
+      // or just `skillShort` for single skills
+      if (individualSkills.length > 1) {
+        // Multiple skills - use format `${individualSkill}-${skillIndex}`
+        // Track which indices have been used for each skill to handle duplicates
+        const skillIndexUsage = new Map<string, number[]>(); // skill -> array of indices where this skill appears
+        
+        // Build map of skill -> available indices
+        individualSkills.forEach((skill, index) => {
+          if (!skillIndexUsage.has(skill)) {
+            skillIndexUsage.set(skill, []);
+          }
+          skillIndexUsage.get(skill)!.push(index);
+        });
+        
+        // Track which indices have been assigned
+        const assignedIndices = new Set<number>();
+        
+        existingPlans.forEach((plan: any) => {
+          const skillRequired = plan.sc_required || plan.hr_emp?.skill_short || plan.skill_short;
+          const worker = plan.hr_emp;
+          
+          if (skillRequired && worker) {
+            // Find available indices for this skill that haven't been assigned yet
+            const availableIndices = skillIndexUsage.get(skillRequired) || [];
+            const unassignedIndex = availableIndices.find(idx => !assignedIndices.has(idx));
+            
+            if (unassignedIndex !== undefined) {
+              // Use the skill name from individualSkills array
+              const skillName = individualSkills[unassignedIndex];
+              const workerKey = `${skillName}-${unassignedIndex}`;
+              selectedWorkers[workerKey] = {
+                emp_id: worker.emp_id || plan.worker_id,
+                emp_name: worker.emp_name || 'Unknown',
+                skill_short: worker.skill_short || skillRequired
+              };
+              assignedIndices.add(unassignedIndex);
+              console.log(`✅ Mapped worker ${worker.emp_name} (${skillRequired}) to key ${workerKey}`);
+            } else {
+              console.warn(`⚠️ No available index for skill ${skillRequired}, worker ${worker.emp_name}. All indices for this skill are already assigned.`);
+            }
+          }
+        });
+      } else {
+        // Single skill - use just the skill name as key
+        const skillShort = getSkillShort(selectedMapping);
+        const firstPlan = existingPlans[0];
+        const worker = firstPlan?.hr_emp;
+        
+        if (worker) {
+          const workerKey = skillShort || selectedMapping.sc_name;
+          selectedWorkers[workerKey] = {
+            emp_id: worker.emp_id || firstPlan.worker_id,
+            emp_name: worker.emp_name || 'Unknown',
+            skill_short: worker.skill_short || skillShort
+          };
+        }
+      }
+    } else {
+      // Fallback: if no mapping selected, use sc_required as key
+      existingPlans.forEach((plan: any) => {
+        const skillRequired = plan.sc_required || plan.skill_short;
+        const worker = plan.hr_emp;
+        
+        if (skillRequired && worker) {
+          selectedWorkers[skillRequired] = {
+            emp_id: worker.emp_id || plan.worker_id,
+            emp_name: worker.emp_name || 'Unknown',
+            skill_short: worker.skill_short || skillRequired
+          };
+        }
+      });
+    }
+    
+    if (fillWorkers) {
+      formData.selectedWorkers = selectedWorkers;
+      // Ensure selected workers are in the available list
+      ensureSelectedWorkersInAvailable();
+    }
+    
+    // Keep step at 1 (time selection) so user can see and modify times
+    // Don't skip to step 2 - let user proceed naturally
+    if (!fillWorkers) {
+      // Only set step on first call (when filling times)
+      currentStep = 1;
+    }
+    
+    // Reset warnings
+    warnings = { ...initialWarnings };
+    filteredAvailableWorkers = [];
+    
+    console.log('✅ Pre-filled form from existing plans:', {
+      fromTime: formData.fromTime,
+      toTime: formData.toTime,
+      selectedWorkers: fillWorkers ? formData.selectedWorkers : 'deferred',
+      selectedSkillMappingIndex: formData.selectedSkillMappingIndex,
+      fillWorkers
+    });
+  }
   
   // Clear workers when switching skill mappings
-  $: if (selectedSkillMappingIndex !== previousSelectedSkillMappingIndex && previousSelectedSkillMappingIndex >= 0) {
+  $: if (formData.selectedSkillMappingIndex !== previousSelectedSkillMappingIndex && previousSelectedSkillMappingIndex >= 0) {
     console.log('Clearing workers due to skill mapping change');
-    selectedWorkers = {};
-    previousSelectedSkillMappingIndex = selectedSkillMappingIndex;
-  } else if (selectedSkillMappingIndex >= 0) {
-    previousSelectedSkillMappingIndex = selectedSkillMappingIndex;
+    formData.selectedWorkers = {};
+    previousSelectedSkillMappingIndex = formData.selectedSkillMappingIndex;
+  } else if (formData.selectedSkillMappingIndex >= 0) {
+    previousSelectedSkillMappingIndex = formData.selectedSkillMappingIndex;
   }
 
-  // Watch for time changes
+  // Watch for fromTime changes to auto-calculate end time FIRST
+  // Only auto-calculate if toTime is empty or was previously auto-calculated
+  $: if (formData.fromTime && (workContinuation.remainingTime > 0 || work?.std_vehicle_work_flow?.estimated_duration_minutes)) {
+    // Auto-calculate end time when fromTime changes
+    // Only if toTime is empty or matches the last auto-calculated value (user hasn't manually changed it)
+    if (!formData.toTime || formData.toTime === lastAutoCalculatedToTime) {
+      const calculatedToTime = autoCalculateEndTime(
+        formData.fromTime,
+        workContinuation.remainingTime,
+        work?.std_vehicle_work_flow?.estimated_duration_minutes,
+        shiftBreakTimes
+      );
+      if (calculatedToTime) {
+        formData.toTime = calculatedToTime;
+        lastAutoCalculatedToTime = calculatedToTime;
+        console.log('🔄 Auto-calculated toTime:', calculatedToTime, 'from fromTime:', formData.fromTime);
+      }
+    }
+  }
+
+  // Watch for time changes - explicitly depend on fromTime, toTime
+  // Planned hours = simple duration between fromTime and toTime (no break time subtraction)
+  // This runs AFTER the auto-calculate above has updated toTime
+  // Use explicit reactive statement to ensure it runs when either time changes
   $: {
-    calculatePlannedHours();
-    checkTimeOverlap();
-    checkTimeExcess();
-    // Recalculate break time when time inputs change
+    const fromTime = formData.fromTime;
+    const toTime = formData.toTime;
+    
     if (fromTime && toTime) {
-      calculateBreakTimeInSlot();
-    }
-  }
-
-  // Watch for fromTime changes to auto-calculate end time
-  // Use remaining time if available, otherwise use standard time
-  $: if (fromTime && (workContinuation.remainingTime > 0 || work?.std_vehicle_work_flow?.estimated_duration_minutes)) {
-    autoCalculateEndTime();
-  }
-
-  async function loadWorkers() {
-    if (!stageCode) return;
-    
-    try {
-      // Get workers assigned to the current stage
-      const { data, error } = await supabase
-        .from('hr_emp')
-        .select(`
-          emp_id,
-          emp_name,
-          skill_short,
-          stage
-        `)
-        .eq('stage', stageCode)
-        .eq('is_active', true)
-        .eq('is_deleted', false);
-
-      if (error) {
-        console.error('Error loading workers:', error);
-        return;
-      }
-
-      availableWorkers = data || [];
-      console.log(`👥 Loaded ${availableWorkers.length} workers for stage ${stageCode}:`, availableWorkers);
-    } catch (error) {
-      console.error('Error loading workers:', error);
-    }
-  }
-
-  async function checkAlternativeSkillCombinations() {
-    if (!work || !work.skill_mappings || work.skill_mappings.length <= 1) {
-      hasAlternativePlanningConflict = false;
-      alternativeConflictDetails = '';
-      return;
-    }
-
-    // Only check if there are multiple skill combinations (alternatives)
-    const derivedSwCode = work.std_work_type_details?.derived_sw_code || work.sw_code;
-    
-    if (!derivedSwCode) {
-      hasAlternativePlanningConflict = false;
-      alternativeConflictDetails = '';
-      return;
-    }
-
-    try {
-      // Check if any alternative skill combination has been planned and not completed
-      const { data: existingPlans, error } = await supabase
-        .from('prdn_work_planning')
-        .select(`
-          *,
-          prdn_work_reporting!left(
-            id,
-            is_deleted
-          )
-        `)
-        .eq('derived_sw_code', derivedSwCode)
-        .eq('stage_code', stageCode)
-        .eq('is_active', true)
-        .eq('is_deleted', false);
-
-      if (error) {
-        console.error('Error checking alternative combinations:', error);
-        return;
-      }
-
-      if (!existingPlans || existingPlans.length === 0) {
-        hasAlternativePlanningConflict = false;
-        alternativeConflictDetails = '';
-        return;
-      }
-
-      // Check if any existing plan is not completed
-      const uncompletedPlans = existingPlans.filter(plan => {
-        // Check if there's a report for this plan
-        const reports = plan.prdn_work_reporting || [];
-        const activeReports = reports.filter((r: any) => !r.is_deleted);
-        return activeReports.length === 0; // No reports = not completed
+      // Calculate simple duration - no break time involved
+      const calculatedHours = calculatePlannedHours(fromTime, toTime);
+      
+      console.log('📊 Planned hours calculation:', {
+        fromTime: fromTime,
+        toTime: toTime,
+        calculatedHours: calculatedHours,
+        fromTimeType: typeof fromTime,
+        toTimeType: typeof toTime
       });
+      
+      formData.plannedHours = calculatedHours;
+    } else {
+      formData.plannedHours = 0;
+    }
+  }
+  
+  // Separate reactive block for validation (runs after plannedHours is calculated)
+  $: if (formData.fromTime && formData.toTime) {
+    checkTimeOverlapValidation();
+    checkTimeExcessValidation();
+  }
 
-      if (uncompletedPlans.length > 0) {
-        // Get the skill combinations of those uncompleted plans
-        const conflictingScNames = uncompletedPlans.map((plan: any) => plan.sc_required).filter(Boolean);
-        
-        if (conflictingScNames.length > 0) {
-          hasAlternativePlanningConflict = true;
-          alternativeConflictDetails = `This work has alternative skill combinations that have been planned but not completed:\n\n${conflictingScNames.join('\n')}\n\nOnce an alternative is planned and not completed, other alternatives cannot be planned.`;
-          console.warn('⚠️ Alternative planning conflict detected:', conflictingScNames);
-        } else {
-          hasAlternativePlanningConflict = false;
-          alternativeConflictDetails = '';
-        }
-      } else {
-        hasAlternativePlanningConflict = false;
-        alternativeConflictDetails = '';
-      }
-    } catch (error) {
-      console.error('Error checking alternative skill combinations:', error);
-      hasAlternativePlanningConflict = false;
-      alternativeConflictDetails = '';
+  // Ensure selected workers are always in available list when viewing step 2
+  $: if (currentStep === 2 && filteredAvailableWorkers.length > 0) {
+    ensureSelectedWorkersInAvailable();
+  }
+
+
+  async function loadAllData() {
+    if (!stageCode || !selectedDate) return;
+    
+    isLoading = true;
+    try {
+      await Promise.all([
+        loadWorkersData(),
+        loadWorkContinuationData(),
+        loadExistingPlansData(),
+        loadShiftInfoData(),
+        checkAlternativeCombinations()
+      ]);
+    } finally {
+      isLoading = false;
     }
   }
 
-  async function loadWorkContinuation() {
+  async function loadWorkersData() {
+    availableWorkers = await loadWorkers(stageCode);
+    console.log(`👥 Loaded ${availableWorkers.length} workers for stage ${stageCode}`);
+  }
+
+  async function loadWorkContinuationData() {
     if (!work || !selectedDate) return;
 
-    try {
-      // First, check if the work object already has time_taken and remaining_time from Works tab
-      // This is more reliable than recalculating
+    // First check if work object has time data
       if (work.time_taken !== undefined && work.remaining_time !== undefined) {
-        workContinuation.timeWorkedTillDate = work.time_taken || 0;
-        workContinuation.remainingTime = work.remaining_time || 0;
-        workContinuation.hasPreviousWork = (work.time_taken || 0) > 0;
-        
-        console.log(`📊 Using work object time data:`, {
-          time_taken: work.time_taken,
-          remaining_time: work.remaining_time,
-          timeWorkedTillDate: workContinuation.timeWorkedTillDate,
-          remainingTime: workContinuation.remainingTime
-        });
+      workContinuation = {
+        hasPreviousWork: (work.time_taken || 0) > 0,
+        timeWorkedTillDate: work.time_taken || 0,
+        remainingTime: work.remaining_time || 0,
+        previousReports: []
+      };
         return;
       }
 
-      const workCode = work.std_work_type_details?.derived_sw_code || work.sw_code;
-      const woDetailsId = work.prdn_wo_details_id || work.wo_details_id;
-      
-      if (!workCode || !woDetailsId) {
-        console.warn('⚠️ Missing workCode or woDetailsId for work continuation');
-        // Fallback calculation
-        const standardTime = work.std_vehicle_work_flow?.estimated_duration_minutes || 0;
-        const standardHours = standardTime / 60;
-        workContinuation.remainingTime = standardHours;
-        workContinuation.timeWorkedTillDate = 0;
-        return;
-      }
-
-      // Check if this work has been reported before (before or on the selected date)
-      // We need to get reports for the same work code and work order
-      // Match the Works tab query: only filter by is_deleted, not is_active
-      const { data, error } = await supabase
-        .from('prdn_work_reporting')
-        .select(`
-          hours_worked_till_date,
-          hours_worked_today,
-          from_date,
-          prdn_work_planning!inner(
-            derived_sw_code,
-            wo_details_id,
-            from_date,
-            stage_code
-          )
-        `)
-        .eq('prdn_work_planning.derived_sw_code', workCode)
-        .eq('prdn_work_planning.wo_details_id', woDetailsId)
-        .eq('prdn_work_planning.stage_code', stageCode)
-        .lte('prdn_work_planning.from_date', selectedDate)
-        .eq('is_deleted', false)
-        .order('prdn_work_planning.from_date', { ascending: false })
-        .order('created_dt', { ascending: false });
-
-      if (error) {
-        console.error('Error loading work continuation:', error);
-        // Fallback calculation
-        const standardTime = work.std_vehicle_work_flow?.estimated_duration_minutes || 0;
-        const standardHours = standardTime / 60;
-        workContinuation.remainingTime = standardHours;
-        workContinuation.timeWorkedTillDate = 0;
-        return;
-      }
-
-      if (data && data.length > 0) {
-        workContinuation.hasPreviousWork = true;
-        workContinuation.previousReports = data;
-        
-        // Calculate total time worked till date
-        // We need to sum all hours_worked_today from reports on dates before the selected date
-        // For reports on the same date, we should use the average (like Works tab does)
-        // But for cumulative time, we sum all hours_worked_today from all previous dates
-        
-        // Group reports by date
-        const reportsByDate = data.reduce((groups, report) => {
-          const planning = report.prdn_work_planning as any;
-          const reportDate = planning?.from_date || report.from_date;
-          if (!groups[reportDate]) {
-            groups[reportDate] = [];
-          }
-          groups[reportDate].push(report);
-          return groups;
-        }, {} as { [date: string]: any[] });
-        
-        // Calculate cumulative time: for each date, average the hours_worked_today, then sum across dates
-        let totalTimeWorked = 0;
-        Object.entries(reportsByDate).forEach(([date, reports]) => {
-          // For each date, get the average of hours_worked_today (handles multiple workers on same date)
-          const hoursWorkedTodayValues = reports.map(r => r.hours_worked_today || 0).filter(h => h > 0);
-          if (hoursWorkedTodayValues.length > 0) {
-            const averageForDate = hoursWorkedTodayValues.reduce((sum, h) => sum + h, 0) / hoursWorkedTodayValues.length;
-            totalTimeWorked += averageForDate;
-          }
-        });
-        
-        workContinuation.timeWorkedTillDate = totalTimeWorked;
-
-        // Calculate remaining time
-        const standardTime = work.std_vehicle_work_flow?.estimated_duration_minutes || 0;
-        const standardHours = standardTime / 60;
-        workContinuation.remainingTime = Math.max(0, standardHours - workContinuation.timeWorkedTillDate);
-        
-        console.log(`📊 Work continuation calculation:`, {
-          workCode,
-          woDetailsId,
-          stageCode,
-          selectedDate,
-          standardTime,
-          standardHours,
-          timeWorkedTillDate: workContinuation.timeWorkedTillDate,
-          remainingTime: workContinuation.remainingTime,
-          totalReports: data.length,
-          reportsByDate: Object.keys(reportsByDate).length,
-          reportsData: data.map(r => ({
-            date: (r.prdn_work_planning as any)?.from_date || r.from_date,
-            hours_worked_today: r.hours_worked_today,
-            hours_worked_till_date: r.hours_worked_till_date
-          }))
-        });
-      } else {
-        // If no previous work, remaining time = standard time
-        const standardTime = work.std_vehicle_work_flow?.estimated_duration_minutes || 0;
-        const standardHours = standardTime / 60;
-        workContinuation.remainingTime = standardHours;
-        workContinuation.timeWorkedTillDate = 0;
-        workContinuation.hasPreviousWork = false;
-        
-        console.log(`📊 No previous work - remaining time = standard time:`, {
-          workCode,
-          woDetailsId,
-          standardTime,
-          standardHours,
-          remainingTime: workContinuation.remainingTime
-        });
-      }
-    } catch (error) {
-      console.error('Error loading work continuation:', error);
-      // Fallback calculation
-      const standardTime = work.std_vehicle_work_flow?.estimated_duration_minutes || 0;
-      const standardHours = standardTime / 60;
-      workContinuation.remainingTime = standardHours;
-      workContinuation.timeWorkedTillDate = 0;
-    }
+    workContinuation = await loadWorkContinuation(work, stageCode, selectedDate);
   }
 
-  async function loadExistingPlans() {
-    if (!selectedDate) return;
-
-    try {
-      // Load all existing plans for the selected date
-      const { data, error } = await supabase
-        .from('prdn_work_planning')
-        .select(`
-          *,
-          hr_emp!inner(
-            emp_id,
-            emp_name
-          ),
-          std_work_type_details!inner(
-            sw_code,
-            derived_sw_code,
-            std_work_details!inner(
-              sw_name
-            )
-          )
-        `)
-        .eq('from_date', selectedDate)
-        .eq('is_active', true)
-        .eq('is_deleted', false);
-
-      if (error) {
-        console.error('Error loading existing plans:', error);
-        return;
-      }
-
-      existingPlans = data || [];
+  async function loadExistingPlansData() {
+    // If editing, exclude the current draft plans from conflict checks
+    const isEditMode = work?.existingDraftPlans && Array.isArray(work.existingDraftPlans) && work.existingDraftPlans.length > 0;
+    
+    if (isEditMode) {
+      // Get all existing plans, then filter out the ones we're editing
+      const allPlans = await loadExistingPlans(work, stageCode, selectedDate);
+      const currentPlanIds = new Set(work.existingDraftPlans.map((p: any) => p.id).filter(Boolean));
+      existingPlans = allPlans.filter((plan: any) => !currentPlanIds.has(plan.id));
+      console.log(`📅 Loaded ${existingPlans.length} existing plans (excluding ${currentPlanIds.size} being edited) for ${selectedDate}`);
+    } else {
+    existingPlans = await loadExistingPlans(work, stageCode, selectedDate);
       console.log(`📅 Loaded ${existingPlans.length} existing plans for ${selectedDate}`);
-    } catch (error) {
-      console.error('Error loading existing plans:', error);
     }
   }
 
-  async function loadShiftInfo() {
-    if (!selectedDate) return;
-
-    try {
-      // Get shift schedule for the selected date
-      const { data, error } = await supabase
-        .from('hr_daily_shift_schedule')
-        .select(`
-          *,
-          hr_shift_master!inner(
-            shift_id,
-            shift_code,
-            shift_name,
-            start_time,
-            end_time
-          )
-        `)
-        .eq('schedule_date', selectedDate)
-        .eq('is_working_day', true)
-        .eq('is_active', true)
-        .eq('is_deleted', false);
-
-      if (error) {
-        console.error('Error loading shift info:', error);
-        return;
-      }
-
-      // For now, use the first shift (you might want to make this configurable)
-      shiftInfo = data?.[0] || null;
+  async function loadShiftInfoData() {
+    shiftInfo = await loadShiftInfo(stageCode);
       
       if (shiftInfo?.hr_shift_master?.shift_id) {
-        // Fetch break times for this shift
         const { data: breakData, error: breakError } = await supabase
           .from('hr_shift_break_master')
           .select('*')
@@ -431,718 +484,237 @@
           .order('break_number');
 
         if (!breakError && breakData) {
-          shiftInfo.breakTimes = breakData;
-          console.log(`🕐 Loaded break times for shift ${shiftInfo.hr_shift_master.shift_id}:`, breakData);
-        } else if (breakError) {
-          console.error('❌ Error loading break times:', breakError);
+          // Create a new array to ensure reactivity
+        shiftBreakTimes = breakData.map((b: any) => ({
+          start_time: b.start_time,
+          end_time: b.end_time
+        }));
+          console.log('🕐 Loaded break times:', shiftBreakTimes.map(bt => `${bt.start_time}-${bt.end_time}`).join(', '));
         } else {
-          console.log('⚠️ No break times found for shift:', shiftInfo.hr_shift_master.shift_id);
+          // Reset to empty array if no breaks
+          shiftBreakTimes = [];
+          console.log('🕐 No break times found');
         }
-      }
-      
-      console.log(`🕐 Loaded shift info for ${selectedDate}:`, shiftInfo);
-    } catch (error) {
-      console.error('Error loading shift info:', error);
-    }
-  }
-
-  function calculatePlannedHours() {
-    if (!fromTime || !toTime) {
-      plannedHours = 0;
-      return;
-    }
-
-    try {
-      const from = new Date(`2000-01-01T${fromTime}`);
-      let to = new Date(`2000-01-01T${toTime}`);
-      
-      // If end time is earlier than start time, it means it's the next day
-      if (to < from) {
-        to = new Date(`2000-01-02T${toTime}`);
-      }
-      
-      // Calculate total duration in milliseconds
-      const diffMs = to.getTime() - from.getTime();
-      
-      // Get break time in minutes that overlaps with the planned time slot
-      const breakMinutes = calculateBreakTimeInSlot();
-      
-      // Convert break time to hours and subtract from total duration
-      const breakHours = breakMinutes / 60;
-      const totalHours = diffMs / (1000 * 60 * 60); // Convert to hours
-      plannedHours = totalHours - breakHours; // Subtract break time
-      
-      // Ensure planned hours is not negative
-      if (plannedHours < 0) {
-        plannedHours = 0;
-      }
-    } catch (error) {
-      console.error('Error calculating planned hours:', error);
-      plannedHours = 0;
-    }
-  }
-
-  function calculateBreakTimeInSlot(): number {
-    console.log('🔍 calculateBreakTimeInSlot called with:', {
-      fromTime,
-      toTime,
-      shiftInfo: shiftInfo ? 'exists' : 'null',
-      breakTimes: shiftInfo?.breakTimes ? shiftInfo.breakTimes.length : 'no breakTimes'
-    });
-
-    if (!fromTime || !toTime || !shiftInfo?.breakTimes) {
-      console.log('❌ Early return - missing data:', {
-        fromTime: !!fromTime,
-        toTime: !!toTime,
-        breakTimes: !!shiftInfo?.breakTimes
-      });
-      return 0;
-    }
-
-    try {
-      const plannedStart = new Date(`2000-01-01T${fromTime}`);
-      const plannedEnd = new Date(`2000-01-01T${toTime}`);
-      
-      if (plannedEnd < plannedStart) {
-        plannedEnd.setDate(plannedEnd.getDate() + 1);
-      }
-
-      console.log('📅 Planned time range:', {
-        plannedStart: plannedStart.toTimeString(),
-        plannedEnd: plannedEnd.toTimeString()
-      });
-
-      let totalBreakMinutes = 0;
-
-      shiftInfo.breakTimes.forEach((breakTime: any) => {
-        console.log('🕐 Processing break:', breakTime);
-        
-        const breakStart = new Date(`2000-01-01T${breakTime.start_time}`);
-        const breakEnd = new Date(`2000-01-01T${breakTime.end_time}`);
-        
-        if (breakEnd < breakStart) {
-          breakEnd.setDate(breakEnd.getDate() + 1);
-        }
-
-        console.log('🕐 Break time range:', {
-          breakStart: breakStart.toTimeString(),
-          breakEnd: breakEnd.toTimeString()
-        });
-
-        // Calculate overlap between planned time and break time
-        const overlapStart = new Date(Math.max(plannedStart.getTime(), breakStart.getTime()));
-        const overlapEnd = new Date(Math.min(plannedEnd.getTime(), breakEnd.getTime()));
-        
-        console.log('🕐 Overlap calculation:', {
-          overlapStart: overlapStart.toTimeString(),
-          overlapEnd: overlapEnd.toTimeString(),
-          hasOverlap: overlapStart < overlapEnd
-        });
-        
-        if (overlapStart < overlapEnd) {
-          const overlapMs = overlapEnd.getTime() - overlapStart.getTime();
-          const overlapMinutes = overlapMs / (1000 * 60);
-          totalBreakMinutes += overlapMinutes;
-          
-          console.log(`✅ Break overlap detected: ${breakTime.break_name} (${breakTime.start_time}-${breakTime.end_time}) overlaps with planned time (${fromTime}-${toTime}) by ${overlapMinutes} minutes`);
-        } else {
-          console.log(`❌ No overlap: ${breakTime.break_name} (${breakTime.start_time}-${breakTime.end_time}) does not overlap with planned time (${fromTime}-${toTime})`);
-        }
-      });
-
-      console.log(`📊 Total break minutes in slot: ${totalBreakMinutes}`);
-      return totalBreakMinutes;
-    } catch (error) {
-      console.error('Error calculating break time in slot:', error);
-      return 0;
-    }
-  }
-
-  /**
-   * Calculate break time that will be spanned by the work period
-   * This function is used when auto-calculating end time (before toTime is known)
-   * It iteratively calculates which breaks will be spanned and adds their duration
-   */
-  function calculateBreakTimeForWorkPeriod(startTimeStr: string, workDurationMinutes: number): number {
-    if (!startTimeStr || !shiftInfo?.breakTimes || shiftInfo.breakTimes.length === 0) {
-      return 0;
-    }
-
-    try {
-      const startTime = new Date(`2000-01-01T${startTimeStr}`);
-      let currentEndTime = new Date(startTime.getTime() + workDurationMinutes * 60000);
-      let totalBreakMinutes = 0;
-      let previousTotalBreakMinutes = -1;
-      const maxIterations = 10; // Prevent infinite loops
-      let iterations = 0;
-
-      // Iteratively calculate break time
-      // We need to iterate because adding break time might cause the work period to span additional breaks
-      while (iterations < maxIterations) {
-        iterations++;
-        previousTotalBreakMinutes = totalBreakMinutes;
-        totalBreakMinutes = 0;
-
-        // Check each break to see if it's spanned by the current work period
-        shiftInfo.breakTimes.forEach((breakTime: any) => {
-          const breakStart = new Date(`2000-01-01T${breakTime.start_time}`);
-          let breakEnd = new Date(`2000-01-01T${breakTime.end_time}`);
-          
-          // Handle overnight breaks
-          if (breakEnd < breakStart) {
-            breakEnd.setDate(breakEnd.getDate() + 1);
-          }
-
-          // Check if the work period spans this break
-          // A break is spanned only if there's actual overlap:
-          // Work overlaps break if: startTime < breakEnd AND currentEndTime > breakStart
-          // This excludes cases where work starts exactly at break end or ends exactly at break start
-          if (startTime < breakEnd && currentEndTime > breakStart) {
-            // Calculate the full break duration
-            const breakDurationMs = breakEnd.getTime() - breakStart.getTime();
-            const breakDurationMinutes = breakDurationMs / (1000 * 60);
-            totalBreakMinutes += breakDurationMinutes;
-            
-            console.log(`✅ Break spanned: ${breakTime.break_name} (${breakTime.start_time}-${breakTime.end_time}) - ${breakDurationMinutes} minutes`);
-          } else {
-            console.log(`❌ Break NOT spanned: ${breakTime.break_name} (${breakTime.start_time}-${breakTime.end_time}) - work starts at ${startTimeStr}, ends at ${currentEndTime.toTimeString().substring(0, 5)}`);
-          }
-        });
-
-        // If no new breaks were found, we're done
-        if (totalBreakMinutes === previousTotalBreakMinutes) {
-          break;
-        }
-
-        // Update current end time to include the break time
-        currentEndTime = new Date(startTime.getTime() + (workDurationMinutes + totalBreakMinutes) * 60000);
-      }
-
-      console.log(`📊 Total break minutes for work period: ${totalBreakMinutes} (after ${iterations} iterations)`);
-      return totalBreakMinutes;
-    } catch (error) {
-      console.error('Error calculating break time for work period:', error);
-      return 0;
-    }
-  }
-
-  function autoCalculateEndTime() {
-    if (!fromTime) {
-      return;
-    }
-
-    try {
-      // Use remaining time if available, otherwise use standard time
-      const remainingTimeHours = workContinuation.remainingTime > 0 
-        ? workContinuation.remainingTime 
-        : (work?.std_vehicle_work_flow?.estimated_duration_minutes || 0) / 60;
-      
-      const workDurationMinutes = remainingTimeHours * 60;
-      
-      if (workDurationMinutes <= 0) {
-        console.warn('⚠️ No remaining time or standard time available for auto-calculation');
-        return;
-      }
-      
-      // Calculate break time that will be spanned by the work period
-      const breakMinutes = calculateBreakTimeForWorkPeriod(fromTime, workDurationMinutes);
-      const shiftEndTime = shiftInfo?.hr_shift_master?.end_time;
-
-      // Calculate start time
-      const startTime = new Date(`2000-01-01T${fromTime}`);
-      
-      // Calculate end time including break
-      const endTime = new Date(startTime.getTime() + (workDurationMinutes + breakMinutes) * 60000);
-      
-      // Format end time
-      const endTimeString = endTime.toTimeString().substring(0, 5);
-      
-      // Check if end time exceeds shift end time
-      if (shiftEndTime && endTimeString > shiftEndTime) {
-        // If work extends beyond shift, set to shift end time
-        toTime = shiftEndTime;
-        console.log(`⚠️ Work duration exceeds shift end time. Set to shift end: ${shiftEndTime}`);
       } else {
-        toTime = endTimeString;
-        console.log(`✅ Auto-calculated end time: ${endTimeString} (work: ${workDurationMinutes}min + break: ${breakMinutes}min)`);
+        shiftBreakTimes = [];
       }
       
-      // Recalculate planned hours
-      calculatePlannedHours();
-    } catch (error) {
-      console.error('Error auto-calculating end time:', error);
-    }
-  }
-
-  function checkTimeOverlap() {
-    if (!fromTime || !toTime) {
-      showTimeOverlapWarning = false;
-      return;
-    }
-
-    const assignedWorkers = Object.values(selectedWorkers).filter(Boolean);
-    if (assignedWorkers.length === 0) {
-      showTimeOverlapWarning = false;
-      return;
-    }
-
-    // Check for time overlaps for all assigned workers
-    const newFrom = new Date(`2000-01-01T${fromTime}`);
-    const newTo = new Date(`2000-01-01T${toTime}`);
-    
-    if (newTo < newFrom) {
-      newTo.setDate(newTo.getDate() + 1);
-    }
-
-    const overlaps: string[] = [];
-
-    assignedWorkers.filter(worker => worker !== null).forEach(worker => {
-      if (!worker) return;
-      const workerPlans = existingPlans.filter(plan => plan.worker_id === worker.emp_id);
-      
-      const overlappingPlans = workerPlans.filter(plan => {
-        const planFrom = new Date(`2000-01-01T${plan.from_time}`);
-        const planTo = new Date(`2000-01-01T${plan.to_time}`);
+      // After shift info loads, update fromTime to match closest time slot (for edit mode)
+      if (work?.existingDraftPlans && Array.isArray(work.existingDraftPlans) && work.existingDraftPlans.length > 0 
+          && formData.fromTime && shiftInfo?.hr_shift_master?.start_time && shiftInfo?.hr_shift_master?.end_time) {
+        const { generateTimeSlots } = await import('$lib/utils/planWorkUtils');
+        const timeSlots = generateTimeSlots(shiftInfo.hr_shift_master.start_time, shiftInfo.hr_shift_master.end_time);
         
-        if (planTo < planFrom) {
-          planTo.setDate(planTo.getDate() + 1);
+        if (timeSlots.length > 0) {
+          // Find closest matching time slot
+          const [currentHour, currentMin] = formData.fromTime.split(':').map(Number);
+          const currentMinutes = currentHour * 60 + currentMin;
+          
+          let closestSlot = timeSlots[0];
+          let minDiff = Infinity;
+          
+          for (const slot of timeSlots) {
+            const [slotHour, slotMin] = slot.value.split(':').map(Number);
+            const slotMinutes = slotHour * 60 + slotMin;
+            const diff = Math.abs(slotMinutes - currentMinutes);
+            
+            if (diff < minDiff) {
+              minDiff = diff;
+              closestSlot = slot;
+            }
+          }
+          
+          formData.fromTime = closestSlot.value;
+          console.log('✅ Updated fromTime to closest slot:', formData.fromTime);
         }
-
-        // Check if time ranges overlap
-        return (newFrom < planTo && newTo > planFrom);
-      });
-
-      if (overlappingPlans.length > 0) {
-        const overlapDetails = overlappingPlans.map(plan => 
-          `${plan.std_work_type_details?.sw_code || 'N/A'} (${plan.from_time} - ${plan.to_time})`
-        ).join(', ');
-        overlaps.push(`${worker.emp_name}: ${overlapDetails}`);
-      }
-    });
-
-    if (overlaps.length > 0) {
-      showTimeOverlapWarning = true;
-      timeOverlapDetails = `Time overlaps detected:\n${overlaps.join('\n')}`;
-    } else {
-      showTimeOverlapWarning = false;
     }
   }
 
-  function checkTimeExcess() {
-    if (!fromTime || !toTime) {
-      showTimeExcessWarning = false;
-      return;
-    }
-
-    // Use remaining time if available, otherwise use standard time
-    const remainingTimeHours = workContinuation.remainingTime > 0 
-      ? workContinuation.remainingTime 
-      : (work?.std_vehicle_work_flow?.estimated_duration_minutes || 0) / 60;
-    
-    const workDurationMinutes = remainingTimeHours * 60;
-    
-    if (workDurationMinutes <= 0) {
-      showTimeExcessWarning = false;
-      return;
-    }
-    
-    // Use the same break calculation as autoCalculateEndTime to ensure consistency
-    const breakMinutes = calculateBreakTimeInSlot();
-    const requiredTimeMinutes = workDurationMinutes + breakMinutes;
-    
-    // Calculate planned time - handle midnight crossover correctly
-    const from = new Date(`2000-01-01T${fromTime}`);
-    let to = new Date(`2000-01-01T${toTime}`);
-    
-    // If end time is earlier than start time, it means it's the next day
-    if (to < from) {
-      to = new Date(`2000-01-02T${toTime}`);
-    }
-    
-    const plannedTimeMinutes = (to.getTime() - from.getTime()) / (1000 * 60);
-    
-    // Debug logging
-    console.log('⏰ Time Excess Check:', {
-      fromTime,
-      toTime,
-      from: from.toISOString(),
-      to: to.toISOString(),
-      plannedTimeMinutes,
-      requiredTimeMinutes,
-      excess: plannedTimeMinutes - requiredTimeMinutes
-    });
-    
-    // Allow a small tolerance (5 minutes) to account for rounding differences
-    const toleranceMinutes = 5;
-    const excessMinutes = plannedTimeMinutes - requiredTimeMinutes;
-    
-    // Check if planned time exceeds required time beyond tolerance
-    if (excessMinutes > toleranceMinutes) {
-      const excessHours = Math.floor(excessMinutes / 60);
-      const excessMins = Math.round(excessMinutes % 60);
-      
-      showTimeExcessWarning = true;
-      timeExcessDetails = `Planned time exceeds work requirement by ${excessHours}h ${excessMins}m.\nRequired: ${formatTime(requiredTimeMinutes / 60)}\nPlanned: ${formatTime(plannedTimeMinutes / 60)}`;
-    } else {
-      showTimeExcessWarning = false;
-    }
+  async function checkAlternativeCombinations() {
+    const result = await checkAlternativeSkillCombinations(work, stageCode);
+    warnings.hasAlternativePlanningConflict = result.hasConflict;
+    warnings.alternativeConflictDetails = result.details;
   }
 
-  function checkSkillMismatch() {
-    if (!work?.skill_mappings) {
-      showSkillMismatchWarning = false;
-      return;
-    }
-
-    const mismatches: string[] = [];
-    
-    // Get the selected skill mapping
-    const selectedSkillMapping = work.skill_mappings[selectedSkillMappingIndex >= 0 ? selectedSkillMappingIndex : 0];
-    if (!selectedSkillMapping) {
-      showSkillMismatchWarning = false;
-      return;
-    }
-    
-    const individualSkills = getIndividualSkills(selectedSkillMapping);
-    
-    // Check each individual skill in the combination (using indexed keys)
-    individualSkills.forEach((individualSkill: string, index: number) => {
-      const workerKey = `${individualSkill}-${index}`;
-      const assignedWorker = selectedWorkers[workerKey];
-      if (assignedWorker) {
-        const workerSkills = assignedWorker.skill_short || '';
-        if (!workerSkills.includes(individualSkill)) {
-          mismatches.push(`${assignedWorker.emp_name} (${workerSkills}) for ${individualSkill}`);
-        }
-      }
-    });
-
-    if (mismatches.length > 0) {
-      showSkillMismatchWarning = true;
-      skillMismatchDetails = `Skill mismatches detected:\n${mismatches.join('\n')}`;
-    } else {
-      showSkillMismatchWarning = false;
-    }
+  function checkTimeOverlapValidation() {
+    const result = checkTimeOverlap(formData.fromTime, formData.toTime, existingPlans);
+    warnings.showTimeOverlapWarning = result.hasOverlap;
+    warnings.timeOverlapDetails = result.details;
   }
 
-  function handleWorkerChange(event: Event, skillName: string) {
+  function checkTimeExcessValidation() {
+    const result = checkTimeExcess(
+      formData.fromTime,
+      formData.toTime,
+      workContinuation.remainingTime,
+      work?.std_vehicle_work_flow?.estimated_duration_minutes,
+      shiftBreakTimes
+    );
+    warnings.showTimeExcessWarning = result.hasExcess;
+    warnings.timeExcessDetails = result.details;
+  }
+
+  function checkSkillMismatchValidation() {
+    const result = checkSkillMismatch(
+      formData.selectedWorkers,
+      work,
+      formData.selectedSkillMappingIndex
+    );
+    warnings.showSkillMismatchWarning = result.hasMismatch;
+    warnings.skillMismatchDetails = result.details;
+  }
+
+  function handleWorkerChange(event: Event, skillKey: string) {
     const target = event.target as HTMLSelectElement;
     const workerId = target.value;
-    selectedWorkers[skillName] = availableWorkers.find(w => w.emp_id === workerId) || null;
-    checkSkillMismatch();
-    checkTimeOverlap();
+    
+    // Clean up null/undefined entries from selectedWorkers
+    Object.keys(formData.selectedWorkers).forEach(key => {
+      if (!formData.selectedWorkers[key]) {
+        delete formData.selectedWorkers[key];
+      }
+    });
+    
+    // If a worker is selected, check if they're already assigned to another skill competency
+    if (workerId) {
+      const selectedWorker = availableWorkers.find(w => w.emp_id === workerId);
+      
+      // Check if this worker is already assigned to a different skill competency
+      for (const [key, worker] of Object.entries(formData.selectedWorkers)) {
+        if (key !== skillKey && worker && worker.emp_id === workerId) {
+          // Worker is already assigned to another skill competency
+          alert(`Worker ${selectedWorker?.emp_name || workerId} is already assigned to another skill competency. One worker can only be assigned to one skill competency at a time.`);
+          // Reset the select to empty
+          target.value = '';
+          delete formData.selectedWorkers[skillKey];
+          checkSkillMismatchValidation();
+          checkTimeOverlapValidation();
+          return;
+        }
+      }
+      
+      // Worker is not already assigned, proceed with assignment
+      formData.selectedWorkers[skillKey] = selectedWorker || null;
+    } else {
+      // No worker selected, remove the entry entirely
+      delete formData.selectedWorkers[skillKey];
+    }
+    
+    checkSkillMismatchValidation();
+    checkTimeOverlapValidation();
   }
 
-  async function checkWorkerConflicts() {
-    try {
-      // Convert time range to datetime for comparison
-      const fromDateTime = new Date(`${selectedDate}T${fromTime}`);
-      const toDateTime = new Date(`${selectedDate}T${toTime}`);
-      
-      // Get all assigned workers
-      const assignedWorkers = Object.values(selectedWorkers).filter(Boolean);
-      
-      if (assignedWorkers.length === 0) {
-        return false; // No workers assigned
-      }
+  function handleSkillMappingChange(index: number) {
+    formData.selectedSkillMappingIndex = index;
+    formData.selectedWorkers = {};
+  }
 
-      // Check for conflicts for each assigned worker
-      const conflictPromises = assignedWorkers.map(async (worker) => {
-        const workerId = (worker as any).emp_id;
-        
-        // Check existing work reports
-        const { data: existingReports, error: reportsError } = await supabase
-          .from('prdn_work_reporting')
-          .select(`
-            *,
-            prdn_work_planning!inner(
-              *,
-              std_work_type_details!inner(
-                sw_code,
-                derived_sw_code,
-                std_work_details!inner(
-                  sw_name
-                )
-              )
-            )
-          `)
-          .eq('worker_id', workerId)
-          .eq('is_deleted', false);
+  function handleFromTimeChange(value: string) {
+    formData.fromTime = value;
+  }
 
-        if (reportsError) throw reportsError;
+  // toTime is bound directly in TimePlanning component
 
-        // Check existing work planning
-        const { data: existingPlans, error: plansError } = await supabase
-          .from('prdn_work_planning')
-          .select(`
-            *,
-            std_work_type_details!inner(
-              sw_code,
-              derived_sw_code,
-              std_work_details!inner(
-                sw_name
-              )
-            )
-          `)
-          .eq('worker_id', workerId)
-          .eq('is_deleted', false);
-
-        if (plansError) throw plansError;
-
-        // Check for time conflicts in reports
-        const reportConflicts = existingReports.filter(report => {
-          const reportFromDateTime = new Date(`${report.from_date}T${report.from_time}`);
-          const reportToDateTime = new Date(`${report.to_date}T${report.to_time}`);
-          
-          return (fromDateTime < reportToDateTime && toDateTime > reportFromDateTime);
-        });
-
-        // Check for time conflicts in planning
-        const planConflicts = existingPlans.filter(plan => {
-          const planFromDateTime = new Date(`${plan.from_date}T${plan.from_time}`);
-          const planToDateTime = new Date(`${plan.to_date}T${plan.to_time}`);
-          
-          return (fromDateTime < planToDateTime && toDateTime > planFromDateTime);
-        });
-
-        return { workerId, worker, reportConflicts, planConflicts };
-      });
-
-      const conflictResults = await Promise.all(conflictPromises);
-      const workersWithConflicts = conflictResults.filter(result => 
-        result.reportConflicts.length > 0 || result.planConflicts.length > 0
-      );
-
-      if (workersWithConflicts.length > 0) {
-        // Build conflict message
-        const conflictDetails = workersWithConflicts.map(({ workerId, worker, reportConflicts, planConflicts }) => {
-          const workerName = (worker as any).emp_name || 'Unknown Worker';
-          const allConflicts = [...reportConflicts, ...planConflicts];
-          
-          const workerConflicts = allConflicts.map(conflict => {
-            const workName = conflict.prdn_work_planning?.std_work_type_details?.std_work_details?.sw_name || 
-                            conflict.std_work_type_details?.std_work_details?.sw_name || 'Unknown Work';
-            const workCode = conflict.prdn_work_planning?.std_work_type_details?.derived_sw_code || 
-                           conflict.prdn_work_planning?.std_work_type_details?.sw_code ||
-                           conflict.std_work_type_details?.derived_sw_code || 
-                           conflict.std_work_type_details?.sw_code || 'Unknown';
-            const conflictFromTime = new Date(`${conflict.from_date}T${conflict.from_time}`).toLocaleString('en-GB', { 
-              day: '2-digit', month: 'short', year: '2-digit', hour: '2-digit', minute: '2-digit' 
-            });
-            const conflictToTime = new Date(`${conflict.to_date}T${conflict.to_time}`).toLocaleString('en-GB', { 
-              day: '2-digit', month: 'short', year: '2-digit', hour: '2-digit', minute: '2-digit' 
-            });
-            const status = conflict.completion_status ? 'Reported' : 'Planned';
-            
-            return `  • ${workName} (${workCode}) [${status}]\n    ${conflictFromTime} - ${conflictToTime}`;
-          }).join('\n');
-          
-          return `${workerName}:\n${workerConflicts}`;
-        }).join('\n\n');
-
-        const currentFromTime = fromDateTime.toLocaleString('en-GB', { 
-          day: '2-digit', month: 'short', year: '2-digit', hour: '2-digit', minute: '2-digit' 
-        });
-        const currentToTime = toDateTime.toLocaleString('en-GB', { 
-          day: '2-digit', month: 'short', year: '2-digit', hour: '2-digit', minute: '2-digit' 
-        });
-
-        const message = `⚠️ WORKER CONFLICTS DETECTED!\n\nCurrent Planning: ${currentFromTime} - ${currentToTime}\n\nWorkers with conflicts:\n\n${conflictDetails}\n\nDo you want to proceed anyway?`;
-
-        const proceed = confirm(message);
-        return !proceed; // Return true if user cancels (has conflicts)
-      }
-
-      return false; // No conflicts found
-    } catch (error) {
-      console.error('Error checking worker conflicts:', error);
-      // If there's an error checking conflicts, allow the save to proceed
-      return false;
+  function handleAutoCalculate() {
+    if (!formData.fromTime) return;
+    
+    const remainingTime = workContinuation.remainingTime;
+    const estimatedDurationMinutes = work?.std_vehicle_work_flow?.estimated_duration_minutes;
+    
+    const calculatedToTime = autoCalculateEndTime(
+      formData.fromTime,
+      remainingTime,
+      estimatedDurationMinutes,
+      shiftBreakTimes
+    );
+    
+    if (calculatedToTime) {
+      formData.toTime = calculatedToTime;
+      lastAutoCalculatedToTime = calculatedToTime;
     }
+  }
+
+  async function checkWorkerConflictsValidation(): Promise<boolean> {
+    // Only check conflicts for workers that are explicitly selected (not null/undefined)
+    // Filter out any invalid entries before checking conflicts
+    const validSelectedWorkers: { [key: string]: any } = {};
+    Object.entries(formData.selectedWorkers).forEach(([key, worker]) => {
+      if (worker && worker.emp_id) {
+        validSelectedWorkers[key] = worker;
+      }
+    });
+    
+    // If no valid workers are selected, skip conflict check
+    if (Object.keys(validSelectedWorkers).length === 0) {
+      return false; // No workers selected, no conflicts to check
+    }
+    
+    // Get plan IDs to exclude (for edit mode)
+    const excludePlanIds = work?.existingDraftPlans?.map((p: any) => p.id).filter(Boolean) || [];
+    
+    const result = await checkWorkerConflicts(
+      validSelectedWorkers,
+      selectedDate,
+      formData.fromTime,
+      selectedDate,
+      formData.toTime,
+      excludePlanIds.length > 0 ? excludePlanIds : undefined
+    );
+    
+    if (result.hasConflict) {
+      alert(`${result.conflictDetails}\n\nCannot proceed. Please resolve the time conflicts before planning work.`);
+      return true; // Return true to indicate validation failed and prevent save
+    }
+    
+    return false; // No conflicts, validation passed
   }
 
   async function handleSave() {
-    // Check for alternative skill combination conflicts
-    if (hasAlternativePlanningConflict) {
-      alert(alternativeConflictDetails);
+    // First check if planning is blocked due to approved submission
+    if (shiftCode && selectedDate) {
+      const { isPlanningBlockedForStageShiftDate } = await import('$lib/api/production/productionWorkValidationService');
+      const blockCheck = await isPlanningBlockedForStageShiftDate(stageCode, shiftCode, selectedDate);
+      if (blockCheck.isBlocked) {
+        alert(blockCheck.reason || 'Planning is blocked for this stage-shift-date combination.');
+        return;
+      }
+    }
+
+    if (warnings.hasAlternativePlanningConflict) {
+      alert(warnings.alternativeConflictDetails);
       return;
     }
 
-    // Check if all required skills have workers assigned
-    const requiredSkills = work?.skill_mappings || [];
-    const assignedWorkers = Object.values(selectedWorkers).filter(Boolean);
-    
-    if (requiredSkills.length > 0 && assignedWorkers.length === 0) {
-      alert('Please assign workers for all required skills');
-      return;
-    }
-
-    if (!fromTime || !toTime) {
-      alert('Please fill in all required fields');
-      return;
-    }
-
-    // Check for worker conflicts
-    const hasConflict = await checkWorkerConflicts();
+    const hasConflict = await checkWorkerConflictsValidation();
     if (hasConflict) {
-      return; // User chose to cancel
+      return;
     }
 
-    if (showSkillMismatchWarning) {
-      const proceed = confirm(`${skillMismatchDetails}\n\nDo you want to proceed anyway?`);
+    if (warnings.showSkillMismatchWarning) {
+      const proceed = confirm(`${warnings.skillMismatchDetails}\n\nDo you want to proceed anyway?`);
       if (!proceed) return;
     }
 
-    if (showTimeOverlapWarning) {
-      const proceed = confirm(`${timeOverlapDetails}\n\nDo you want to proceed anyway?`);
+    if (warnings.showTimeOverlapWarning) {
+      const proceed = confirm(`${warnings.timeOverlapDetails}\n\nDo you want to proceed anyway?`);
       if (!proceed) return;
     }
 
-    if (showTimeExcessWarning) {
-      const proceed = confirm(`${timeExcessDetails}\n\nDo you want to proceed anyway?`);
+    if (warnings.showTimeExcessWarning) {
+      const proceed = confirm(`${warnings.timeExcessDetails}\n\nDo you want to proceed anyway?`);
       if (!proceed) return;
     }
 
     try {
-      // Get current username (throws error if not found)
-      const { getCurrentUsername, getCurrentTimestamp } = await import('$lib/utils/userUtils');
-      const currentUser = getCurrentUsername();
-      const now = getCurrentTimestamp();
+      const result = await saveWorkPlanning(
+        work,
+        formData,
+        workContinuation,
+        stageCode,
+        selectedDate
+      );
       
-      // Create work planning records for each assigned worker
-      const insertPromises = [];
-      
-      if (requiredSkills.length > 0) {
-        // For works with specific skills
-        // Get the selected skill mapping
-        const selectedSkillMapping = work.skill_mappings[selectedSkillMappingIndex >= 0 ? selectedSkillMappingIndex : 0];
-        const individualSkills = getIndividualSkills(selectedSkillMapping);
-        
-        // Extract wsm_id from the selected skill mapping
-        const wsmId = (selectedSkillMapping as any)?.wsm_id || null;
-        
-        // Create a planning entry for each skill instance (handles duplicates)
-        individualSkills.forEach((skillShort, index) => {
-          // Try indexed key first (for multiple skills), then fallback to skill name only (for single skill)
-          const workerKey = `${skillShort}-${index}`;
-          const worker = selectedWorkers[workerKey] || selectedWorkers[skillShort];
-          
-          if (worker) {
-            // Check if this is a non-standard work (added work)
-            const isNonStandardWork = work.is_added_work || !work.std_work_type_details?.derived_sw_code;
-            
-            insertPromises.push(
-              createWorkPlanning({
-                stage_code: stageCode,
-                wo_details_id: work.prdn_wo_details_id || work.wo_details_id || 1,
-                derived_sw_code: isNonStandardWork ? null : (work.std_work_type_details?.derived_sw_code || null),
-                other_work_code: isNonStandardWork ? work.sw_code : null,
-                sc_required: skillShort, // Use skill_short directly (fits VARCHAR(5))
-                worker_id: (worker as any).emp_id,
-                from_date: selectedDate,
-                from_time: fromTime,
-                to_date: selectedDate,
-                to_time: toTime,
-                planned_hours: plannedHours,
-                time_worked_till_date: workContinuation.timeWorkedTillDate,
-                remaining_time: workContinuation.remainingTime,
-                status: 'planned',
-                notes: `Planned for ${skillShort} skill`,
-                wsm_id: isNonStandardWork ? null : wsmId // wsm_id is null for non-standard works
-              }, currentUser)
-            );
-          }
-        });
-      } else {
-        // For general works without specific skills
-        const worker = Object.values(selectedWorkers)[0];
-        if (worker) {
-          // Check if this is a non-standard work (added work)
-          const isNonStandardWork = work.is_added_work || !work.std_work_type_details?.derived_sw_code;
-          
-          insertPromises.push(
-            createWorkPlanning({
-              stage_code: stageCode,
-              wo_details_id: work.prdn_wo_details_id || 1,
-              derived_sw_code: isNonStandardWork ? null : (work.std_work_type_details?.derived_sw_code || null),
-              other_work_code: isNonStandardWork ? work.sw_code : null,
-              sc_required: 'GEN', // General work
-              worker_id: (worker as any).emp_id,
-              from_date: selectedDate,
-              from_time: fromTime,
-              to_date: selectedDate,
-              to_time: toTime,
-              planned_hours: plannedHours,
-              time_worked_till_date: workContinuation.timeWorkedTillDate,
-              remaining_time: workContinuation.remainingTime,
-              status: 'planned',
-              notes: 'General work planning'
-            }, currentUser)
-          );
-        }
-      }
-
-      if (insertPromises.length === 0) {
-        alert('No workers assigned. Please assign at least one worker.');
-        return;
-      }
-
-      const results = await Promise.all(insertPromises);
-      console.log('Work planning created successfully:', results);
-      
-      // Update prdn_work_status to 'Planned'
-      if (results.length > 0) {
-        try {
-          const isNonStandardWork = work.is_added_work || !work.std_work_type_details?.derived_sw_code;
-          const derivedSwCode = isNonStandardWork ? null : (work.std_work_type_details?.derived_sw_code || null);
-          const otherWorkCode = isNonStandardWork ? work.sw_code : null;
-          const woDetailsId = work.prdn_wo_details_id || work.wo_details_id;
-
-          if (woDetailsId && (derivedSwCode || otherWorkCode)) {
-            const { getCurrentUsername, getCurrentTimestamp } = await import('$lib/utils/userUtils');
-            const currentUser = getCurrentUsername();
-            const now = getCurrentTimestamp();
-
-            let statusUpdateQuery = supabase
-              .from('prdn_work_status')
-              .update({
-                current_status: 'Planned',
-                modified_by: currentUser,
-                modified_dt: now
-              })
-              .eq('stage_code', stageCode)
-              .eq('wo_details_id', woDetailsId);
-
-            if (derivedSwCode) {
-              statusUpdateQuery = statusUpdateQuery.eq('derived_sw_code', derivedSwCode);
-            } else if (otherWorkCode) {
-              statusUpdateQuery = statusUpdateQuery.eq('other_work_code', otherWorkCode);
-            }
-
-            const { error: statusError } = await statusUpdateQuery;
-
-            if (statusError) {
-              console.error('Error updating work status to Planned:', statusError);
-              // Note: Planning was created, but status update failed
-              // This is logged but we still continue
-            } else {
-              console.log(`✅ Updated work status to Planned for work ${derivedSwCode || otherWorkCode}`);
-            }
-          }
-        } catch (error) {
-          console.error('Error updating work status:', error);
-          // Note: Planning was created, but status update failed
-          // This is logged but we still continue
-        }
-      }
-      
-      // Dispatch success event
-      dispatch('save', {
-        success: true,
-        createdPlans: results.length,
-        message: `Successfully created ${results.length} work plan(s)`
-      });
-      
+      dispatch('save', result);
       handleClose();
     } catch (error) {
       console.error('Error creating work planning:', error);
@@ -1156,20 +728,11 @@
   }
 
   function resetForm() {
-    selectedWorkers = {};
-    fromTime = '';
-    toTime = '';
-    plannedHours = 0;
-    showSkillMismatchWarning = false;
-    skillMismatchDetails = '';
-    showTimeOverlapWarning = false;
-    timeOverlapDetails = '';
-    showTimeExcessWarning = false;
-    timeExcessDetails = '';
-    hasAlternativePlanningConflict = false;
-    alternativeConflictDetails = '';
-    selectedSkillMappingIndex = -1;
+    formData = { ...initialPlanWorkFormData };
+    warnings = { ...initialWarnings };
     previousSelectedSkillMappingIndex = -1;
+    currentStep = 1;
+    filteredAvailableWorkers = [];
     workContinuation = {
       hasPreviousWork: false,
       timeWorkedTillDate: 0,
@@ -1178,146 +741,231 @@
     };
   }
 
-  function formatTime(hours: number): string {
-    if (!hours) return '0h 0m';
-    const h = Math.floor(hours);
-    const m = Math.round((hours - h) * 60);
-    return `${h}h ${m}m`;
-  }
-
-
-  function getSkillShort(skillMapping: any): string {
-    try {
-      // Get skill combination from the mapping
-      const skillCombination = skillMapping.std_skill_combinations;
-      if (!skillCombination) return skillMapping.sc_name;
-
-      // Handle both array and single object cases
-      const combination = Array.isArray(skillCombination) 
-        ? skillCombination[0]?.skill_combination 
-        : skillCombination?.skill_combination;
-
-      if (!combination) return skillMapping.sc_name;
-
-      // Extract skill_short from the combination
-      if (Array.isArray(combination)) {
-        // Get all skill names from the combination
-        const skillNames = combination
-          .map(skill => skill.skill_name)
-          .filter(Boolean)
-          .join(' + ');
-        return skillNames || skillMapping.sc_name;
-      }
-
-      return skillMapping.sc_name;
-    } catch (error) {
-      console.error('Error extracting skill short:', error);
-      return skillMapping.sc_name;
+  // Filter workers based on time availability when moving to step 2
+  async function filterWorkersByTimeAvailability() {
+    if (!selectedDate || !formData.fromTime || !formData.toTime) {
+      filteredAvailableWorkers = availableWorkers;
+      // Ensure selected workers are included
+      ensureSelectedWorkersInAvailable();
+      return;
     }
-  }
 
-  function getIndividualSkills(skillMapping: any): string[] {
     try {
-      // Get skill combination from the mapping
-      const skillCombination = skillMapping.std_skill_combinations;
+      // Helper function to convert time string to minutes
+      const timeToMinutes = (timeStr: string): number => {
+        const [hours, minutes] = timeStr.split(':').map(Number);
+        return hours * 60 + minutes;
+      };
       
-      // Handle both array and single object cases
-      const combination = skillCombination 
-        ? (Array.isArray(skillCombination) 
-          ? skillCombination[0]?.skill_combination 
-          : skillCombination?.skill_combination)
-        : null;
+      // Convert selected time to minutes for comparison
+      const fromMinutes = timeToMinutes(formData.fromTime);
+      const toMinutes = timeToMinutes(formData.toTime);
+      let adjustedToMinutes = toMinutes;
+      if (adjustedToMinutes < fromMinutes) {
+        adjustedToMinutes += 24 * 60; // Handle overnight
+      }
+      
+      const workerIds = availableWorkers.map(w => w.emp_id);
+      
+      // First, get workers reassigned TO this stage during the selected time period
+      const { data: reassignmentsTo, error: reassignToError } = await supabase
+        .from('prdn_planning_stage_reassignment')
+        .select('emp_id, from_time, to_time, hr_emp!inner(emp_id, emp_name, skill_short)')
+        .eq('to_stage_code', stageCode)
+        .eq('planning_date', selectedDate)
+        .eq('status', 'draft')
+        .eq('is_deleted', false);
 
-      // Extract individual skill names from the combination if available
-      if (combination && Array.isArray(combination)) {
-        const skillNames = combination
-          .map(skill => skill.skill_name)
-          .filter(Boolean);
-        if (skillNames.length > 0) {
-          return skillNames;
-        }
+      if (reassignToError) {
+        console.error('Error checking reassignments to stage:', reassignToError);
       }
 
-      // Fallback: Parse sc_name if it contains " + " (e.g., "S2 + US" -> ["S2", "US"])
-      // This is needed for non-standard works where std_skill_combinations might not be fully loaded
-      if (skillMapping.sc_name && typeof skillMapping.sc_name === 'string') {
-        const scName = skillMapping.sc_name.trim();
-        if (scName.includes(' + ')) {
-          const individualSkills = scName.split(' + ').map((s: string) => s.trim()).filter(Boolean);
-          if (individualSkills.length > 0) {
-            return individualSkills;
+      // Add workers reassigned TO this stage during our time period to available workers
+      const reassignedWorkers: Worker[] = [];
+      (reassignmentsTo || []).forEach((reassignment: any) => {
+        if (!reassignment.from_time || !reassignment.to_time) return;
+        
+        const reassignFromMinutes = timeToMinutes(reassignment.from_time);
+        const reassignToMinutes = timeToMinutes(reassignment.to_time);
+        let adjustedReassignToMinutes = reassignToMinutes;
+        if (adjustedReassignToMinutes < reassignFromMinutes) {
+          adjustedReassignToMinutes += 24 * 60; // Handle overnight
+        }
+        
+        // Check if reassignment period overlaps with our planned time (including adjacent slots)
+        if (fromMinutes < adjustedReassignToMinutes && adjustedToMinutes > reassignFromMinutes) {
+          const emp = reassignment.hr_emp;
+          if (emp && !workerIds.includes(emp.emp_id)) {
+            reassignedWorkers.push({
+              emp_id: emp.emp_id,
+              emp_name: emp.emp_name,
+              skill_short: emp.skill_short
+            });
           }
         }
+      });
+
+      // Combine original workers with reassigned workers
+      const allWorkers = [...availableWorkers, ...reassignedWorkers];
+      const allWorkerIds = allWorkers.map(w => w.emp_id);
+      
+      // Check existing work plans for all workers at the same time
+      const { data: existingPlans, error: plansError } = await supabase
+        .from('prdn_work_planning')
+        .select('worker_id, from_date, from_time, to_date, to_time')
+        .in('worker_id', allWorkerIds)
+        .eq('from_date', selectedDate)
+        .eq('is_active', true)
+        .eq('is_deleted', false)
+        .eq('status', 'draft');
+
+      if (plansError) {
+        console.error('Error checking existing plans:', plansError);
       }
 
-      // Final fallback: return sc_name as single skill
-      return [skillMapping.sc_name || 'Unknown'];
+      // Check stage reassignments - workers reassigned FROM this stage (they're away)
+      const { data: reassignmentsFrom, error: reassignFromError } = await supabase
+        .from('prdn_planning_stage_reassignment')
+        .select('emp_id, from_time, to_time')
+        .in('emp_id', allWorkerIds)
+        .eq('from_stage_code', stageCode)
+        .eq('planning_date', selectedDate)
+        .eq('status', 'draft')
+        .eq('is_deleted', false);
+
+      if (reassignFromError) {
+        console.error('Error checking reassignments from stage:', reassignFromError);
+      }
+
+      const unavailableWorkerIds = new Set<string>();
+      
+      // Check work plan conflicts
+      (existingPlans || []).forEach((plan: any) => {
+        if (!plan.from_time || !plan.to_time) return;
+        
+        const planFromMinutes = timeToMinutes(plan.from_time);
+        const planToMinutes = timeToMinutes(plan.to_time);
+        let adjustedPlanToMinutes = planToMinutes;
+        if (adjustedPlanToMinutes < planFromMinutes) {
+          adjustedPlanToMinutes += 24 * 60; // Handle overnight
+        }
+        
+        // Check if time ranges overlap (excluding adjacent slots)
+        // Two ranges overlap if: start1 < end2 && end1 > start2
+        // Adjacent slots (where one ends exactly when another starts) are allowed
+        // This means we only mark as unavailable if there's actual overlap, not just adjacency
+        const hasOverlap = fromMinutes < adjustedPlanToMinutes && adjustedToMinutes > planFromMinutes;
+        // Also check if new work starts before existing work ends AND new work ends after existing work starts
+        // But exclude the case where they're exactly adjacent (one ends when another starts)
+        const isAdjacent = (fromMinutes === adjustedPlanToMinutes) || (adjustedToMinutes === planFromMinutes);
+        if (hasOverlap && !isAdjacent) {
+          unavailableWorkerIds.add(plan.worker_id);
+        }
+      });
+
+      // Check reassignments FROM this stage (workers are away during that time)
+      (reassignmentsFrom || []).forEach((reassignment: any) => {
+        if (!reassignment.from_time || !reassignment.to_time) return;
+        
+        const reassignFromMinutes = timeToMinutes(reassignment.from_time);
+        const reassignToMinutes = timeToMinutes(reassignment.to_time);
+        let adjustedReassignToMinutes = reassignToMinutes;
+        if (adjustedReassignToMinutes < reassignFromMinutes) {
+          adjustedReassignToMinutes += 24 * 60; // Handle overnight
+        }
+        
+        // Check if time ranges overlap (worker is away during our planned time)
+        // Adjacent slots are allowed (where reassignment ends exactly when our work starts)
+        if (fromMinutes < adjustedReassignToMinutes && adjustedToMinutes > reassignFromMinutes) {
+          unavailableWorkerIds.add(reassignment.emp_id);
+        }
+      });
+
+      // Filter out unavailable workers
+      filteredAvailableWorkers = allWorkers.filter(w => !unavailableWorkerIds.has(w.emp_id));
+      
+      // Ensure selected workers are always included (for edit mode - they're already assigned to this work)
+      ensureSelectedWorkersInAvailable();
+      
+      console.log(`✅ Filtered workers: ${filteredAvailableWorkers.length} available out of ${allWorkers.length} total (${reassignedWorkers.length} reassigned to stage)`);
     } catch (error) {
-      console.error('Error extracting individual skills:', error);
-      // Fallback: try to parse sc_name
-      if (skillMapping?.sc_name && typeof skillMapping.sc_name === 'string') {
-        const scName = skillMapping.sc_name.trim();
-        if (scName.includes(' + ')) {
-          const individualSkills = scName.split(' + ').map((s: string) => s.trim()).filter(Boolean);
-          if (individualSkills.length > 0) {
-            return individualSkills;
-          }
-        }
-        return [scName];
-      }
-      return [skillMapping?.sc_name || 'Unknown'];
+      console.error('Error filtering workers by time availability:', error);
+      filteredAvailableWorkers = availableWorkers;
+      ensureSelectedWorkersInAvailable();
     }
   }
 
-  /**
-   * Generate time slots in 15-minute intervals
-   * Starting from 3 hours before shift start time, up to shift end time
-   */
-  function generateTimeSlots(shiftStartTime: string, shiftEndTime: string): Array<{ value: string; display: string }> {
-    const slots: Array<{ value: string; display: string }> = [];
+  // Ensure selected workers are always in the available workers list (for edit mode)
+  function ensureSelectedWorkersInAvailable() {
+    const selectedWorkerIds = new Set<string>();
+    Object.values(formData.selectedWorkers).forEach((worker: SelectedWorker | null) => {
+      if (worker && worker.emp_id) {
+        selectedWorkerIds.add(worker.emp_id);
+      }
+    });
+
+    // Check if any selected workers are missing from filteredAvailableWorkers
+    selectedWorkerIds.forEach(empId => {
+      const isInAvailable = filteredAvailableWorkers.some(w => w.emp_id === empId);
+      if (!isInAvailable) {
+        // Find the worker in the full availableWorkers list
+        const worker = availableWorkers.find(w => w.emp_id === empId);
+        if (worker) {
+          // Add to filteredAvailableWorkers
+          filteredAvailableWorkers = [...filteredAvailableWorkers, worker];
+          console.log(`➕ Added selected worker to available list: ${worker.emp_name} (${worker.emp_id})`);
+        } else {
+          // Worker not in availableWorkers, try to get from selectedWorkers
+          const selectedWorker = Object.values(formData.selectedWorkers).find(
+            (w: SelectedWorker | null) => w && w.emp_id === empId
+          ) as SelectedWorker | null;
+          if (selectedWorker) {
+            // Create a Worker object from SelectedWorker
+            filteredAvailableWorkers = [...filteredAvailableWorkers, {
+              emp_id: selectedWorker.emp_id,
+              emp_name: selectedWorker.emp_name,
+              skill_short: selectedWorker.skill_short
+            }];
+            console.log(`➕ Added selected worker to available list: ${selectedWorker.emp_name} (${selectedWorker.emp_id})`);
+          }
+        }
+      }
+    });
+  }
+
+  // Move to step 2 (worker selection) after time is set
+  async function proceedToWorkerSelection() {
+    if (!formData.fromTime || !formData.toTime) {
+      alert('Please select both start time and end time before proceeding.');
+      return;
+    }
+
+    // Validate time
+    checkTimeOverlapValidation();
+    checkTimeExcessValidation();
     
-    try {
-      // Parse shift start time
-      const [startHour, startMinute] = shiftStartTime.split(':').map(Number);
-      const shiftStartDate = new Date(2000, 0, 1, startHour, startMinute);
-      
-      // Calculate start time (3 hours before shift start)
-      const slotStartDate = new Date(shiftStartDate.getTime() - 3 * 60 * 60 * 1000);
-      
-      // Parse shift end time
-      const [endHour, endMinute] = shiftEndTime.split(':').map(Number);
-      let shiftEndDate = new Date(2000, 0, 1, endHour, endMinute);
-      
-      // Handle overnight shifts (if end time is earlier than start time, it's next day)
-      if (shiftEndDate < shiftStartDate) {
-        shiftEndDate = new Date(shiftEndDate.getTime() + 24 * 60 * 60 * 1000);
-      }
-      
-      // Generate slots in 15-minute intervals
-      let currentTime = new Date(slotStartDate);
-      while (currentTime <= shiftEndDate) {
-        const hours24 = currentTime.getHours();
-        const minutes = currentTime.getMinutes();
-        
-        // Format as HH:MM (24-hour)
-        const value = `${hours24.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
-        
-        // Format for display (12-hour with AM/PM)
-        const hours12 = hours24 === 0 ? 12 : hours24 > 12 ? hours24 - 12 : hours24;
-        const ampm = hours24 < 12 ? 'AM' : 'PM';
-        const display = `${hours12}:${minutes.toString().padStart(2, '0')} ${ampm}`;
-        
-        slots.push({ value, display });
-        
-        // Add 15 minutes
-        currentTime = new Date(currentTime.getTime() + 15 * 60 * 1000);
-      }
-      
-      return slots;
-    } catch (error) {
-      console.error('Error generating time slots:', error);
-      return [];
+    if (warnings.showTimeOverlapWarning || warnings.showTimeExcessWarning) {
+      const proceed = confirm(
+        `${warnings.timeOverlapDetails || ''}\n${warnings.timeExcessDetails || ''}\n\nDo you want to proceed anyway?`
+      );
+      if (!proceed) return;
     }
+
+    // Filter workers based on time availability
+    await filterWorkersByTimeAvailability();
+    
+    // Ensure selected workers are in the available list (in case they were filtered out)
+    ensureSelectedWorkersInAvailable();
+    
+    // Move to step 2
+    currentStep = 2;
+  }
+
+  // Go back to step 1 (time selection)
+  function goBackToTimeSelection() {
+    currentStep = 1;
+    // Clear worker selections when going back
+    formData.selectedWorkers = {};
   }
 </script>
 
@@ -1348,389 +996,123 @@
 
         <!-- Content -->
         <div class="px-6 py-4 space-y-4">
-          <!-- Work Details -->
-          <div class="theme-bg-secondary rounded-lg p-4">
-            <h4 class="font-medium theme-text-primary mb-2">Work Details</h4>
-            <div class="space-y-1 text-sm">
-              <div><span class="theme-text-secondary">Code:</span> <span class="theme-text-primary">{work?.std_work_type_details?.derived_sw_code || work?.sw_code}</span></div>
-              <div><span class="theme-text-secondary">Name:</span> <span class="theme-text-primary">{work?.sw_name}{work?.std_work_type_details?.type_description ? ' - ' + work.std_work_type_details.type_description : ''}</span></div>
-              <div><span class="theme-text-secondary">Standard Time:</span> <span class="theme-text-primary">{work?.std_vehicle_work_flow?.estimated_duration_minutes ? formatTime(work.std_vehicle_work_flow.estimated_duration_minutes / 60) : 'N/A'}</span></div>
-              <div><span class="theme-text-secondary">Time Taken:</span> <span class="theme-text-primary">{formatTime(workContinuation.timeWorkedTillDate)}</span></div>
-              <div><span class="theme-text-secondary">Remaining Time:</span> <span class="theme-text-primary">{formatTime(workContinuation.remainingTime)}</span></div>
+        {#if isLoading}
+          <div class="text-center py-8">
+            <p class="theme-text-secondary">Loading...</p>
             </div>
-          </div>
+        {:else if work}
+          <!-- Work Details Display -->
+          <WorkDetailsDisplay 
+            {work} 
+            {workContinuation}
+          />
 
-          <!-- Required Skills -->
-          {#if work?.skill_mappings && work.skill_mappings.length > 0}
-            <div>
-              <h4 class="font-medium theme-text-primary mb-2">Required Skills</h4>
-              <div class="flex flex-wrap gap-2">
-                {#each work.skill_mappings as skill}
-                  {@const skillAny = skill as any}
-                  {@const skillShort = getSkillShort(skillAny)}
-                  <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-400">
-                    {skillShort || skillAny.sc_name}
-                  </span>
-                {/each}
-              </div>
-            </div>
-          {/if}
+          <!-- Warnings Display -->
+          <WarningsDisplay {warnings} />
 
-          <!-- Work Continuation Info -->
-          {#if workContinuation.hasPreviousWork}
-            <div class="theme-bg-yellow-50 dark:theme-bg-yellow-900/20 rounded-lg p-4 border border-yellow-200 dark:border-yellow-800">
-              <h4 class="font-medium text-yellow-800 dark:text-yellow-200 mb-2">Work Continuation</h4>
-              <div class="space-y-1 text-sm text-yellow-700 dark:text-yellow-300">
-                <div>Time worked till date: <span class="font-medium">{formatTime(workContinuation.timeWorkedTillDate)}</span></div>
-                <div>Remaining time: <span class="font-medium">{formatTime(workContinuation.remainingTime)}</span></div>
-              </div>
-            </div>
-          {/if}
-
-          <!-- Alternative Skill Combination Conflict Warning -->
-          {#if hasAlternativePlanningConflict}
-            <div class="theme-bg-red-50 dark:theme-bg-red-900/20 rounded-lg p-4 border border-red-200 dark:border-red-800">
-              <div class="flex items-start">
-                <AlertTriangle class="w-5 h-5 text-red-600 dark:text-red-400 mt-0.5 mr-2 flex-shrink-0" />
-                <div>
-                  <h4 class="font-medium text-red-800 dark:text-red-200">Alternative Combination Conflict</h4>
-                  <p class="text-sm text-red-700 dark:text-red-300 mt-1 whitespace-pre-line">{alternativeConflictDetails}</p>
-                </div>
-              </div>
-            </div>
-          {/if}
-
-          <!-- Worker Selection for Each Skill -->
-          {#if work?.skill_mappings && work.skill_mappings.length > 0}
-            <div>
-              <h4 class="font-medium theme-text-primary mb-3">Assign Workers by Skill</h4>
-              
-              <!-- If multiple skill mappings, allow selecting only one -->
-              {#if work.skill_mappings.length > 1}
-                <div class="mb-4">
-                  <p class="text-sm theme-text-secondary mb-2">This work has multiple alternative skill combinations. Select ONE to plan:</p>
-                  <div class="space-y-2">
-                    {#each work.skill_mappings as skill, index}
-                      {@const skillAny = skill as any}
-                      {@const skillShort = getSkillShort(skillAny)}
-                      <label class="flex items-center p-3 border-2 rounded-lg cursor-pointer transition-colors {selectedSkillMappingIndex === index ? 'border-blue-500 bg-blue-100 dark:bg-blue-900/40 dark:text-gray-100' : 'border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800'}">
-                        <input
-                          type="radio"
-                          name="skill-mapping"
-                          value={index}
-                          checked={selectedSkillMappingIndex === index}
-                          on:change={() => selectedSkillMappingIndex = index}
-                          class="mr-3 w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:ring-offset-gray-800 dark:focus:ring-blue-600"
-                        />
-                        <div class="flex-1">
-                          <div class="font-medium text-gray-900 dark:text-gray-100">{skillShort || skillAny.sc_name}</div>
-                        </div>
-                      </label>
-                    {/each}
+            <!-- Step Indicator -->
+            <div class="flex items-center justify-center mb-6">
+              <div class="flex items-center space-x-4">
+                <!-- Step 1: Time Selection -->
+                <div class="flex items-center">
+                  <div class="flex items-center justify-center w-8 h-8 rounded-full border-2 {
+                    currentStep >= 1 ? 'bg-blue-500 border-blue-500 text-white' : 'border-gray-300 text-gray-400'
+                  }">
+                    {currentStep > 1 ? '✓' : '1'}
                   </div>
+                  <span class="ml-2 text-sm font-medium {
+                    currentStep >= 1 ? 'text-blue-600 dark:text-blue-400' : 'text-gray-400'
+                  }">Time Selection</span>
                 </div>
-              {:else}
-                <!-- Auto-select first (and only) skill mapping -->
-              {/if}
-              
-              {#if selectedSkillMappingIndex >= 0 || work.skill_mappings.length === 1}
-                {#key selectedSkillMappingIndex}
-                  {#if work.skill_mappings.length > 1}
-                    {#if selectedSkillMappingIndex >= 0}
-                      {@const skill = work.skill_mappings[selectedSkillMappingIndex]}
-                      {@const skillShort = getSkillShort(skill)}
-                      {@const individualSkills = getIndividualSkills(skill)}
-                      
-                      <div class="space-y-4">
-                        {#if individualSkills.length > 1}
-                    <!-- Multiple skills in combination - show separate fields for each -->
-                    <div class="border-l-4 border-blue-500 pl-4">
-                      <h5 class="font-medium theme-text-primary mb-2">{skillShort || skill.sc_name}</h5>
-                      <div class="space-y-3">
-                        {#each individualSkills as individualSkill, skillIndex}
-                          <div>
-                            <label for="worker-{skill.sc_name}-{individualSkill}-{skillIndex}" class="block text-sm font-medium theme-text-primary mb-1">
-                              {individualSkill} Worker {skillIndex > 0 ? `(${skillIndex + 1})` : ''}
-                            </label>
-                            <select
-                              id="worker-{skill.sc_name}-{individualSkill}-{skillIndex}"
-                              class="w-full px-3 py-2 border theme-border rounded-lg theme-bg-primary theme-text-primary focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                              on:change={(e) => handleWorkerChange(e, `${individualSkill}-${skillIndex}`)}
-                            >
-                              <option value="">Choose a worker for {individualSkill}...</option>
-                              {#each availableWorkers as worker}
-                                {@const w = worker as { emp_id: string; emp_name: string; skill_short: string }}
-                                <option value={w.emp_id}>
-                                  {w.emp_name} ({w.skill_short})
-                                </option>
-                              {/each}
-                            </select>
-                            {#if selectedWorkers[`${individualSkill}-${skillIndex}`]}
-                              {@const selectedWorker = selectedWorkers[`${individualSkill}-${skillIndex}`]}
-                              {#if selectedWorker}
-                                <div class="mt-1 text-xs theme-text-secondary">
-                                  Selected: {selectedWorker.emp_name} ({selectedWorker.skill_short})
-                                </div>
-                              {/if}
-                            {/if}
-                          </div>
-                        {/each}
-                      </div>
-                    </div>
-                  {:else}
-                    <!-- Single skill - show single field -->
-                    <div>
-                      <label for="worker-{skill.sc_name}" class="block text-sm font-medium theme-text-primary mb-2">
-                        {skillShort || skill.sc_name} Worker
-                      </label>
-                      <select
-                        id="worker-{skill.sc_name}"
-                        class="w-full px-3 py-2 border theme-border rounded-lg theme-bg-primary theme-text-primary focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                        on:change={(e) => handleWorkerChange(e, skillShort || skill.sc_name)}
-                      >
-                        <option value="">Choose a worker for {skillShort || skill.sc_name}...</option>
-                        {#each availableWorkers as worker}
-                          {@const w = worker as { emp_id: string; emp_name: string; skill_short: string }}
-                          <option value={w.emp_id}>
-                            {w.emp_name} ({w.skill_short})
-                          </option>
-                        {/each}
-                      </select>
-                      {#if selectedWorkers[skillShort || skill.sc_name]}
-                        {@const selectedWorker = selectedWorkers[skillShort || skill.sc_name]}
-                        {#if selectedWorker}
-                          <div class="mt-1 text-xs theme-text-secondary">
-                            Selected: {selectedWorker.emp_name} ({selectedWorker.skill_short})
-                          </div>
-                        {/if}
-                      {/if}
-                    </div>
-                  {/if}
-                    </div>
-                  {/if}
-                  {:else}
-                    <!-- Case when there's only 1 skill mapping -->
-                    {@const skill = work.skill_mappings[0]}
-                    {@const skillShort = getSkillShort(skill)}
-                    {@const individualSkills = getIndividualSkills(skill)}
-                    
-                    <div class="space-y-4">
-                      {#if individualSkills.length > 1}
-                        <div class="border-l-4 border-blue-500 pl-4">
-                          <h5 class="font-medium theme-text-primary mb-2">{skillShort || skill.sc_name}</h5>
-                          <div class="space-y-3">
-                            {#each individualSkills as individualSkill, skillIndex}
-                              <div>
-                                <label for="worker-single-{individualSkill}-{skillIndex}" class="block text-sm font-medium theme-text-primary mb-1">
-                                  {individualSkill} Worker {skillIndex > 0 ? `(${skillIndex + 1})` : ''}
-                                </label>
-                                <select
-                                  id="worker-single-{individualSkill}-{skillIndex}"
-                                  class="w-full px-3 py-2 border theme-border rounded-lg theme-bg-primary theme-text-primary focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                                  on:change={(e) => handleWorkerChange(e, `${individualSkill}-${skillIndex}`)}
-                                >
-                                  <option value="">Choose a worker for {individualSkill}...</option>
-                                  {#each availableWorkers as worker}
-                                    {@const w = worker as { emp_id: string; emp_name: string; skill_short: string }}
-                                    <option value={w.emp_id}>
-                                      {w.emp_name} ({w.skill_short})
-                                    </option>
-                                  {/each}
-                                </select>
-                                {#if selectedWorkers[`${individualSkill}-${skillIndex}`]}
-                                  {@const selectedWorker = selectedWorkers[`${individualSkill}-${skillIndex}`]}
-                                  {#if selectedWorker}
-                                    <div class="mt-1 text-xs theme-text-secondary">
-                                      Selected: {selectedWorker.emp_name} ({selectedWorker.skill_short})
-                                    </div>
-                                  {/if}
-                                {/if}
-                              </div>
-                            {/each}
-                          </div>
-                        </div>
-                      {:else}
-                        <div>
-                          <label for="worker-single-skill" class="block text-sm font-medium theme-text-primary mb-2">
-                            {skillShort || skill.sc_name} Worker
-                          </label>
-                          <select
-                            id="worker-single-skill"
-                            class="w-full px-3 py-2 border theme-border rounded-lg theme-bg-primary theme-text-primary focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                            on:change={(e) => handleWorkerChange(e, skillShort || skill.sc_name)}
-                          >
-                            <option value="">Choose a worker for {skillShort || skill.sc_name}...</option>
-                            {#each availableWorkers as worker}
-                              {@const w = worker as { emp_id: string; emp_name: string; skill_short: string }}
-                              <option value={w.emp_id}>
-                                {w.emp_name} ({w.skill_short})
-                              </option>
-                            {/each}
-                          </select>
-                          {#if selectedWorkers[skillShort || skill.sc_name]}
-                            {@const selectedWorker = selectedWorkers[skillShort || skill.sc_name]}
-                            {#if selectedWorker}
-                              <div class="mt-1 text-xs theme-text-secondary">
-                                Selected: {selectedWorker.emp_name} ({selectedWorker.skill_short})
-                              </div>
-                            {/if}
-                          {/if}
-                        </div>
-                      {/if}
-                    </div>
-                  {/if}
-                {/key}
-              {/if}
-            </div>
-          {:else}
-            <!-- Fallback for works without specific skills -->
-            <div>
-              <label for="worker-select" class="block text-sm font-medium theme-text-primary mb-2">Select Worker</label>
-              <select
-                id="worker-select"
-                class="w-full px-3 py-2 border theme-border rounded-lg theme-bg-primary theme-text-primary focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                on:change={(e) => handleWorkerChange(e, 'general')}
-              >
-                <option value="">Choose a worker...</option>
-                {#each availableWorkers as worker}
-                  {@const w = worker as { emp_id: string; emp_name: string; skill_short: string }}
-                  <option value={w.emp_id}>
-                    {w.emp_name} ({w.skill_short})
-                  </option>
-                {/each}
-              </select>
-            </div>
-          {/if}
-
-          <!-- Skill Mismatch Warning -->
-          {#if showSkillMismatchWarning}
-            <div class="theme-bg-red-50 dark:theme-bg-red-900/20 rounded-lg p-4 border border-red-200 dark:border-red-800">
-              <div class="flex items-start">
-                <AlertTriangle class="w-5 h-5 text-red-600 dark:text-red-400 mt-0.5 mr-2 flex-shrink-0" />
-                <div>
-                  <h4 class="font-medium text-red-800 dark:text-red-200">Skill Mismatch Warning</h4>
-                  <p class="text-sm text-red-700 dark:text-red-300 mt-1">{skillMismatchDetails}</p>
+                
+                <!-- Arrow -->
+                <div class="w-8 h-0.5 bg-gray-300"></div>
+                
+                <!-- Step 2: Worker Selection -->
+                <div class="flex items-center">
+                  <div class="flex items-center justify-center w-8 h-8 rounded-full border-2 {
+                    currentStep >= 2 ? 'bg-blue-500 border-blue-500 text-white' : 'border-gray-300 text-gray-400'
+                  }">
+                    2
+                  </div>
+                  <span class="ml-2 text-sm font-medium {
+                    currentStep >= 2 ? 'text-blue-600 dark:text-blue-400' : 'text-gray-400'
+                  }">Worker Selection</span>
                 </div>
               </div>
             </div>
-          {/if}
 
-          <!-- Time Overlap Warning -->
-          {#if showTimeOverlapWarning}
-            <div class="theme-bg-orange-50 dark:theme-bg-orange-900/20 rounded-lg p-4 border border-orange-200 dark:border-orange-800">
-              <div class="flex items-start">
-                <AlertTriangle class="w-5 h-5 text-orange-600 dark:text-orange-400 mt-0.5 mr-2 flex-shrink-0" />
-                <div>
-                  <h4 class="font-medium text-orange-800 dark:text-orange-200">Time Overlap Warning</h4>
-                  <p class="text-sm text-orange-700 dark:text-orange-300 mt-1">{timeOverlapDetails}</p>
-                </div>
+            {#if currentStep === 1}
+              <!-- Step 1: Time Selection -->
+              <div class="space-y-4">
+                <h4 class="font-medium theme-text-primary text-lg">Step 1: Select Time</h4>
+                
+          <TimePlanning
+            fromTime={formData.fromTime}
+            bind:toTime={formData.toTime}
+            plannedHours={formData.plannedHours}
+            {shiftInfo}
+            {work}
+            onFromTimeChange={handleFromTimeChange}
+            onAutoCalculate={handleAutoCalculate}
+          />
               </div>
-            </div>
-          {/if}
-
-          <!-- Time Excess Warning -->
-          {#if showTimeExcessWarning}
-            <div class="theme-bg-yellow-50 dark:theme-bg-yellow-900/20 rounded-lg p-4 border border-yellow-200 dark:border-yellow-800">
-              <div class="flex items-start">
-                <AlertTriangle class="w-5 h-5 text-yellow-600 dark:text-yellow-400 mt-0.5 mr-2 flex-shrink-0" />
-                <div>
-                  <h4 class="font-medium text-yellow-800 dark:text-yellow-200">Time Excess Warning</h4>
-                  <p class="text-sm text-yellow-700 dark:text-yellow-300 mt-1 whitespace-pre-line">{timeExcessDetails}</p>
-                </div>
-              </div>
-            </div>
-          {/if}
-
-          <!-- Time Planning -->
-          <div class="space-y-4">
-            <div class="flex items-center justify-between">
-              <h4 class="font-medium theme-text-primary">Time Planning</h4>
-              {#if work?.std_vehicle_work_flow?.estimated_duration_minutes}
-                <button
-                  type="button"
-                  class="text-sm text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 font-medium"
-                  on:click={autoCalculateEndTime}
-                >
-                  Auto Calculate End Time
-                </button>
-              {/if}
-            </div>
-            
-            <div class="grid grid-cols-2 gap-4">
-              <div>
-                <label for="from-time-select" class="block text-sm font-medium theme-text-primary mb-2">
-                  From Time
-                </label>
-                <select
-                  id="from-time-select"
-                  bind:value={fromTime}
-                  class="w-full px-3 py-2 border theme-border rounded-lg theme-bg-primary theme-text-primary focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                >
-                  <option value="">Select time...</option>
-                  {#if shiftInfo?.hr_shift_master?.start_time && shiftInfo?.hr_shift_master?.end_time}
-                    {@const timeSlots = generateTimeSlots(shiftInfo.hr_shift_master.start_time, shiftInfo.hr_shift_master.end_time)}
-                    {#each timeSlots as slot}
-                      <option value={slot.value}>{slot.display}</option>
-                    {/each}
-                  {:else}
-                    <option value="" disabled>Shift information not available</option>
-                  {/if}
-                </select>
-              </div>
-              <div>
-                <TimePicker
-                  label="To Time"
-                  bind:value={toTime}
+            {:else if currentStep === 2}
+              <!-- Step 2: Worker Selection -->
+              <div class="space-y-4">
+                <h4 class="font-medium theme-text-primary text-lg">Step 2: Select Workers</h4>
+                <p class="text-sm theme-text-secondary">
+                  Only workers available during {formData.fromTime} - {formData.toTime} are shown.
+                </p>
+                
+                <WorkerSelection
+                  {work}
+                  availableWorkers={filteredAvailableWorkers}
+                  selectedWorkers={formData.selectedWorkers}
+                  selectedSkillMappingIndex={formData.selectedSkillMappingIndex}
+                  {selectedDate}
+                  fromTime={formData.fromTime}
+                  toTime={formData.toTime}
+                  excludePlanIds={work?.existingDraftPlans?.map((p: any) => p.id).filter(Boolean) || []}
+                  onWorkerChange={handleWorkerChange}
+                  onSkillMappingChange={handleSkillMappingChange}
                 />
               </div>
-            </div>
-            
-            <!-- Shift Information Display -->
-            {#if shiftInfo?.hr_shift_master}
-              <div class="theme-bg-blue-50 dark:theme-bg-blue-900/20 rounded-lg p-3 border border-blue-200 dark:border-blue-800">
-                <div class="text-sm text-blue-800 dark:text-blue-200">
-                  <div class="font-medium mb-1">Shift Information:</div>
-                  <div>Shift: {shiftInfo.hr_shift_master.shift_name} ({shiftInfo.hr_shift_master.start_time} - {shiftInfo.hr_shift_master.end_time})</div>
-                </div>
-              </div>
             {/if}
-            
-            <!-- Auto-calculation Info -->
-            {#if work?.std_vehicle_work_flow?.estimated_duration_minutes}
-              {@const breakTimeForPeriod = fromTime ? calculateBreakTimeForWorkPeriod(fromTime, work.std_vehicle_work_flow.estimated_duration_minutes) : 0}
-              <div class="theme-bg-green-50 dark:theme-bg-green-900/20 rounded-lg p-3 border border-green-200 dark:border-green-800">
-                <div class="text-sm text-green-800 dark:text-green-200">
-                  <div class="font-medium mb-1">💡 Auto-calculation:</div>
-                  <div>End time will be automatically calculated based on:</div>
-                  <div>• Work duration: {work.std_vehicle_work_flow.estimated_duration_minutes} minutes</div>
-                  <div>• Break time (if spanned): {breakTimeForPeriod} minutes</div>
-                  <div>• Shift end time constraint</div>
-                </div>
-              </div>
-            {/if}
-          </div>
-
-          <!-- Planned Hours Display -->
-          {#if plannedHours > 0}
-            <div class="theme-bg-blue-50 dark:theme-bg-blue-900/20 rounded-lg p-4 border border-blue-200 dark:border-blue-800">
-              <div class="flex items-center">
-                <Clock class="w-5 h-5 text-blue-600 dark:text-blue-400 mr-2" />
-                <span class="text-sm font-medium text-blue-800 dark:text-blue-200">
-                  Planned Hours: {formatTime(plannedHours)}
-                </span>
-              </div>
-            </div>
           {/if}
         </div>
 
         <!-- Footer -->
-        <div class="px-6 py-4 border-t theme-border flex justify-end space-x-3">
+        <div class="px-6 py-4 border-t theme-border flex justify-between">
+          <div>
+            {#if currentStep === 2}
+              <Button variant="secondary" on:click={goBackToTimeSelection}>
+                ← Back to Time Selection
+              </Button>
+            {/if}
+          </div>
+          <div class="flex space-x-3">
           <Button variant="secondary" on:click={handleClose}>
             Cancel
           </Button>
-          <Button variant="primary" on:click={handleSave} disabled={Object.values(selectedWorkers).filter(Boolean).length === 0 || !fromTime || !toTime}>
+            {#if currentStep === 1}
+              <Button 
+                variant="primary" 
+                on:click={proceedToWorkerSelection}
+                disabled={!formData.fromTime || !formData.toTime}
+              >
+                Next: Select Workers →
+              </Button>
+            {:else if currentStep === 2}
+        <Button 
+          variant="primary" 
+          on:click={handleSave} 
+                disabled={Object.values(formData.selectedWorkers).filter(Boolean).length === 0}
+        >
             Save Plan
           </Button>
+            {/if}
+          </div>
         </div>
     </div>
   </div>

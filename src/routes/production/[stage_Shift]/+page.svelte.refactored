@@ -1,0 +1,816 @@
+<script lang="ts">
+  import { onMount } from 'svelte';
+  import { page } from '$app/stores';
+  import { supabase } from '$lib/supabaseClient';
+  import Sidebar from '$lib/components/navigation/Sidebar.svelte';
+  import FloatingThemeToggle from '$lib/components/common/FloatingThemeToggle.svelte';
+  import PlanWorkModal from '$lib/components/production/PlanWorkModal.svelte';
+  import ReportWorkModal from '$lib/components/production/ReportWorkModal.svelte';
+  import MultiSkillReportModal from '$lib/components/production/MultiSkillReportModal.svelte';
+  import ViewWorkHistoryModal from '$lib/components/production/ViewWorkHistoryModal.svelte';
+  import RemoveWorkModal from '$lib/components/production/RemoveWorkModal.svelte';
+  import AddWorkModal from '$lib/components/production/AddWorkModal.svelte';
+  import { fetchUserMenus } from '$lib/services/menuService';
+  import type { ProductionEmployee, ProductionWork } from '$lib/api/production';
+  import { formatTimeVerbose } from '$lib/utils/timeFormatUtils';
+  import { calculateBreakTimeInMinutes } from '$lib/utils/breakTimeUtils';
+  import * as XLSX from 'xlsx';
+  import { exportToCSV } from '$lib/utils/exportUtils';
+  import { loadStageWorkOrders, loadStageWorks, loadStagePlannedWorks, loadShiftBreakTimes } from '../services/stageProductionService';
+  import { getWaitingWorkOrdersForEntry, getAvailableWorkOrdersForExit, recordWorkOrderEntry, recordWorkOrderExit } from '../services/stageWorkOrderService';
+  import { getDraftWorkPlans, getDraftManpowerPlans, submitPlanning, getDraftWorkReports, getDraftManpowerReports, submitReporting } from '$lib/api/production/planningReportingService';
+  import { parseStageShiftParam, getStageShiftDisplayName, formatStageShiftExportFilename } from '../utils/stageUtils';
+  import { formatTime, calculateBreakTimeInRange, to12HourTime, formatLostTimeDetails } from './utils/timeUtils';
+  import { areAllSkillsReported, hasReportedSkillsSelected } from './utils/planTabUtils';
+  import { loadWorkOrdersData, loadWorksData, loadPlannedWorksData, loadManpowerPlanData, loadDraftPlanData, loadManpowerReportData, loadDraftReportData, loadShiftBreakTimesData } from './services/pageDataService';
+  
+  // Import all tab components
+  import PageHeader from './components/PageHeader.svelte';
+  import WorkOrdersTab from './components/WorkOrdersTab.svelte';
+  import WorksTab from './components/WorksTab.svelte';
+  import ManpowerPlanTab from './components/ManpowerPlanTab.svelte';
+  import DraftPlanTab from './components/DraftPlanTab.svelte';
+  import PlanTab from './components/PlanTab.svelte';
+  import ManpowerReportTab from './components/ManpowerReportTab.svelte';
+  import DraftReportTab from './components/DraftReportTab.svelte';
+  import ReportTab from './components/ReportTab.svelte';
+  import EntryModal from './components/EntryModal.svelte';
+  import ExitModal from './components/ExitModal.svelte';
+
+  // Parse route parameters
+  $: stageShiftParam = $page.params.stageShift || '{stageCode}-GEN';
+  $: parsedParams = parseStageShiftParam(stageShiftParam);
+  $: stageCode = parsedParams?.stageCode || '{stageCode}';
+  $: shiftCode = parsedParams?.shiftCode || 'GEN';
+
+  // Tab management
+  let activeTab = 'work-orders';
+  const tabs = [
+    { id: 'work-orders', label: 'Work Orders', icon: '📦' },
+    { id: 'works', label: 'Works', icon: '🔧' },
+    { id: 'manpower-plan', label: 'Manpower Plan', icon: '👥📋' },
+    { id: 'draft-plan', label: 'Draft Plan', icon: '📝' },
+    { id: 'plan', label: 'Plan', icon: '📋' },
+    { id: 'manpower-report', label: 'Manpower Report', icon: '👥📊' },
+    { id: 'draft-report', label: 'Draft Report', icon: '📝' },
+    { id: 'report', label: 'Report', icon: '📊' }
+  ];
+
+  // Common state
+  let showSidebar = false;
+  let menus: any[] = [];
+  let isLoading = true;
+  let selectedDate = new Date().toISOString().split('T')[0];
+
+  // Tab-specific state
+  let workOrdersData: any[] = [];
+  let isWorkOrdersLoading = false;
+  let worksData: ProductionWork[] = [];
+  let isWorksLoading = false;
+  let manpowerPlanData: ProductionEmployee[] = [];
+  let isManpowerPlanLoading = false;
+  let draftPlanData: any[] = [];
+  let draftManpowerPlanData: any[] = [];
+  let isDraftPlanLoading = false;
+  let plannedWorksData: any[] = [];
+  let isPlannedWorksLoading = false;
+  let plannedWorksWithStatus: any[] = [];
+  let expandedGroups: string[] = [];
+  let selectedRows: Set<string> = new Set();
+  let shiftBreakTimes: Array<{ start_time: string; end_time: string }> = [];
+  let manpowerReportData: ProductionEmployee[] = [];
+  let isManpowerReportLoading = false;
+  let draftReportData: any[] = [];
+  let draftManpowerReportData: any[] = [];
+  let isDraftReportLoading = false;
+  let reportData: any[] = [];
+  let isReportLoading = false;
+  let expandedReportGroups: string[] = [];
+
+  // Modal state
+  let showPlanModal = false;
+  let selectedWorkForPlanning: any = null;
+  let showReportModal = false;
+  let selectedWorkForReporting: any = null;
+  let showMultiReportModal = false;
+  let selectedWorksForMultiReport: any[] = [];
+  let showViewWorkHistoryModal = false;
+  let selectedWorkForHistory: any = null;
+  let showRemoveWorkModal = false;
+  let selectedWorkForRemoval: any = null;
+  let showAddWorkModal = false;
+  let availableWorkOrdersForAdd: Array<{id: number, wo_no: string | null, pwo_no: string | null, wo_model: string}> = [];
+  let showEntryModal = false;
+  let waitingWorkOrdersForEntry: any[] = [];
+  let selectedWorkOrderForEntry: any = null;
+  let isEntryModalLoading = false;
+  let entryProgressMessage = '';
+  let showExitModal = false;
+  let availableWorkOrdersForExit: any[] = [];
+  let selectedWorkOrderForExit: any = null;
+  let isExitModalLoading = false;
+  let exitProgressMessage = '';
+  let exitDate = '';
+
+  // Tab change handler
+  async function handleTabChange(tabId: string) {
+    activeTab = tabId;
+    if (tabId === 'work-orders') await loadWorkOrdersData();
+    else if (tabId === 'works') await loadWorksData();
+    else if (tabId === 'manpower-plan') await loadManpowerPlanData();
+    else if (tabId === 'draft-plan') await loadDraftPlanData();
+    else if (tabId === 'plan') await loadPlannedWorksData();
+    else if (tabId === 'manpower-report') await loadManpowerReportData();
+    else if (tabId === 'draft-report') await loadDraftReportData();
+    else if (tabId === 'report') await loadReportData();
+  }
+
+  // Data loading functions (wrappers around service functions)
+  async function loadWorkOrdersData() {
+    isWorkOrdersLoading = true;
+    workOrdersData = await loadWorkOrdersData(stageCode, selectedDate);
+    isWorkOrdersLoading = false;
+  }
+
+  async function loadWorksData() {
+    isWorksLoading = true;
+    worksData = await loadWorksData(stageCode, selectedDate);
+    isWorksLoading = false;
+  }
+
+  async function loadPlannedWorksData() {
+    isPlannedWorksLoading = true;
+    plannedWorksData = await loadPlannedWorksData(stageCode, selectedDate);
+    await calculatePlannedWorksStatus();
+    isPlannedWorksLoading = false;
+  }
+
+  async function loadManpowerPlanData() {
+    isManpowerPlanLoading = true;
+    manpowerPlanData = await loadManpowerPlanData(stageCode, shiftCode, selectedDate);
+    isManpowerPlanLoading = false;
+  }
+
+  async function loadDraftPlanData() {
+    isDraftPlanLoading = true;
+    const result = await loadDraftPlanData(stageCode, selectedDate);
+    draftPlanData = result.workPlans;
+    draftManpowerPlanData = result.manpowerPlans;
+    isDraftPlanLoading = false;
+  }
+
+  async function loadManpowerReportData() {
+    isManpowerReportLoading = true;
+    manpowerReportData = await loadManpowerReportData(stageCode, shiftCode, selectedDate);
+    isManpowerReportLoading = false;
+  }
+
+  async function loadDraftReportData() {
+    isDraftReportLoading = true;
+    const result = await loadDraftReportData(stageCode, selectedDate);
+    draftReportData = result.workReports;
+    draftManpowerReportData = result.manpowerReports;
+    isDraftReportLoading = false;
+  }
+
+  async function loadReportData() {
+    if (!selectedDate) return;
+    isReportLoading = true;
+    try {
+      const { data, error } = await supabase
+        .from('prdn_work_reporting')
+        .select(`
+          *,
+          prdn_work_planning!inner(
+            *,
+            std_work_type_details!inner(
+              *,
+              std_work_details!inner(sw_name)
+            ),
+            hr_emp!inner(emp_name, skill_short),
+            prdn_wo_details!inner(wo_no, pwo_no, wo_model, customer_name),
+            std_work_skill_mapping(
+              wsm_id,
+              sc_name
+            )
+          )
+        `)
+        .eq('prdn_work_planning.stage_code', stageCode)
+        .gte('from_date', selectedDate)
+        .lte('from_date', selectedDate)
+        .eq('status', 'approved')
+        .eq('is_deleted', false);
+      if (error) throw error;
+      reportData = data || [];
+    } catch (error) {
+      console.error('Error loading report data:', error);
+      reportData = [];
+    } finally {
+      isReportLoading = false;
+    }
+  }
+
+  async function calculatePlannedWorksStatus() {
+    if (!plannedWorksData || plannedWorksData.length === 0) {
+      plannedWorksWithStatus = [];
+      return;
+    }
+    const worksWithStatus = await Promise.all(
+      plannedWorksData.map(async (plannedWork) => {
+        const { data: reportData } = await supabase
+          .from('prdn_work_reporting')
+          .select('id, completion_status')
+          .eq('planning_id', plannedWork.id)
+          .eq('is_deleted', false)
+          .maybeSingle();
+        if (!reportData) return { ...plannedWork, workLifecycleStatus: 'Planned' };
+        if (reportData.completion_status === 'NC') return { ...plannedWork, workLifecycleStatus: 'In progress' };
+        return { ...plannedWork, workLifecycleStatus: 'Completed' };
+      })
+    );
+    plannedWorksWithStatus = worksWithStatus;
+  }
+
+  // Date change handler
+  async function handleDateChange() {
+    shiftBreakTimes = await loadShiftBreakTimesData(selectedDate);
+    await handleTabChange(activeTab);
+  }
+
+  // Sidebar handler
+  function handleSidebarToggle() {
+    showSidebar = !showSidebar;
+  }
+
+  // Event handlers for components
+  async function handleWorksExport(event: CustomEvent) {
+    const { data: worksData } = event.detail;
+    if (!worksData || worksData.length === 0) {
+      alert('No data to export');
+      return;
+    }
+    // Export logic here
+  }
+
+  function handleAddWork() {
+    availableWorkOrdersForAdd = workOrdersData.map(wo => ({
+      id: wo.prdn_wo_details?.id || 0,
+      wo_no: wo.prdn_wo_details?.wo_no || null,
+      pwo_no: wo.prdn_wo_details?.pwo_no || null,
+      wo_model: wo.prdn_wo_details?.wo_model || ''
+    })).filter(wo => wo.id > 0);
+    showAddWorkModal = true;
+  }
+
+  function handleAddWorkClose() {
+    showAddWorkModal = false;
+    availableWorkOrdersForAdd = [];
+  }
+
+  async function handleWorkAdded(event: CustomEvent) {
+    await loadWorksData();
+    handleAddWorkClose();
+  }
+
+  function handleViewWork(event: CustomEvent) {
+    selectedWorkForHistory = event.detail.work;
+    showViewWorkHistoryModal = true;
+  }
+
+  function handleViewWorkHistoryClose() {
+    showViewWorkHistoryModal = false;
+    selectedWorkForHistory = null;
+  }
+
+  function handleRemoveWork(event: CustomEvent) {
+    selectedWorkForRemoval = event.detail.work;
+    showRemoveWorkModal = true;
+  }
+
+  function handleRemoveWorkClose() {
+    showRemoveWorkModal = false;
+    selectedWorkForRemoval = null;
+  }
+
+  async function handleWorkRemoved(event: CustomEvent) {
+    await loadWorksData();
+    handleRemoveWorkClose();
+  }
+
+  async function handleRemoveSelected(event: CustomEvent) {
+    const { works } = event.detail;
+    if (!works || works.length === 0) return;
+    // Remove logic here
+    await loadWorksData();
+  }
+
+  function handlePlanWork(event: CustomEvent) {
+    selectedWorkForPlanning = event.detail.work;
+    showPlanModal = true;
+  }
+
+  function handlePlanModalClose() {
+    showPlanModal = false;
+    selectedWorkForPlanning = null;
+  }
+
+  async function handlePlanSave(event: CustomEvent) {
+    await loadWorksData();
+    if (activeTab === 'plan') await loadPlannedWorksData();
+    handlePlanModalClose();
+  }
+
+  function handleReportWork(event: CustomEvent) {
+    selectedWorkForReporting = event.detail;
+    showReportModal = true;
+  }
+
+  function handleReportModalClose() {
+    showReportModal = false;
+    selectedWorkForReporting = null;
+  }
+
+  async function handleReportSave(event: CustomEvent) {
+    await loadPlannedWorksData();
+    if (activeTab === 'report') await loadReportData();
+    handleReportModalClose();
+  }
+
+  function handleMultiReport() {
+    if (selectedRows.size === 0) {
+      alert('Please select at least one row to report');
+      return;
+    }
+    const selectedWorks = plannedWorksWithStatus.filter(work => selectedRows.has(work.id));
+    const workCodes = [...new Set(selectedWorks.map(work => 
+      work.std_work_type_details?.derived_sw_code || work.std_work_type_details?.sw_code
+    ))];
+    if (workCodes.length > 1) {
+      alert('Please select only skill competencies from the same work');
+      return;
+    }
+    selectedWorksForMultiReport = selectedWorks;
+    showMultiReportModal = true;
+  }
+
+  async function handleMultiDelete() {
+    if (selectedRows.size === 0) {
+      alert('Please select at least one skill competency to delete');
+      return;
+    }
+    const selectedWorks = plannedWorksWithStatus.filter(work => selectedRows.has(work.id));
+    const confirmed = confirm(`Are you sure you want to delete ${selectedWorks.length} skill competency${selectedWorks.length === 1 ? '' : 'ies'}?`);
+    if (!confirmed) return;
+    try {
+      const { getCurrentUsername, getCurrentTimestamp } = await import('$lib/utils/userUtils');
+      const planningIds = selectedWorks.map(work => work.id).filter(Boolean);
+      const { error } = await supabase
+        .from('prdn_work_planning')
+        .update({ is_deleted: true, modified_by: getCurrentUsername(), modified_dt: getCurrentTimestamp() })
+        .in('id', planningIds);
+      if (!error) {
+        selectedRows.clear();
+        selectedRows = new Set(selectedRows);
+        await loadPlannedWorksData();
+      }
+    } catch (error) {
+      console.error('Error deleting work plans:', error);
+      alert('Error deleting work plans. Please try again.');
+    }
+  }
+
+  function handleMultiReportModalClose() {
+    showMultiReportModal = false;
+    selectedWorksForMultiReport = [];
+  }
+
+  async function handleMultiSkillReportSave(event: CustomEvent) {
+    await loadPlannedWorksData();
+    if (activeTab === 'report') await loadReportData();
+    selectedRows.clear();
+    selectedRows = new Set(selectedRows);
+    handleMultiReportModalClose();
+  }
+
+  async function handleDeletePlan(event: CustomEvent) {
+    const plannedWork = event.detail;
+    const confirmed = confirm('Are you sure you want to delete this work plan?');
+    if (!confirmed) return;
+    const { getCurrentUsername, getCurrentTimestamp } = await import('$lib/utils/userUtils');
+    const { error } = await supabase
+      .from('prdn_work_planning')
+      .update({ is_deleted: true, modified_by: getCurrentUsername(), modified_dt: getCurrentTimestamp() })
+      .eq('id', plannedWork.id);
+    if (!error) await loadPlannedWorksData();
+  }
+
+  function toggleGroup(workCode: string) {
+    if (expandedGroups.includes(workCode)) {
+      expandedGroups = expandedGroups.filter(code => code !== workCode);
+    } else {
+      expandedGroups = [...expandedGroups, workCode];
+    }
+  }
+
+  function toggleRowSelection(rowId: string) {
+    if (selectedRows.has(rowId)) {
+      selectedRows.delete(rowId);
+    } else {
+      selectedRows.add(rowId);
+    }
+    selectedRows = new Set(selectedRows);
+  }
+
+  function selectAllInGroup(event: CustomEvent) {
+    const group = event.detail;
+    group.items.forEach((item: any) => selectedRows.add(item.id));
+    selectedRows = new Set(selectedRows);
+  }
+
+  function clearSelections() {
+    selectedRows.clear();
+    selectedRows = new Set(selectedRows);
+  }
+
+  function toggleReportGroup(workCode: string) {
+    if (expandedReportGroups.includes(workCode)) {
+      expandedReportGroups = expandedReportGroups.filter(code => code !== workCode);
+    } else {
+      expandedReportGroups = [...expandedReportGroups, workCode];
+    }
+  }
+
+  // Entry/Exit modal handlers
+  async function handleWorkOrderEntry() {
+    isEntryModalLoading = true;
+    waitingWorkOrdersForEntry = await getWaitingWorkOrdersForEntry(stageCode, selectedDate);
+    selectedWorkOrderForEntry = null;
+    showEntryModal = true;
+    isEntryModalLoading = false;
+  }
+
+  async function handleEntryConfirm() {
+    if (!selectedWorkOrderForEntry) {
+      alert('Please select a work order');
+      return;
+    }
+    isEntryModalLoading = true;
+    entryProgressMessage = 'Processing entry...';
+    const result = await recordWorkOrderEntry(stageCode, selectedWorkOrderForEntry.prdn_wo_details.id, selectedWorkOrderForEntry.prdn_wo_details.wo_model, selectedDate, (msg) => { entryProgressMessage = msg; });
+    if (result.success) {
+      await loadWorkOrdersData();
+      await loadWorksData();
+      showEntryModal = false;
+      selectedWorkOrderForEntry = null;
+      waitingWorkOrdersForEntry = [];
+    }
+    isEntryModalLoading = false;
+    entryProgressMessage = '';
+  }
+
+  function handleEntryModalClose() {
+    showEntryModal = false;
+    selectedWorkOrderForEntry = null;
+    waitingWorkOrdersForEntry = [];
+    isEntryModalLoading = false;
+    entryProgressMessage = '';
+  }
+
+  async function handleWorkOrderExit() {
+    isExitModalLoading = true;
+    availableWorkOrdersForExit = await getAvailableWorkOrdersForExit(stageCode);
+    selectedWorkOrderForExit = null;
+    exitDate = selectedDate;
+    showExitModal = true;
+    isExitModalLoading = false;
+  }
+
+  async function handleExitConfirm() {
+    if (!selectedWorkOrderForExit || !exitDate) {
+      alert('Please select a work order and enter an exit date');
+      return;
+    }
+    isExitModalLoading = true;
+    exitProgressMessage = 'Processing exit...';
+    const result = await recordWorkOrderExit(stageCode, selectedWorkOrderForExit.prdn_wo_details.id, exitDate, (msg) => { exitProgressMessage = msg; });
+    if (result.success) {
+      await loadWorkOrdersData();
+      await loadWorksData();
+      showExitModal = false;
+      selectedWorkOrderForExit = null;
+      availableWorkOrdersForExit = [];
+      exitDate = '';
+    }
+    isExitModalLoading = false;
+    exitProgressMessage = '';
+  }
+
+  function handleExitModalClose() {
+    showExitModal = false;
+    selectedWorkOrderForExit = null;
+    availableWorkOrdersForExit = [];
+    exitDate = '';
+    isExitModalLoading = false;
+    exitProgressMessage = '';
+  }
+
+  // Manpower event handlers
+  async function handleAttendanceMarked(event: CustomEvent) {
+    await loadManpowerPlanData();
+  }
+
+  async function handleBulkAttendanceMarked(event: CustomEvent) {
+    await loadManpowerPlanData();
+  }
+
+  async function handleStageReassigned(event: CustomEvent) {
+    await loadManpowerPlanData();
+  }
+
+  function handleManpowerExport() {
+    // TODO: Implement export
+  }
+
+  // Draft submission handlers
+  async function handleSubmitPlanning() {
+    isDraftPlanLoading = true;
+    const nextDate = new Date(selectedDate);
+    nextDate.setDate(nextDate.getDate() + 1);
+    const dateStr = nextDate.toISOString().split('T')[0];
+    await submitPlanning(stageCode, dateStr);
+    await loadDraftPlanData();
+    isDraftPlanLoading = false;
+  }
+
+  async function handleSubmitReporting() {
+    isDraftReportLoading = true;
+    const dateStr = selectedDate.split('T')[0];
+    await submitReporting(stageCode, dateStr);
+    await loadDraftReportData();
+    isDraftReportLoading = false;
+  }
+
+  // Excel/PDF generation (simplified - full implementation would be in utils)
+  function generatePlanExcel() {
+    // TODO: Extract to utils/exportUtils.ts
+    alert('Excel generation - to be implemented');
+  }
+
+  function generatePlanPDF() {
+    // TODO: Extract to utils/exportUtils.ts
+    alert('PDF generation - to be implemented');
+  }
+
+  function generateReportExcel() {
+    // TODO: Extract to utils/exportUtils.ts
+    alert('Excel generation - to be implemented');
+  }
+
+  function generateReportPDF() {
+    // TODO: Extract to utils/exportUtils.ts
+    alert('PDF generation - to be implemented');
+  }
+
+  // Load break times
+  async function loadShiftBreakTimesLocal() {
+    if (!selectedDate) {
+      shiftBreakTimes = [];
+      return;
+    }
+    shiftBreakTimes = await loadShiftBreakTimesData(selectedDate);
+  }
+
+  $: if (selectedDate) {
+    loadShiftBreakTimesLocal();
+  }
+
+  onMount(async () => {
+    const username = localStorage.getItem('username');
+    if (username) {
+      try {
+        menus = await fetchUserMenus(username);
+      } catch (error) {
+        console.error('Error loading menus:', error);
+      }
+    }
+    await loadWorkOrdersData();
+    await loadWorksData();
+    isLoading = false;
+  });
+</script>
+
+<svelte:head>
+  <title>{getStageShiftDisplayName(stageCode, shiftCode)}</title>
+</svelte:head>
+
+<div class="min-h-screen theme-bg-primary">
+  <PageHeader 
+    {activeTab} 
+    {selectedDate} 
+    {tabs}
+    on:tabChange={(e) => handleTabChange(e.detail)}
+    on:dateChange={handleDateChange}
+    on:sidebarToggle={handleSidebarToggle}
+  />
+
+  <div class="container mx-auto px-4 py-6">
+    {#if activeTab === 'work-orders'}
+      <WorkOrdersTab 
+        workOrdersData={workOrdersData}
+        isLoading={isWorkOrdersLoading}
+        {stageCode}
+        {selectedDate}
+        on:entry={handleWorkOrderEntry}
+        on:exit={handleWorkOrderExit}
+      />
+    {:else if activeTab === 'works'}
+      <WorksTab 
+        worksData={worksData}
+        isLoading={isWorksLoading}
+        on:export={handleWorksExport}
+        on:refresh={loadWorksData}
+        on:addWork={handleAddWork}
+        on:viewWork={handleViewWork}
+        on:removeWork={handleRemoveWork}
+        on:removeSelected={handleRemoveSelected}
+        on:planWork={handlePlanWork}
+      />
+    {:else if activeTab === 'manpower-plan'}
+      <ManpowerPlanTab 
+        data={manpowerPlanData}
+        isLoading={isManpowerPlanLoading}
+        {selectedDate}
+        on:refresh={loadManpowerPlanData}
+        on:attendanceMarked={handleAttendanceMarked}
+        on:bulkAttendanceMarked={handleBulkAttendanceMarked}
+        on:stageReassigned={handleStageReassigned}
+        on:export={handleManpowerExport}
+      />
+    {:else if activeTab === 'draft-plan'}
+      <DraftPlanTab 
+        draftPlanData={draftPlanData}
+        draftManpowerPlanData={draftManpowerPlanData}
+        isLoading={isDraftPlanLoading}
+        {selectedDate}
+        on:submit={handleSubmitPlanning}
+      />
+    {:else if activeTab === 'plan'}
+      <PlanTab 
+        plannedWorksData={plannedWorksData}
+        plannedWorksWithStatus={plannedWorksWithStatus}
+        isLoading={isPlannedWorksLoading}
+        {stageCode}
+        {selectedDate}
+        {selectedRows}
+        {expandedGroups}
+        {shiftBreakTimes}
+        on:refresh={loadPlannedWorksData}
+        on:generateExcel={generatePlanExcel}
+        on:generatePDF={generatePlanPDF}
+        on:multiReport={handleMultiReport}
+        on:multiDelete={handleMultiDelete}
+        on:reportWork={(e) => handleReportWork({ detail: e.detail })}
+        on:deletePlan={(e) => handleDeletePlan({ detail: e.detail })}
+        on:toggleGroup={(e) => toggleGroup(e.detail)}
+        on:toggleRowSelection={(e) => toggleRowSelection(e.detail)}
+        on:selectAllInGroup={selectAllInGroup}
+        on:clearSelections={clearSelections}
+      />
+    {:else if activeTab === 'manpower-report'}
+      <ManpowerReportTab 
+        data={manpowerReportData}
+        isLoading={isManpowerReportLoading}
+        {selectedDate}
+        on:refresh={loadManpowerReportData}
+        on:attendanceMarked={handleAttendanceMarked}
+        on:bulkAttendanceMarked={handleBulkAttendanceMarked}
+        on:stageReassigned={handleStageReassigned}
+        on:export={handleManpowerExport}
+      />
+    {:else if activeTab === 'draft-report'}
+      <DraftReportTab 
+        draftReportData={draftReportData}
+        draftManpowerReportData={draftManpowerReportData}
+        isLoading={isDraftReportLoading}
+        {selectedDate}
+        on:submit={handleSubmitReporting}
+      />
+    {:else if activeTab === 'report'}
+      <ReportTab 
+        reportData={reportData}
+        isLoading={isReportLoading}
+        {stageCode}
+        {selectedDate}
+        {expandedReportGroups}
+        on:refresh={loadReportData}
+        on:generateExcel={generateReportExcel}
+        on:generatePDF={generateReportPDF}
+        on:toggleGroup={(e) => toggleReportGroup(e.detail)}
+      />
+    {/if}
+  </div>
+
+  <FloatingThemeToggle />
+
+  <!-- Modals -->
+  <PlanWorkModal 
+    isOpen={showPlanModal}
+    work={selectedWorkForPlanning}
+    {selectedDate}
+    {stageCode}
+    on:close={handlePlanModalClose}
+    on:save={handlePlanSave}
+  />
+
+  <ReportWorkModal 
+    isOpen={showReportModal}
+    plannedWork={selectedWorkForReporting}
+    on:close={handleReportModalClose}
+    on:save={handleReportSave}
+  />
+
+  <MultiSkillReportModal 
+    isOpen={showMultiReportModal}
+    selectedWorks={selectedWorksForMultiReport}
+    on:close={handleMultiReportModalClose}
+    on:save={handleMultiSkillReportSave}
+  />
+
+  <ViewWorkHistoryModal 
+    isOpen={showViewWorkHistoryModal}
+    work={selectedWorkForHistory}
+    {stageCode}
+    on:close={handleViewWorkHistoryClose}
+  />
+
+  <RemoveWorkModal 
+    isOpen={showRemoveWorkModal}
+    work={selectedWorkForRemoval}
+    {stageCode}
+    on:close={handleRemoveWorkClose}
+    on:removed={handleWorkRemoved}
+  />
+
+  <AddWorkModal 
+    isOpen={showAddWorkModal}
+    workOrders={availableWorkOrdersForAdd}
+    {stageCode}
+    on:close={handleAddWorkClose}
+    on:added={handleWorkAdded}
+  />
+
+  <EntryModal 
+    isOpen={showEntryModal}
+    waitingWorkOrders={waitingWorkOrdersForEntry}
+    bind:selectedWorkOrder={selectedWorkOrderForEntry}
+    isLoading={isEntryModalLoading}
+    progressMessage={entryProgressMessage}
+    {stageCode}
+    on:close={handleEntryModalClose}
+    on:confirm={handleEntryConfirm}
+  />
+
+  <ExitModal 
+    isOpen={showExitModal}
+    availableWorkOrders={availableWorkOrdersForExit}
+    bind:selectedWorkOrder={selectedWorkOrderForExit}
+    bind:exitDate
+    isLoading={isExitModalLoading}
+    progressMessage={exitProgressMessage}
+    {stageCode}
+    on:close={handleExitModalClose}
+    on:confirm={handleExitConfirm}
+  />
+</div>
+
+<!-- Sidebar Overlay -->
+{#if showSidebar}
+  <div class="fixed inset-0 z-50">
+    <button
+      type="button"
+      aria-label="Close sidebar overlay"
+      class="fixed inset-0 bg-black bg-opacity-40 z-40"
+      on:click={handleSidebarToggle}
+      tabindex="0"
+      on:keydown={(e) => (e.key === 'Enter' || e.key === ' ') && handleSidebarToggle()}
+      style="cursor: pointer; border: none; width: 100%; height: 100%; position: fixed; left: 0; top: 0; background-color: rgba(0,0,0,0.4);"
+    ></button>
+    <div class="fixed left-0 top-0 h-full w-64 z-50 theme-bg-primary shadow-lg">
+      <Sidebar {menus} />
+    </div>
+  </div>
+{/if}
+
+<style>
+  :global(.on-time) { background-color: #dcfce7 !important; }
+  :global(.dark .on-time) { background-color: #14532d !important; }
+  :global(.slight-delay) { background-color: #fef3c7 !important; }
+  :global(.dark .slight-delay) { background-color: #713f12 !important; }
+  :global(.moderate-delay) { background-color: #fed7aa !important; }
+  :global(.dark .moderate-delay) { background-color: #7c2d12 !important; }
+  :global(.significant-delay) { background-color: #fecaca !important; }
+  :global(.dark .significant-delay) { background-color: #7f1d1d !important; }
+  :global(.lost-time) { background-color: #fef3c7 !important; }
+  :global(.dark .lost-time) { background-color: #713f12 !important; }
+</style>
+

@@ -8,15 +8,10 @@
 
   const dispatch = createEventDispatcher();
 
+  import { formatDateTimeLocal } from '$lib/utils/formatDate';
+  
   function handleClose() {
     dispatch('close');
-  }
-
-  function formatTime(dateString: string): string {
-    return new Date(dateString).toLocaleTimeString('en-GB', { 
-      hour: '2-digit', 
-      minute: '2-digit' 
-    });
   }
 </script>
 
@@ -73,7 +68,7 @@
                        </div>
                        <div style="display: flex; justify-content: space-between; align-items: center;">
                          <span class="theme-text-secondary text-sm">
-                           {formatTime(journey.reassigned_at)}
+                           {formatDateTimeLocal(journey.reassigned_at)}
                          </span>
                          <span class="theme-text-secondary text-sm">
                            by {journey.reassigned_by}

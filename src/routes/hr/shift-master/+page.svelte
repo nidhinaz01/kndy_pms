@@ -1,8 +1,10 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { goto } from '$app/navigation';
   import DataTablePage from '$lib/templates/DataTablePage.svelte';
   import ShiftsTable from '$lib/components/hr/ShiftsTable.svelte';
   import ShiftBreaksTable from '$lib/components/hr/ShiftBreaksTable.svelte';
+  import StageShiftMatrix from '$lib/components/hr/StageShiftMatrix.svelte';
   import AddShiftModal from '$lib/components/hr/AddShiftModal.svelte';
   import AddShiftBreakModal from '$lib/components/hr/AddShiftBreakModal.svelte';
   import ShiftsHeader from '$lib/components/hr/ShiftsHeader.svelte';
@@ -27,7 +29,8 @@
   // Tab configuration with icons
   const tabs = [
     { id: 'shifts', label: 'Shifts', icon: '⏰' },
-    { id: 'shift-breaks', label: 'Shift Breaks', icon: '☕' }
+    { id: 'shift-breaks', label: 'Shift Breaks', icon: '☕' },
+    { id: 'stage-shift', label: 'Stage - Shift', icon: '🔗' }
   ];
 
   function handleRowSelect(row: any) {
@@ -63,9 +66,10 @@
     try {
       if (activeTab === 'shifts') {
         tableData = await fetchAllShifts();
-      } else {
+      } else if (activeTab === 'shift-breaks') {
         tableData = await fetchAllShiftBreaks();
       }
+      // stage-shift tab doesn't need tableData
     } catch (error) {
       console.error('Error loading data:', error);
       tableData = [];
@@ -148,7 +152,13 @@
         </nav>
 
         <!-- Logo -->
-        <img src="/favicon.png" alt="Company Logo" class="h-8 w-auto" />
+        <button
+          on:click={() => goto('/dashboard')}
+          class="flex items-center hover:opacity-80 transition-opacity cursor-pointer"
+          aria-label="Go to dashboard"
+        >
+          <img src="/favicon.png" alt="Company Logo" class="h-8 w-auto" />
+        </button>
       </div>
     </div>
   </div>
@@ -209,6 +219,9 @@
           />
         {/if}
       </div>
+    {:else if activeTab === 'stage-shift'}
+      <!-- Stage - Shift Matrix -->
+      <StageShiftMatrix />
     {/if}
   </div>
 </div>

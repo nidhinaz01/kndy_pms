@@ -2,15 +2,14 @@
 	import Sidebar from '$lib/components/navigation/Sidebar.svelte';
 	import FloatingThemeToggle from '$lib/components/common/FloatingThemeToggle.svelte';
 	import { onMount } from 'svelte';
+	import { fetchUserMenus } from '$lib/services/menuService';
 
 	let menus: any[] = [];
 
 	onMount(async () => {
-		const user = localStorage.getItem('user');
-		if (user) {
-			const userData = JSON.parse(user);
-			// Use the menu structure from database
-			menus = userData.menus || [];
+		const username = typeof window !== 'undefined' ? localStorage.getItem('username') : null;
+		if (username) {
+			menus = await fetchUserMenus(username);
 		}
 	});
 </script>

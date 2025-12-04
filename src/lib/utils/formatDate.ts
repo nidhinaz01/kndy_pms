@@ -142,6 +142,92 @@ export function formatDateTimeLocal(dateString: string | Date): string {
   }
 }
 
+/**
+ * Format date with weekday (e.g., "Mon, Nov 17, 2024")
+ */
+export function formatDateWithWeekday(dateString: string | Date): string {
+  if (!dateString) return '-';
+  
+  try {
+    const date = parseUTCDate(dateString);
+    if (isNaN(date.getTime())) return '-';
+    
+    return date.toLocaleDateString('en-US', { 
+      weekday: 'short', 
+      year: 'numeric', 
+      month: 'short', 
+      day: 'numeric' 
+    });
+  } catch (error) {
+    console.error('Error formatting date with weekday:', error);
+    return '-';
+  }
+}
+
+/**
+ * Format date in UK format (e.g., "17 Nov 2024")
+ */
+export function formatDateGB(dateString: string | Date): string {
+  if (!dateString) return '-';
+  
+  try {
+    const date = parseUTCDate(dateString);
+    if (isNaN(date.getTime())) return '-';
+    
+    return date.toLocaleDateString('en-GB', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric'
+    });
+  } catch (error) {
+    console.error('Error formatting date GB:', error);
+    return '-';
+  }
+}
+
+/**
+ * Format date and time together (e.g., "Mon, Nov 17 09:00")
+ */
+export function formatDateTime(dateStr: string | Date, timeStr?: string): string {
+  if (!dateStr) return '-';
+  
+  try {
+    let dateTime: Date;
+    
+    if (timeStr) {
+      // Combine date and time for proper formatting
+      const dateStrOnly = dateStr instanceof Date 
+        ? dateStr.toISOString().split('T')[0] 
+        : dateStr.split('T')[0];
+      dateTime = parseUTCDate(dateStrOnly + 'T' + timeStr);
+    } else {
+      dateTime = parseUTCDate(dateStr);
+    }
+    
+    if (isNaN(dateTime.getTime())) return '-';
+    
+    const datePart = dateTime.toLocaleDateString('en-US', { 
+      weekday: 'short', 
+      month: 'short', 
+      day: 'numeric' 
+    });
+    
+    if (timeStr) {
+      const timePart = dateTime.toLocaleTimeString('en-US', {
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false
+      });
+      return `${datePart} ${timePart}`;
+    }
+    
+    return datePart;
+  } catch (error) {
+    console.error('Error formatting date time:', error);
+    return '-';
+  }
+}
+
 export function formatTimeBreakdown(breakdown: any[], isUniform: boolean, totalMinutes?: number): string {
   if (!breakdown || breakdown.length === 0) {
     return 'No time standards available';

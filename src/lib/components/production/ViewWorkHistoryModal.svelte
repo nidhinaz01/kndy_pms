@@ -4,10 +4,14 @@
   import { X, Clock, User, Calendar } from 'lucide-svelte';
   import { supabase } from '$lib/supabaseClient';
   import { formatDateTimeLocal } from '$lib/utils/formatDate';
+  import { formatTime } from '$lib/utils/timeFormatUtils';
+  
+  // Use shared utility
+  const formatDateTime = formatDateTimeLocal;
 
   export let isOpen: boolean = false;
   export let work: any = null;
-  export let stageCode: string = 'P1S2';
+  export let stageCode: string = '';
 
   const dispatch = createEventDispatcher();
 
@@ -128,12 +132,6 @@
     dispatch('close');
   }
 
-  function formatTime(hours: number): string {
-    if (!hours) return '0h 0m';
-    const h = Math.floor(hours);
-    const m = Math.round((hours - h) * 60);
-    return `${h}h ${m}m`;
-  }
 
   function formatDate(dateStr: string): string {
     if (!dateStr) return 'N/A';
@@ -145,11 +143,6 @@
     }
   }
 
-  function formatDateTime(dateTimeStr: string): string {
-    if (!dateTimeStr) return 'N/A';
-    // Use formatDateTimeLocal which handles UTC conversion properly
-    return formatDateTimeLocal(dateTimeStr);
-  }
 </script>
 
 {#if isOpen}

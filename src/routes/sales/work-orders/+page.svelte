@@ -308,6 +308,14 @@
     console.log('Modal close event received');
     showCreateWorkOrderModal = false;
   }}
+  on:workOrderCreated={async () => {
+    console.log('Work order created, refreshing data...');
+    // Refresh work orders list and statistics
+    await Promise.all([
+      loadWorkOrders(),
+      loadStatistics()
+    ]);
+  }}
 />
 
 

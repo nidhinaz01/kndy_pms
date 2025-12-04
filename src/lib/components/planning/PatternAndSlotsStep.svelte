@@ -1,6 +1,7 @@
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
   import Button from '$lib/components/common/Button.svelte';
+  import { timeToMinutes } from '$lib/utils/planWorkUtils';
 
   export let shifts: any[] = [];
   export let shiftDistribution: any[] = [];
@@ -165,11 +166,6 @@
     }
 
     return { isValid: true };
-  }
-
-  function timeToMinutes(timeString: string): number {
-    const [hours, minutes] = timeString.split(':').map(Number);
-    return hours * 60 + minutes;
   }
 
   function handleNext() {

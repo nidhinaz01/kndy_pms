@@ -1,7 +1,9 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
   import { createEventDispatcher } from 'svelte';
   import Button from '$lib/components/common/Button.svelte';
   import { saveShift } from '$lib/api/hrShiftMaster';
+  import { saveShiftStages, fetchAllPlantStages } from '$lib/api/hrShiftStageMaster';
   import type { HrShiftMasterFormData } from '$lib/api/hrShiftMaster';
 
   export let showAddModal: boolean;
@@ -16,8 +18,36 @@
     end_time: ''
   };
 
+  let selectedStages: string[] = [];
+  let availableStages: string[] = [];
+  let isLoadingStages = false;
+
   let isSubmitting = false;
   let errorMessage = '';
+
+  onMount(async () => {
+    await loadStages();
+  });
+
+  async function loadStages() {
+    isLoadingStages = true;
+    try {
+      availableStages = await fetchAllPlantStages();
+    } catch (error) {
+      console.error('Error loading stages:', error);
+      errorMessage = 'Failed to load stages. Please refresh the page.';
+    } finally {
+      isLoadingStages = false;
+    }
+  }
+
+  function toggleStage(stageCode: string) {
+    if (selectedStages.includes(stageCode)) {
+      selectedStages = selectedStages.filter(s => s !== stageCode);
+    } else {
+      selectedStages = [...selectedStages, stageCode];
+    }
+  }
 
   function resetForm() {
     formData = {
@@ -26,6 +56,7 @@
       start_time: '',
       end_time: ''
     };
+    selectedStages = [];
     errorMessage = '';
   }
 
@@ -39,7 +70,14 @@
     errorMessage = '';
 
     try {
+      // First, create the shift
       const newShift = await saveShift(formData);
+      
+      // Then, save the stage associations
+      if (selectedStages.length > 0) {
+        await saveShiftStages(newShift.shift_code, selectedStages);
+      }
+      
       alert('Shift created successfully!');
       resetForm();
       dispatch('itemAdded', newShift);

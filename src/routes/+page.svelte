@@ -274,12 +274,12 @@
 <div class="flex items-center justify-center min-h-screen theme-bg-secondary">
 	<div class="theme-bg-primary theme-text-primary theme-border border p-8 rounded shadow-md w-full max-w-sm text-center">
 		<!-- Logo -->
-		<div class="w-32 h-32 mx-auto mb-6 flex items-center justify-center">
+		<div class="w-32 h-32 mx-auto mb-0 flex items-center justify-center">
 			<img src="/favicon.png" alt="Company Logo" class="w-full h-full object-contain" />
 		</div>
 
 		<!-- Title -->
-		<h2 class="text-2xl font-bold mb-4 theme-text-primary">Login for Production</h2>
+		<h2 class="text-4xl font-bold mb-4 theme-text-primary" style="letter-spacing: 0.5em;">K A I P L</h2>
 
 		<!-- Username Input -->
 		<input

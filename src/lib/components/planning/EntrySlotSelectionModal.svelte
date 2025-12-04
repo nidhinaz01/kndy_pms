@@ -6,6 +6,9 @@
   import { theme } from '$lib/stores/theme';
   import { getActivePlanForDate, getCurrentActivePlan } from '$lib/api/productionPlanService';
   import { fetchHolidays } from '$lib/api/planning';
+  import { calculateDateBefore, isHoliday } from '$lib/utils/dateCalculationUtils';
+  import { formatDateWithWeekday } from '$lib/utils/formatDate';
+  import { fetchShiftsForStage } from '$lib/api/hrShiftStageMaster';
 
   const dispatch = createEventDispatcher();
 
@@ -17,6 +20,7 @@
     date: string;
     shift: string;
     time: string;
+    shift_code?: string; // Add shift_code to track which shift this slot belongs to
     available_entries: number;
     max_entries: number;
   }> = [];
@@ -24,10 +28,11 @@
   let isLoading = true;
   let error = '';
   let holidays: any[] = [];
+  let allowedShiftCodes: string[] = []; // Shifts allowed for the first stage
 
   // Lead time configuration
-  let chassisLeadTime = 4;
-  let documentLeadTime = 2;
+  let chassisLeadTime = 5;
+  let documentLeadTime = 3;
   let finalInspectionLeadTime = 1;
   let deliveryLeadTime = 1;
 
@@ -35,6 +40,38 @@
     try {
       isLoading = true;
       error = '';
+
+      // First, get the first stage for this work order type
+      let firstStageCode: string | null = null;
+      if (workOrder?.wo_model) {
+        const { data: stageOrderData } = await supabase
+          .from('plan_wo_stage_order')
+          .select('plant_stage')
+          .eq('wo_type_name', workOrder.wo_model)
+          .order('order_no', { ascending: true })
+          .limit(1)
+          .maybeSingle();
+
+        if (stageOrderData) {
+          firstStageCode = stageOrderData.plant_stage;
+        }
+      }
+
+      // Get allowed shifts for the first stage
+      if (firstStageCode) {
+        try {
+          allowedShiftCodes = await fetchShiftsForStage(firstStageCode);
+          console.log(`Allowed shifts for first stage ${firstStageCode}:`, allowedShiftCodes);
+        } catch (err) {
+          console.error('Error fetching shifts for stage:', err);
+          // If we can't get shifts, allow all (fallback behavior)
+          allowedShiftCodes = [];
+        }
+      } else {
+        // If no first stage found, allow all shifts (fallback)
+        allowedShiftCodes = [];
+        console.warn('No first stage found for work order model:', workOrder?.wo_model);
+      }
 
       // Get tomorrow's date
       const tomorrow = new Date();
@@ -55,32 +92,66 @@
         throw new Error(`Error loading slots: ${slotsError.message}`);
       }
 
+      // Build a map of shift_id to shift_code from shift_distribution
+      const shiftIdToCodeMap = new Map<number, string>();
+      if (slotsData && slotsData.length > 0) {
+        // Collect all unique shift_ids from all plans
+        const allShiftIds = new Set<number>();
+        slotsData.forEach(plan => {
+          if (plan.shift_distribution && Array.isArray(plan.shift_distribution)) {
+            plan.shift_distribution.forEach((dist: any) => {
+              if (dist.shift_id) {
+                allShiftIds.add(dist.shift_id);
+              }
+            });
+          }
+        });
+
+        // Fetch all shift codes in one query
+        if (allShiftIds.size > 0) {
+          const { data: shiftsData } = await supabase
+            .from('hr_shift_master')
+            .select('shift_id, shift_code')
+            .in('shift_id', Array.from(allShiftIds))
+            .eq('is_active', true)
+            .eq('is_deleted', false);
+
+          if (shiftsData) {
+            shiftsData.forEach(shift => {
+              shiftIdToCodeMap.set(shift.shift_id, shift.shift_code);
+            });
+          }
+        }
+      }
+
       // Process slots data from entry_slots JSONB
       availableSlots = [];
       console.log('Raw slots data:', slotsData);
       console.log('Tomorrow string:', tomorrowStr);
       console.log('Number of plans found:', slotsData?.length || 0);
+      console.log('Allowed shift codes:', allowedShiftCodes);
+      console.log('Shift ID to Code map:', shiftIdToCodeMap);
       
              (slotsData || []).forEach(plan => {
-         console.log('Processing plan:', plan);
-         
-         // Generate dates for the plan period, but start from tomorrow
-         const startDate = new Date(Math.max(new Date(plan.from_date).getTime(), tomorrow.getTime()));
-         const endDate = new Date(plan.to_date);
-         const currentDate = new Date(startDate);
-         
-         // Track the actual production day number (starting from 1)
-         let productionDayNumber = 1;
-         
-         while (currentDate <= endDate) {
-           const currentDateStr = currentDate.toISOString().split('T')[0];
-           
-           // Process entry_slots JSONB - handle both old array structure and new object structure
-           if (plan.entry_slots) {
-             console.log('Entry slots structure:', plan.entry_slots);
-             
-                           // Handle new object structure with pattern_time_slots
-              if (plan.entry_slots.pattern_time_slots && Array.isArray(plan.entry_slots.pattern_time_slots)) {
+        console.log('Processing plan:', plan);
+        
+        // Generate dates for the plan period, but start from tomorrow
+        const startDate = new Date(Math.max(new Date(plan.from_date).getTime(), tomorrow.getTime()));
+        const endDate = new Date(plan.to_date);
+        const currentDate = new Date(startDate);
+        
+        // Track the actual production day number (starting from 1)
+        let productionDayNumber = 1;
+        
+        while (currentDate <= endDate) {
+          const currentDateStr = currentDate.toISOString().split('T')[0];
+          
+          // Process entry_slots JSONB - handle both old array structure and new object structure
+          if (plan.entry_slots) {
+            console.log('Entry slots structure:', plan.entry_slots);
+            
+                          // Handle new object structure with pattern_time_slots
+             if (plan.entry_slots.pattern_time_slots && Array.isArray(plan.entry_slots.pattern_time_slots)) {
                 // Find the pattern day that corresponds to this production day
                 // Pattern repeats: Day 1, Day 2, Day 1, Day 2, etc.
                 const patternDayIndex = ((productionDayNumber - 1) % plan.entry_slots.pattern_time_slots.length);
@@ -89,42 +160,60 @@
                 if (daySlot && daySlot.slots && Array.isArray(daySlot.slots)) {
                   daySlot.slots.forEach((slot: any) => {
                     console.log('Pattern slot:', slot);
-                    availableSlots.push({
-                      date: currentDateStr,
-                      shift: `Day ${productionDayNumber}`,
-                      time: slot.entry_time || '09:00',
-                      available_entries: daySlot.vehicles || 1,
-                      max_entries: daySlot.vehicles || 1
-                    });
+                    // For pattern_time_slots, we need to determine shift from shift_distribution
+                    // Use the first shift from shift_distribution as default, or check time against shift schedules
+                    let slotShiftCode: string | undefined = undefined;
+                    if (plan.shift_distribution && Array.isArray(plan.shift_distribution) && plan.shift_distribution.length > 0) {
+                      const firstShiftId = plan.shift_distribution[0].shift_id;
+                      slotShiftCode = shiftIdToCodeMap.get(firstShiftId);
+                    }
+                    
+                    // Only add slot if it belongs to an allowed shift (or if no restrictions)
+                    if (allowedShiftCodes.length === 0 || (slotShiftCode && allowedShiftCodes.includes(slotShiftCode))) {
+                      availableSlots.push({
+                        date: currentDateStr,
+                        shift: `Day ${productionDayNumber}`,
+                        time: slot.entry_time || '09:00',
+                        shift_code: slotShiftCode,
+                        available_entries: daySlot.vehicles || 1,
+                        max_entries: daySlot.vehicles || 1
+                      });
+                    }
                   });
                 }
               }
                          // Handle old array structure (fallback)
-             else if (Array.isArray(plan.entry_slots)) {
-               plan.entry_slots.forEach((shiftSlot: any) => {
-                 if (shiftSlot.slots && Array.isArray(shiftSlot.slots)) {
-                   shiftSlot.slots.forEach((slot: any) => {
-                     console.log('Shift slot:', slot);
-                     availableSlots.push({
-                       date: currentDateStr,
-                       shift: `Day ${productionDayNumber}`,
-                       time: slot.entry_time || '09:00',
-                       available_entries: 1,
-                       max_entries: 1
-                     });
-                   });
-                 }
-               });
-             }
-           }
-           
-           // Increment production day number for next iteration
-           productionDayNumber++;
-           
-           // Move to next day
-           currentDate.setDate(currentDate.getDate() + 1);
-        }
-      });
+            else if (Array.isArray(plan.entry_slots)) {
+              plan.entry_slots.forEach((shiftSlot: any) => {
+                if (shiftSlot.slots && Array.isArray(shiftSlot.slots)) {
+                  const shiftCode = shiftIdToCodeMap.get(shiftSlot.shift_id);
+                  
+                  // Only process slots for allowed shifts (or if no restrictions)
+                  if (allowedShiftCodes.length === 0 || (shiftCode && allowedShiftCodes.includes(shiftCode))) {
+                    shiftSlot.slots.forEach((slot: any) => {
+                      console.log('Shift slot:', slot);
+                      availableSlots.push({
+                        date: currentDateStr,
+                        shift: `Day ${productionDayNumber}`,
+                        time: slot.entry_time || '09:00',
+                        shift_code: shiftCode,
+                        available_entries: 1,
+                        max_entries: 1
+                      });
+                    });
+                  }
+                }
+              });
+            }
+          }
+          
+          // Increment production day number for next iteration
+          productionDayNumber++;
+          
+          // Move to next day
+          currentDate.setDate(currentDate.getDate() + 1);
+       }
+     });
       
       console.log('Processed available slots:', availableSlots);
 
@@ -206,7 +295,7 @@
         .single();
 
       if (chassisData?.de_value) {
-        chassisLeadTime = parseInt(chassisData.de_value) || 4;
+        chassisLeadTime = parseInt(chassisData.de_value) || 5;
       }
 
       // Load document lead time
@@ -217,7 +306,7 @@
         .single();
 
       if (documentData?.de_value) {
-        documentLeadTime = parseInt(documentData.de_value) || 2;
+        documentLeadTime = parseInt(documentData.de_value) || 3;
       }
 
       // Load final inspection lead time
@@ -260,8 +349,8 @@
 
     // Calculate dates
     const productionEntryDate = selectedSlot.date;
-    const documentReleaseDate = calculateDateBefore(productionEntryDate, documentLeadTime);
-    const chassisArrivalDate = calculateDateBefore(productionEntryDate, chassisLeadTime);
+    const documentReleaseDate = calculateDateBefore(productionEntryDate, documentLeadTime, holidays);
+    const chassisArrivalDate = calculateDateBefore(productionEntryDate, chassisLeadTime, holidays);
 
     // Dispatch event with calculated dates
     dispatch('confirm', {
@@ -279,26 +368,6 @@
     closeModal();
   }
 
-  function isHoliday(dateStr: string): boolean {
-    return holidays.some(holiday => holiday.dt_value === dateStr);
-  }
-
-  function calculateDateBefore(startDate: string, daysBefore: number): string {
-    const date = new Date(startDate);
-    let daysAdded = 0;
-    let currentDate = new Date(date);
-
-    while (daysAdded < daysBefore) {
-      currentDate.setDate(currentDate.getDate() - 1);
-      
-      // Skip holidays (using the existing holiday table)
-      if (!isHoliday(currentDate.toISOString().split('T')[0])) {
-        daysAdded++;
-      }
-    }
-
-    return currentDate.toISOString().split('T')[0];
-  }
 
   function closeModal() {
     selectedSlot = null;
@@ -306,15 +375,6 @@
     dispatch('close');
   }
 
-  function formatDate(dateStr: string): string {
-    const date = new Date(dateStr);
-    return date.toLocaleDateString('en-US', { 
-      weekday: 'short', 
-      year: 'numeric', 
-      month: 'short', 
-      day: 'numeric' 
-    });
-  }
 
   // Load slots when modal opens
   $: if (showModal && workOrder) {
@@ -418,7 +478,7 @@
                   on:keydown={(e) => (e.key === 'Enter' || e.key === ' ') && selectSlot(slot)}
                   role="button"
                   tabindex="0"
-                  aria-label="Select entry slot for {formatDate(slot.date)} at {slot.time}"
+                  aria-label="Select entry slot for {formatDateWithWeekday(slot.date)} at {slot.time}"
                 >
                   <div class="flex items-center justify-between">
                     <div class="flex items-center space-x-4">
@@ -426,7 +486,7 @@
                       <div class="flex items-center space-x-2">
                         <Calendar class="w-5 h-5 {currentTheme === 'dark' ? 'text-gray-400' : 'text-gray-500'}" />
                         <div class="flex flex-col">
-                          <span class="font-medium {currentTheme === 'dark' ? 'text-white' : 'text-gray-900'}">{formatDate(slot.date)}</span>
+                          <span class="font-medium {currentTheme === 'dark' ? 'text-white' : 'text-gray-900'}">{formatDateWithWeekday(slot.date)}</span>
                           <div class="flex items-center space-x-1">
                             <Clock class="w-4 h-4 {currentTheme === 'dark' ? 'text-gray-400' : 'text-gray-500'}" />
                             <span class="text-sm {currentTheme === 'dark' ? 'text-gray-300' : 'text-gray-600'}">{slot.time}</span>
@@ -436,7 +496,7 @@
                       <!-- Combined DateTime Badge -->
                       <div class="px-3 py-2 rounded-lg border {currentTheme === 'dark' ? 'bg-blue-900/30 border-blue-700 text-blue-200' : 'bg-blue-50 border-blue-200 text-blue-800'}">
                         <div class="text-sm font-medium">
-                          {formatDate(slot.date)} at {slot.time}
+                          {formatDateWithWeekday(slot.date)} at {slot.time}
                         </div>
                         <div class="text-xs {currentTheme === 'dark' ? 'text-blue-300' : 'text-blue-600'}">
                           {slot.shift}

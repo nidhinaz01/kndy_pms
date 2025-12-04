@@ -7,6 +7,12 @@
   export let lostTimeReasons: LostTimeReason[] = [];
   export let totalLostTimeMinutes: number = 0;
   export let employeeSalary: number = 0;
+  export let workers: Array<{ emp_id: string; emp_name: string; salary: number }> = [];
+  
+  // Debug: log workers when they change
+  $: if (workers.length > 0) {
+    console.log('LostTimeBreakdown - Workers loaded:', workers.map(w => ({ name: w.emp_name, salary: w.salary })));
+  }
 
   const dispatch = createEventDispatcher();
 
@@ -16,6 +22,7 @@
     reasonId: number;
     minutes: number;
     cost: number;
+    workerCosts: { [workerId: string]: number };
   }> = [];
   
   // Force reactivity trigger
@@ -28,7 +35,8 @@
       id: `item_${Date.now()}`,
       reasonId: 0,
       minutes: 0,
-      cost: 0
+      cost: 0,
+      workerCosts: {}
     };
     breakdownItems = [...breakdownItems, newItem];
     breakdownItemsVersion++;
@@ -77,14 +85,34 @@
           const isPayable = reason?.p_head === 'Payable';
           
           if (isPayable && updatedItem.minutes > 0) {
-            // Calculate salary per minute: salary / (days in month) / 480
             const currentDate = new Date();
             const daysInMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0).getDate();
-            const salaryPerMinute = (employeeSalary || 0) / daysInMonth / 480;
-            updatedItem.cost = updatedItem.minutes * salaryPerMinute;
+            
+            // Calculate cost per worker and total
+            let totalCost = 0;
+            const workerCosts: { [workerId: string]: number } = {};
+            
+            if (workers.length > 0) {
+              // Calculate per worker
+              workers.forEach(worker => {
+                const salaryPerMinute = (worker.salary || 0) / daysInMonth / 480;
+                const workerCost = updatedItem.minutes * salaryPerMinute;
+                workerCosts[worker.emp_id] = Math.round(workerCost * 100) / 100;
+                totalCost += workerCost;
+              });
+              updatedItem.cost = Math.round(totalCost * 100) / 100; // Round to 2 decimal places
+            } else {
+              // Fallback to average salary if no workers provided
+              const salaryPerMinute = (employeeSalary || 0) / daysInMonth / 480;
+              const cost = updatedItem.minutes * salaryPerMinute;
+              updatedItem.cost = Math.round(cost * 100) / 100;
+            }
+            
+            updatedItem.workerCosts = workerCosts;
           } else {
             // Non-payable lost time has zero cost
             updatedItem.cost = 0;
+            updatedItem.workerCosts = {};
           }
         }
         
@@ -113,13 +141,23 @@
     // Debug logging
     console.log(`LostTimeBreakdown - Employee Salary: ₹${employeeSalary}, Total Cost: ₹${totalCost}`);
     
+    // Calculate per-worker totals
+    const workerTotals: { [workerId: string]: number } = {};
+    workers.forEach(worker => {
+      workerTotals[worker.emp_id] = breakdownItems.reduce((sum, item) => {
+        return sum + (item.workerCosts?.[worker.emp_id] || 0);
+      }, 0);
+    });
+    
     dispatch('totalsChanged', {
       totalMinutes,
       totalCost,
+      workerTotals, // Include per-worker totals
       breakdownItems: breakdownItems.map(item => ({
         reasonId: item.reasonId,
         minutes: item.minutes,
-        cost: item.cost
+        cost: item.cost,
+        workerCosts: item.workerCosts || {} // Include per-worker costs for each breakdown item
       }))
     });
   }
@@ -171,15 +209,37 @@
           if (isPayable) {
             const currentDate = new Date();
             const daysInMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0).getDate();
-            const salaryPerMinute = employeeSalary / daysInMonth / 480;
-            const newCost = item.minutes * salaryPerMinute;
             
-            // Only update if cost actually changed
-            if (Math.abs(newCost - item.cost) > 0.01) {
-              return { ...item, cost: newCost };
+            // Calculate cost per worker and total
+            let totalCost = 0;
+            const workerCosts: { [workerId: string]: number } = {};
+            
+            if (workers.length > 0) {
+              // Calculate per worker
+              workers.forEach(worker => {
+                const salaryPerMinute = (worker.salary || 0) / daysInMonth / 480;
+                const workerCost = item.minutes * salaryPerMinute;
+                workerCosts[worker.emp_id] = Math.round(workerCost * 100) / 100;
+                totalCost += workerCost;
+              });
+              const newCost = Math.round(totalCost * 100) / 100;
+              
+              // Only update if cost actually changed
+              if (Math.abs(newCost - item.cost) > 0.01 || JSON.stringify(workerCosts) !== JSON.stringify(item.workerCosts || {})) {
+                return { ...item, cost: newCost, workerCosts };
+              }
+            } else {
+              // Fallback to average salary
+              const salaryPerMinute = employeeSalary / daysInMonth / 480;
+              const calculatedCost = item.minutes * salaryPerMinute;
+              const newCost = Math.round(calculatedCost * 100) / 100;
+              
+              if (Math.abs(newCost - item.cost) > 0.01) {
+                return { ...item, cost: newCost };
+              }
             }
           } else if (item.cost !== 0) {
-            return { ...item, cost: 0 };
+            return { ...item, cost: 0, workerCosts: {} };
           }
         }
         
@@ -277,7 +337,7 @@
           />
         </div>
         
-        <div class="w-20 text-sm theme-text-primary">
+        <div class="w-20 text-sm text-orange-900 dark:text-orange-100 font-medium">
           ₹{item.cost.toFixed(2)}
         </div>
         
@@ -299,10 +359,25 @@
   {/if}
 
   {#if breakdownItems.length > 0}
-    <div class="border-t border-orange-200 dark:border-orange-700 pt-3">
-      <div class="flex justify-between text-sm font-medium">
-        <span class="theme-text-primary">Total Allocated:</span>
-        <span class="theme-text-primary">
+    <div class="border-t border-orange-200 dark:border-orange-700 pt-3 space-y-3">
+      <!-- Per-worker totals -->
+      {#if workers.length > 0}
+        <div class="space-y-2">
+          <div class="text-sm font-medium text-orange-800 dark:text-orange-200">Per Worker Lost Time Amount:</div>
+          {#each workers as worker}
+            {@const workerTotal = breakdownItems.reduce((sum, item) => sum + (item.workerCosts?.[worker.emp_id] || 0), 0)}
+            <div class="flex justify-between text-sm text-orange-900 dark:text-orange-100 bg-orange-100 dark:bg-orange-900/30 px-3 py-2 rounded">
+              <span class="font-medium">{worker.emp_name}:</span>
+              <span class="font-semibold">₹{workerTotal.toFixed(2)}</span>
+            </div>
+          {/each}
+        </div>
+      {/if}
+      
+      <!-- Total -->
+      <div class="flex justify-between text-sm font-medium pt-2 border-t border-orange-200 dark:border-orange-700">
+        <span class="text-orange-800 dark:text-orange-200 font-semibold">Total Allocated:</span>
+        <span class="text-orange-900 dark:text-orange-100 font-semibold">
           {breakdownItems.reduce((sum, item) => sum + item.minutes, 0)} minutes | 
           ₹{breakdownItems.reduce((sum, item) => sum + item.cost, 0).toFixed(2)}
         </span>

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { goto } from '$app/navigation';
   import DataTablePage from '$lib/templates/DataTablePage.svelte';
   import WorksTable from '$lib/components/standards/WorksTable.svelte';
   import AddWorkModal from '$lib/components/standards/AddWorkModal.svelte';
@@ -297,7 +298,13 @@
         </nav>
 
         <!-- Favicon -->
-        <img src="/favicon.png" alt="Company Logo" class="h-8 w-auto" />
+        <button
+          on:click={() => goto('/dashboard')}
+          class="flex items-center hover:opacity-80 transition-opacity cursor-pointer"
+          aria-label="Go to dashboard"
+        >
+          <img src="/favicon.png" alt="Company Logo" class="h-8 w-auto" />
+        </button>
       </div>
     </div>
   </div>

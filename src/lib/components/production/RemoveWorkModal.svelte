@@ -7,7 +7,7 @@
 
   export let isOpen: boolean = false;
   export let work: any = null;
-  export let stageCode: string = 'P1S2';
+  export let stageCode: string = '';
 
   const dispatch = createEventDispatcher();
 

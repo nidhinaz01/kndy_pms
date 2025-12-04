@@ -9,6 +9,7 @@
   import { fetchUserMenus } from '$lib/services/menuService';
   import {
     fetchWorkOrderStageOrders, 
+    checkWorkOrderStageOrderExists,
     saveWorkOrderStageOrder, 
     updateWorkOrderStageOrder, 
     deleteWorkOrderStageOrder, 
@@ -32,6 +33,7 @@
   let selectedTypeName = '';
   let selectedPlantStage = '';
   let orderNo = 1;
+  let leadTimeHours = 1;
   let editingId: number | null = null;
 
   // Sidebar state
@@ -113,6 +115,7 @@
     selectedTypeName = '';
     selectedPlantStage = '';
     orderNo = 1;
+    leadTimeHours = 1;
     editingId = null;
   }
 
@@ -121,6 +124,7 @@
     selectedTypeName = stageOrder.wo_type_name;
     selectedPlantStage = stageOrder.plant_stage;
     orderNo = stageOrder.order_no;
+    leadTimeHours = stageOrder.lead_time_hours || 1;
     editingId = stageOrder.id;
   }
 
@@ -129,7 +133,9 @@
     selectedTypeName = '';
     selectedPlantStage = '';
     orderNo = 1;
+    leadTimeHours = 1;
     editingId = null;
+    message = ''; // Clear any error messages when closing modal
   }
 
   async function handleSave() {
@@ -148,6 +154,11 @@
       return;
     }
 
+    if (leadTimeHours <= 0) {
+      showMessage('Lead time hours must be greater than 0', 'error');
+      return;
+    }
+
     try {
       isLoading = true;
 
@@ -156,18 +167,23 @@
         await updateWorkOrderStageOrder(editingId, {
           wo_type_name: selectedTypeName,
           plant_stage: selectedPlantStage,
-          order_no: orderNo
+          order_no: orderNo,
+          lead_time_hours: leadTimeHours
         });
         showMessage('Stage order updated successfully');
       } else {
-        // Check if stage order already exists for this type and plant stage combination
-        const existing = stageOrders.find(order => 
-          order.wo_type_name === selectedTypeName && 
-          order.plant_stage === selectedPlantStage
-        );
-        
-        if (existing) {
-          showMessage(`Stage order already exists for ${selectedTypeName} - ${selectedPlantStage} combination`, 'error');
+        // Check if stage order already exists in database for this type and plant stage combination
+        try {
+          const exists = await checkWorkOrderStageOrderExists(selectedTypeName, selectedPlantStage);
+          
+          if (exists) {
+            showMessage(`Stage order already exists for ${selectedTypeName} - ${selectedPlantStage} combination`, 'error');
+            isLoading = false;
+            return;
+          }
+        } catch (checkError) {
+          showMessage(`Error checking for existing stage order: ${(checkError as Error)?.message || 'Unknown error'}`, 'error');
+          isLoading = false;
           return;
         }
 
@@ -175,7 +191,8 @@
         await saveWorkOrderStageOrder({
           wo_type_name: selectedTypeName,
           plant_stage: selectedPlantStage,
-          order_no: orderNo
+          order_no: orderNo,
+          lead_time_hours: leadTimeHours
         });
         showMessage('Stage order created successfully');
       }
@@ -183,7 +200,8 @@
       isEditMode = false;
       await Promise.all([loadWorkOrderTypes(), loadPlantStages(), loadStageOrders()]);
     } catch (error) {
-      showMessage('Error saving stage order', 'error');
+      const errorMessage = (error as Error)?.message || 'Unknown error';
+      showMessage(`Error saving stage order: ${errorMessage}`, 'error');
       console.error('Error saving stage order:', error);
     } finally {
       isLoading = false;
@@ -303,6 +321,9 @@
                             Plant Stage
                           </th>
                           <th class="px-4 py-2 text-center font-medium theme-text-primary border theme-border">
+                            Lead Time (Hours)
+                          </th>
+                          <th class="px-4 py-2 text-center font-medium theme-text-primary border theme-border">
                             Actions
                           </th>
                         </tr>
@@ -315,6 +336,9 @@
                             </td>
                             <td class="px-4 py-2 theme-text-primary border theme-border">
                               {order.plant_stage}
+                            </td>
+                            <td class="px-4 py-2 text-center theme-text-primary border theme-border">
+                              {order.lead_time_hours || 1}
                             </td>
                             <td class="px-4 py-2 text-center border theme-border">
                               <div class="flex items-center justify-center gap-2">
@@ -366,6 +390,13 @@
               <h2 class="text-xl font-semibold theme-text-primary mb-6">
                 {editingId ? 'Edit Stage Order' : 'Add New Stage Order'}
               </h2>
+
+              <!-- Error Message Display inside Modal -->
+              {#if message && isEditMode}
+                <div class="mb-4 p-3 rounded-lg {messageType === 'success' ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200' : 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'}">
+                  {message}
+                </div>
+              {/if}
 
               <form on:submit|preventDefault={handleSave} class="space-y-6">
                 <!-- Work Order Type -->
@@ -446,6 +477,25 @@
                   </p>
                 </div>
 
+                <!-- Lead Time Hours -->
+                <div>
+                  <label for="leadTimeHours" class="block text-sm font-medium theme-text-primary mb-2">
+                    Lead Time (Hours) *
+                  </label>
+                  <input
+                    id="leadTimeHours"
+                    type="number"
+                    bind:value={leadTimeHours}
+                    min="1"
+                    class="w-full px-3 py-2 border theme-border rounded-lg theme-bg-primary theme-text-primary focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    placeholder="Enter lead time in hours"
+                    required
+                  />
+                  <p class="mt-1 text-xs theme-text-secondary">
+                    The number of working hours required to complete this stage
+                  </p>
+                </div>
+
                 <!-- Action Buttons -->
                 <div class="flex justify-end gap-3 pt-4">
                   <Button
@@ -458,6 +508,7 @@
                   <Button
                     variant="primary"
                     disabled={isLoading}
+                    on:click={handleSave}
                   >
                     {#if isLoading}
                       <svg class="animate-spin -ml-1 mr-3 h-5 w-5 text-white inline" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">

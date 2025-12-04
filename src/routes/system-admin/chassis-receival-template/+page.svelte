@@ -1,11 +1,16 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { supabase } from '$lib/supabaseClient';
+  import { goto } from '$app/navigation';
   import Sidebar from '$lib/components/navigation/Sidebar.svelte';
   import FloatingThemeToggle from '$lib/components/common/FloatingThemeToggle.svelte';
   import Button from '$lib/components/common/Button.svelte';
   import { fetchUserMenus } from '$lib/services/menuService';
   import { formatDateLocal } from '$lib/utils/formatDate';
+  import { loadTemplates, saveTemplate as saveTemplateService, copyTemplate as copyTemplateService, deleteTemplate as deleteTemplateService, saveField as saveFieldService, deleteField as deleteFieldService } from './services/templateService';
+  import TemplateModal from './components/TemplateModal.svelte';
+  import FieldModal from './components/FieldModal.svelte';
+  import CopyTemplateModal from './components/CopyTemplateModal.svelte';
+  import ViewTemplateModal from './components/ViewTemplateModal.svelte';
 
   // Page state
   let isLoading = true;
@@ -59,27 +64,12 @@
     if (username) {
       menus = await fetchUserMenus(username);
     }
-    await loadTemplates();
+    await loadTemplatesData();
     isLoading = false;
   });
 
-  async function loadTemplates() {
-    try {
-      const { data, error } = await supabase
-        .from('sys_chassis_receival_templates')
-        .select(`
-          *,
-          sys_chassis_receival_template_fields(*)
-        `)
-        .eq('is_deleted', false)
-        .order('created_dt', { ascending: false });
-
-      if (error) throw error;
-      templates = data || [];
-    } catch (error) {
-      console.error('Error loading templates:', error);
-      templates = [];
-    }
+  async function loadTemplatesData() {
+    templates = await loadTemplates();
   }
 
   function handleCreateTemplate() {
@@ -116,41 +106,11 @@
     showViewModal = true;
   }
 
-  async function saveTemplate() {
+  async function handleSaveTemplate() {
     try {
       const username = typeof window !== 'undefined' ? localStorage.getItem('username') : null;
-      const now = new Date().toISOString();
-
-      if (selectedTemplate) {
-        // Update existing template
-        const { error } = await supabase
-          .from('sys_chassis_receival_templates')
-          .update({
-            template_name: templateForm.template_name,
-            template_description: templateForm.template_description,
-            is_active: templateForm.is_active,
-            modified_by: username,
-            modified_dt: now
-          })
-          .eq('id', selectedTemplate.id);
-
-        if (error) throw error;
-      } else {
-        // Create new template
-        const { error } = await supabase
-          .from('sys_chassis_receival_templates')
-          .insert({
-            template_name: templateForm.template_name,
-            template_description: templateForm.template_description,
-            is_active: templateForm.is_active,
-            created_by: username,
-            created_dt: now
-          });
-
-        if (error) throw error;
-      }
-
-      await loadTemplates();
+      await saveTemplateService(templateForm, !!selectedTemplate, selectedTemplate?.id, username);
+      await loadTemplatesData();
       showTemplateModal = false;
       selectedTemplate = null;
     } catch (error) {
@@ -159,49 +119,11 @@
     }
   }
 
-  async function copyTemplate() {
+  async function handleSaveCopyTemplate() {
     try {
       const username = typeof window !== 'undefined' ? localStorage.getItem('username') : null;
-      const now = new Date().toISOString();
-
-      // Create new template
-      const { data: newTemplate, error: templateError } = await supabase
-        .from('sys_chassis_receival_templates')
-        .insert({
-          template_name: copyForm.template_name,
-          template_description: copyForm.template_description,
-          is_active: true,
-          created_by: username,
-          created_dt: now
-        })
-        .select()
-        .single();
-
-      if (templateError) throw templateError;
-
-      // Copy fields from original template
-      if (selectedTemplate.sys_chassis_receival_template_fields?.length > 0) {
-        const fieldsToInsert = selectedTemplate.sys_chassis_receival_template_fields.map((field: any) => ({
-          template_id: newTemplate.id,
-          field_name: field.field_name,
-          field_label: field.field_label,
-          field_type: field.field_type,
-          is_required: field.is_required,
-          field_order: field.field_order,
-          validation_rules: field.validation_rules,
-          dropdown_options: field.dropdown_options,
-          created_by: username,
-          created_dt: now
-        }));
-
-        const { error: fieldsError } = await supabase
-          .from('sys_chassis_receival_template_fields')
-          .insert(fieldsToInsert);
-
-        if (fieldsError) throw fieldsError;
-      }
-
-      await loadTemplates();
+      await copyTemplateService(selectedTemplate, copyForm.template_name, copyForm.template_description, username);
+      await loadTemplatesData();
       showCopyModal = false;
       selectedTemplate = null;
     } catch (error) {
@@ -210,27 +132,15 @@
     }
   }
 
-  async function deleteTemplate(template: any) {
+  async function handleDeleteTemplate(template: any) {
     if (!confirm(`Are you sure you want to delete "${template.template_name}"?`)) {
       return;
     }
 
     try {
       const username = typeof window !== 'undefined' ? localStorage.getItem('username') : null;
-      const now = new Date().toISOString();
-
-      const { error } = await supabase
-        .from('sys_chassis_receival_templates')
-        .update({
-          is_deleted: true,
-          modified_by: username,
-          modified_dt: now
-        })
-        .eq('id', template.id);
-
-      if (error) throw error;
-
-      await loadTemplates();
+      await deleteTemplateService(template.id, username);
+      await loadTemplatesData();
     } catch (error) {
       console.error('Error deleting template:', error);
       alert('Error deleting template. Please try again.');
@@ -251,29 +161,11 @@
     showFieldModal = true;
   }
 
-  async function saveField() {
+  async function handleSaveField() {
     try {
       const username = typeof window !== 'undefined' ? localStorage.getItem('username') : null;
-      const now = new Date().toISOString();
-
-      const { error } = await supabase
-        .from('sys_chassis_receival_template_fields')
-        .insert({
-          template_id: selectedTemplate.id,
-          field_name: fieldForm.field_name,
-          field_label: fieldForm.field_label,
-          field_type: fieldForm.field_type,
-          is_required: fieldForm.is_required,
-          field_order: fieldForm.field_order,
-          validation_rules: fieldForm.validation_rules,
-          dropdown_options: fieldForm.dropdown_options,
-          created_by: username,
-          created_dt: now
-        });
-
-      if (error) throw error;
-
-      await loadTemplates();
+      await saveFieldService(selectedTemplate.id, fieldForm, username);
+      await loadTemplatesData();
       showFieldModal = false;
       selectedTemplate = null;
     } catch (error) {
@@ -282,27 +174,15 @@
     }
   }
 
-  async function deleteField(field: any) {
+  async function handleDeleteField(field: any) {
     if (!confirm(`Are you sure you want to delete this field?`)) {
       return;
     }
 
     try {
       const username = typeof window !== 'undefined' ? localStorage.getItem('username') : null;
-      const now = new Date().toISOString();
-
-      const { error } = await supabase
-        .from('sys_chassis_receival_template_fields')
-        .update({
-          is_deleted: true,
-          modified_by: username,
-          modified_dt: now
-        })
-        .eq('id', field.id);
-
-      if (error) throw error;
-
-      await loadTemplates();
+      await deleteFieldService(field.id, username);
+      await loadTemplatesData();
     } catch (error) {
       console.error('Error deleting field:', error);
       alert('Error deleting field. Please try again.');
@@ -356,7 +236,13 @@
         <h1 class="text-2xl font-bold theme-text-primary">Chassis Receival Templates</h1>
 
         <!-- Favicon -->
-        <img src="/favicon.png" alt="Company Logo" class="h-8 w-auto" />
+        <button
+          on:click={() => goto('/dashboard')}
+          class="flex items-center hover:opacity-80 transition-opacity cursor-pointer"
+          aria-label="Go to dashboard"
+        >
+          <img src="/favicon.png" alt="Company Logo" class="h-8 w-auto" />
+        </button>
       </div>
     </div>
   </div>
@@ -429,7 +315,7 @@
                         <Button variant="secondary" size="sm" on:click={() => handleCopyTemplate(template)}>
                           Copy
                         </Button>
-                        <Button variant="danger" size="sm" on:click={() => deleteTemplate(template)}>
+                        <Button variant="danger" size="sm" on:click={() => handleDeleteTemplate(template)}>
                           Delete
                         </Button>
                       </div>
@@ -446,312 +332,54 @@
 </div>
 
 <!-- Template Modal -->
-{#if showTemplateModal}
-  <div class="fixed inset-0 z-50 flex items-center justify-center">
-    <div class="fixed inset-0 bg-black bg-opacity-50" 
-         role="button" 
-         tabindex="0"
-         on:click={() => showTemplateModal = false}
-         on:keydown={(e) => (e.key === 'Escape' || e.key === 'Enter' || e.key === ' ') && (showTemplateModal = false)}></div>
-    <div class="relative theme-bg-primary rounded-lg shadow-xl p-6 w-full max-w-md mx-4">
-      <h2 class="text-xl font-bold theme-text-primary mb-4">
-        {selectedTemplate ? 'Edit Template' : 'Create New Template'}
-      </h2>
-      
-      <form on:submit|preventDefault={saveTemplate}>
-        <div class="mb-4">
-          <label for="template-name" class="block text-sm font-medium theme-text-primary mb-2">Template Name</label>
-          <input
-            id="template-name"
-            type="text"
-            bind:value={templateForm.template_name}
-            required
-            class="w-full px-3 py-2 border theme-border rounded-lg theme-bg-primary theme-text-primary focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-          />
-        </div>
-        
-        <div class="mb-4">
-          <label for="template-description" class="block text-sm font-medium theme-text-primary mb-2">Description</label>
-          <textarea
-            id="template-description"
-            bind:value={templateForm.template_description}
-            rows="3"
-            class="w-full px-3 py-2 border theme-border rounded-lg theme-bg-primary theme-text-primary focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-          ></textarea>
-        </div>
-        
-        <div class="mb-6">
-          <label class="flex items-center">
-            <input
-              type="checkbox"
-              bind:checked={templateForm.is_active}
-              class="mr-2"
-            />
-            <span class="text-sm theme-text-primary">Active</span>
-          </label>
-        </div>
-        
-        <div class="flex justify-end gap-2">
-          <Button variant="secondary" size="md" on:click={() => showTemplateModal = false}>
-            Cancel
-          </Button>
-          <Button variant="primary" size="md" on:click={() => saveTemplate()}>
-            {selectedTemplate ? 'Update' : 'Create'}
-          </Button>
-        </div>
-      </form>
-    </div>
-  </div>
-{/if}
+<TemplateModal
+  bind:showModal={showTemplateModal}
+  bind:templateForm
+  isEditMode={!!selectedTemplate}
+  onSave={handleSaveTemplate}
+  onCancel={() => {
+    showTemplateModal = false;
+    selectedTemplate = null;
+  }}
+/>
 
 <!-- Copy Template Modal -->
-{#if showCopyModal}
-  <div class="fixed inset-0 z-50 flex items-center justify-center">
-    <div class="fixed inset-0 bg-black bg-opacity-50" 
-         role="button" 
-         tabindex="0"
-         on:click={() => showCopyModal = false}
-         on:keydown={(e) => (e.key === 'Escape' || e.key === 'Enter' || e.key === ' ') && (showCopyModal = false)}></div>
-    <div class="relative theme-bg-primary rounded-lg shadow-xl p-6 w-full max-w-md mx-4">
-      <h2 class="text-xl font-bold theme-text-primary mb-4">Copy Template</h2>
-      
-      <form on:submit|preventDefault={copyTemplate}>
-        <div class="mb-4">
-          <label for="copy-template-name" class="block text-sm font-medium theme-text-primary mb-2">New Template Name</label>
-          <input
-            id="copy-template-name"
-            type="text"
-            bind:value={copyForm.template_name}
-            required
-            class="w-full px-3 py-2 border theme-border rounded-lg theme-bg-primary theme-text-primary focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-          />
-        </div>
-        
-        <div class="mb-6">
-          <label for="copy-template-description" class="block text-sm font-medium theme-text-primary mb-2">Description</label>
-          <textarea
-            id="copy-template-description"
-            bind:value={copyForm.template_description}
-            rows="3"
-            class="w-full px-3 py-2 border theme-border rounded-lg theme-bg-primary theme-text-primary focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-          ></textarea>
-        </div>
-        
-        <div class="flex justify-end gap-2">
-          <Button variant="secondary" size="md" on:click={() => showCopyModal = false}>
-            Cancel
-          </Button>
-          <Button variant="primary" size="md" on:click={() => copyTemplate()}>
-            Copy Template
-          </Button>
-        </div>
-      </form>
-    </div>
-  </div>
-{/if}
+<CopyTemplateModal
+  bind:showModal={showCopyModal}
+  bind:copyForm
+  onSave={handleSaveCopyTemplate}
+  onCancel={() => {
+    showCopyModal = false;
+    selectedTemplate = null;
+  }}
+/>
 
 <!-- Field Modal -->
-{#if showFieldModal}
-  <div class="fixed inset-0 z-50 flex items-center justify-center">
-    <div class="fixed inset-0 bg-black bg-opacity-50" 
-         role="button" 
-         tabindex="0"
-         on:click={() => showFieldModal = false}
-         on:keydown={(e) => (e.key === 'Escape' || e.key === 'Enter' || e.key === ' ') && (showFieldModal = false)}></div>
-    <div class="relative theme-bg-primary rounded-lg shadow-xl p-6 w-full max-w-lg mx-4">
-      <h2 class="text-xl font-bold theme-text-primary mb-4">Add Field to Template</h2>
-      
-      <form on:submit|preventDefault={saveField}>
-        <div class="grid grid-cols-2 gap-4 mb-4">
-          <div>
-            <label for="field-name" class="block text-sm font-medium theme-text-primary mb-2">Field Name</label>
-            <input
-              id="field-name"
-              type="text"
-              bind:value={fieldForm.field_name}
-              required
-              class="w-full px-3 py-2 border theme-border rounded-lg theme-bg-primary theme-text-primary focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            />
-          </div>
-          
-          <div>
-            <label for="field-label" class="block text-sm font-medium theme-text-primary mb-2">Field Label</label>
-            <input
-              id="field-label"
-              type="text"
-              bind:value={fieldForm.field_label}
-              required
-              class="w-full px-3 py-2 border theme-border rounded-lg theme-bg-primary theme-text-primary focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            />
-          </div>
-        </div>
-        
-        <div class="grid grid-cols-2 gap-4 mb-4">
-          <div>
-            <label for="field-type" class="block text-sm font-medium theme-text-primary mb-2">Field Type</label>
-            <select
-              id="field-type"
-              bind:value={fieldForm.field_type}
-              class="w-full px-3 py-2 border theme-border rounded-lg theme-bg-primary theme-text-primary focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            >
-              {#each fieldTypes as type}
-                <option value={type.value}>{type.label}</option>
-              {/each}
-            </select>
-          </div>
-          
-          <div>
-            <label for="field-order" class="block text-sm font-medium theme-text-primary mb-2">Field Order</label>
-            <input
-              id="field-order"
-              type="number"
-              bind:value={fieldForm.field_order}
-              min="1"
-              class="w-full px-3 py-2 border theme-border rounded-lg theme-bg-primary theme-text-primary focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            />
-          </div>
-        </div>
-        
-        <div class="mb-4">
-          <div class="flex items-center">
-            <input
-              id="field-required"
-              type="checkbox"
-              bind:checked={fieldForm.is_required}
-              class="mr-2"
-            />
-            <label for="field-required" class="text-sm theme-text-primary">Required Field</label>
-          </div>
-        </div>
-        
-        {#if fieldForm.field_type === 'dropdown'}
-          <div class="mb-4">
-            <label for="dropdown-options" class="block text-sm font-medium theme-text-primary mb-2">Dropdown Options</label>
-            <textarea
-              id="dropdown-options"
-              bind:value={fieldForm.dropdown_options.options}
-              placeholder="Enter options separated by commas"
-              rows="3"
-              class="w-full px-3 py-2 border theme-border rounded-lg theme-bg-primary theme-text-primary focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            ></textarea>
-          </div>
-        {/if}
-        
-        <div class="flex justify-end gap-2">
-          <Button variant="secondary" size="md" on:click={() => showFieldModal = false}>
-            Cancel
-          </Button>
-          <Button variant="primary" size="md" on:click={() => saveField()}>
-            Add Field
-          </Button>
-        </div>
-      </form>
-    </div>
-  </div>
-{/if}
+<FieldModal
+  bind:showModal={showFieldModal}
+  bind:fieldForm
+  {fieldTypes}
+  onSave={handleSaveField}
+  onCancel={() => {
+    showFieldModal = false;
+    selectedTemplate = null;
+  }}
+/>
 
 <!-- View Template Modal -->
-{#if showViewModal}
-  <div class="fixed inset-0 z-50 flex items-center justify-center">
-    <div class="fixed inset-0 bg-black bg-opacity-50" 
-         role="button" 
-         tabindex="0"
-         on:click={() => showViewModal = false}
-         on:keydown={(e) => (e.key === 'Escape' || e.key === 'Enter' || e.key === ' ') && (showViewModal = false)}></div>
-    <div class="relative theme-bg-primary rounded-lg shadow-xl p-6 w-full max-w-4xl mx-4 max-h-[90vh] overflow-y-auto">
-      <h2 class="text-xl font-bold theme-text-primary mb-4">Template Details</h2>
-      
-      <!-- Template Information -->
-      <div class="mb-6 p-4 theme-bg-secondary border theme-border rounded-lg">
-        <h3 class="text-lg font-semibold theme-text-primary mb-2">{selectedTemplate?.template_name}</h3>
-        <p class="text-sm theme-text-secondary mb-2">
-          <strong>Description:</strong> {selectedTemplate?.template_description || 'No description'}
-        </p>
-        <p class="text-sm theme-text-secondary mb-2">
-          <strong>Status:</strong> 
-          <span class="px-2 py-1 rounded-full text-xs {selectedTemplate?.is_active ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200' : 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200'}">
-            {selectedTemplate?.is_active ? 'Active' : 'Inactive'}
-          </span>
-        </p>
-        <p class="text-sm theme-text-secondary">
-          <strong>Created:</strong> {selectedTemplate?.created_dt ? formatDateLocal(selectedTemplate.created_dt) : 'N/A'}
-        </p>
-      </div>
-
-      <!-- Template Fields -->
-      <div class="mb-6">
-        <h3 class="text-lg font-semibold theme-text-primary mb-4">
-          Template Fields ({selectedTemplate?.sys_chassis_receival_template_fields?.length || 0})
-        </h3>
-        
-        {#if selectedTemplate?.sys_chassis_receival_template_fields?.length > 0}
-          <div class="space-y-4">
-            {#each selectedTemplate.sys_chassis_receival_template_fields.sort((a: any, b: any) => (a as any).field_order - (b as any).field_order) as field}
-              <div class="p-4 border theme-border rounded-lg">
-                <div class="flex justify-between items-start mb-2">
-                  <div>
-                    <h4 class="font-medium theme-text-primary">{field.field_label}</h4>
-                    <p class="text-sm theme-text-secondary">Field Name: {field.field_name}</p>
-                  </div>
-                  <div class="flex items-center gap-2">
-                    <span class="px-2 py-1 bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200 text-xs rounded">
-                      {field.field_type}
-                    </span>
-                    {#if field.is_required}
-                      <span class="px-2 py-1 bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200 text-xs rounded">
-                        Required
-                      </span>
-                    {/if}
-                  </div>
-                </div>
-                
-                <div class="text-sm theme-text-secondary">
-                  <p><strong>Order:</strong> {field.field_order}</p>
-                  
-                  {#if field.field_type === 'dropdown' && field.dropdown_options?.options?.length > 0}
-                    <p class="mt-2"><strong>Options:</strong></p>
-                    <ul class="list-disc list-inside ml-4">
-                      {#each field.dropdown_options.options as option}
-                        <li>{option}</li>
-                      {/each}
-                    </ul>
-                  {/if}
-                  
-                  {#if field.validation_rules && Object.keys(field.validation_rules).length > 0}
-                    <p class="mt-2"><strong>Validation Rules:</strong></p>
-                    <ul class="list-disc list-inside ml-4">
-                      {#each Object.entries(field.validation_rules) as [key, value]}
-                        <li>{key}: {value}</li>
-                      {/each}
-                    </ul>
-                  {/if}
-                </div>
-              </div>
-            {/each}
-          </div>
-        {:else}
-          <div class="text-center py-8">
-            <p class="text-gray-500 dark:text-gray-400">No fields added to this template yet.</p>
-            <p class="text-sm text-gray-400 dark:text-gray-500 mt-2">Click "Add Field" to start building the template.</p>
-          </div>
-        {/if}
-      </div>
-
-      <!-- Action Buttons -->
-      <div class="flex justify-end gap-2">
-        <Button variant="secondary" size="md" on:click={() => showViewModal = false}>
-          Close
-        </Button>
-        <Button variant="primary" size="md" on:click={() => {
-          showViewModal = false;
-          handleAddField(selectedTemplate);
-        }}>
-          Add Field
-        </Button>
-      </div>
-    </div>
-  </div>
-{/if}
+<ViewTemplateModal
+  bind:showModal={showViewModal}
+  bind:selectedTemplate
+  onAddField={() => {
+    showViewModal = false;
+    handleAddField(selectedTemplate);
+  }}
+  onClose={() => {
+    showViewModal = false;
+    selectedTemplate = null;
+  }}
+  onDeleteField={handleDeleteField}
+/>
 
 <!-- Floating Theme Toggle -->
 <FloatingThemeToggle />

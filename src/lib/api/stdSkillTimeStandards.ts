@@ -239,19 +239,15 @@ export async function saveBulkSkillTimeStandards(wsm_id: number, timeStandards: 
 }
 
 // Calculate total time for a work-skill mapping
+// Uses database function for efficient calculation
 export async function calculateTotalTimeForMapping(wsm_id: number): Promise<number> {
   try {
-    const { data, error } = await supabase
-      .from('std_skill_time_standards')
-      .select('standard_time_minutes')
-      .eq('wsm_id', wsm_id)
-      .eq('is_deleted', false)
-      .eq('is_active', true);
+    const { data, error } = await supabase.rpc('calculate_total_time_for_mapping', {
+      p_wsm_id: wsm_id
+    });
 
     if (error) throw error;
-    
-    const totalMinutes = data?.reduce((sum, item) => sum + item.standard_time_minutes, 0) || 0;
-    return totalMinutes;
+    return data as number;
   } catch (error) {
     console.error('Error calculating total time for mapping:', error);
     throw error;
@@ -259,76 +255,35 @@ export async function calculateTotalTimeForMapping(wsm_id: number): Promise<numb
 }
 
 // Get detailed time breakdown for a derivative work
+// Uses database function for efficient calculation with grouping and aggregation
 export async function getDetailedTimeBreakdownForDerivativeWork(derived_sw_code: string): Promise<{
   totalMinutes: number;
   breakdown: any[];
   isUniform: boolean;
 }> {
   try {
-    // First get all work-skill mappings for this derivative work
-    const { data: mappings, error: mappingsError } = await supabase
-      .from('std_work_skill_mapping')
-      .select('wsm_id')
-      .eq('derived_sw_code', derived_sw_code)
-      .eq('is_deleted', false)
-      .eq('is_active', true);
-
-    if (mappingsError) throw mappingsError;
-    
-    if (!mappings || mappings.length === 0) {
-      return {
-        totalMinutes: 0,
-        breakdown: [],
-        isUniform: false
-      };
-    }
-
-    // Get all skill time standards for these mappings
-    const wsmIds = mappings.map(m => m.wsm_id);
-    const { data: timeStandards, error: timeError } = await supabase
-      .from('std_skill_time_standards')
-      .select('standard_time_minutes, skill_order')
-      .in('wsm_id', wsmIds)
-      .eq('is_deleted', false)
-      .eq('is_active', true)
-      .order('skill_order');
-
-    if (timeError) throw timeError;
-
-    if (!timeStandards || timeStandards.length === 0) {
-      return {
-        totalMinutes: 0,
-        breakdown: [],
-        isUniform: false
-      };
-    }
-
-    // Group skills by order and calculate total time
-    const orderGroups = new Map<number, number>();
-    timeStandards.forEach(item => {
-      const order = item.skill_order;
-      const currentMax = orderGroups.get(order) || 0;
-      orderGroups.set(order, Math.max(currentMax, item.standard_time_minutes));
+    const { data, error } = await supabase.rpc('get_time_breakdown_for_derivative_work', {
+      p_derived_sw_code: derived_sw_code
     });
-    
-    // Sum the maximum time for each order (sequential skills)
-    const totalMinutes = Array.from(orderGroups.values()).reduce((sum, maxTime) => sum + maxTime, 0);
-    
-    // Check if all mappings have the same total time (uniform)
-    const isUniform = true;
 
-    // Create breakdown with skill details
-    const breakdown = timeStandards.map(item => ({
-      skillOrder: item.skill_order,
-      minutes: item.standard_time_minutes,
-      skillName: `Skill ${item.skill_order}`,
-      manpowerRequired: 1
-    }));
+    if (error) throw error;
+
+    // Database function returns JSONB, which Supabase converts to object
+    const result = data as {
+      totalMinutes: number;
+      breakdown: Array<{
+        skillOrder: number;
+        minutes: number;
+        skillName: string;
+        manpowerRequired: number;
+      }>;
+      isUniform: boolean;
+    };
 
     return {
-      totalMinutes,
-      breakdown,
-      isUniform
+      totalMinutes: result.totalMinutes,
+      breakdown: result.breakdown || [],
+      isUniform: result.isUniform
     };
   } catch (error) {
     console.error('Error getting detailed time breakdown for derivative work:', error);

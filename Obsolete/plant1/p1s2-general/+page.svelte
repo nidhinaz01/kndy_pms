@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { goto } from '$app/navigation';
   import { supabase } from '$lib/supabaseClient';
   import Sidebar from '$lib/components/navigation/Sidebar.svelte';
   import FloatingThemeToggle from '$lib/components/common/FloatingThemeToggle.svelte';
@@ -17,6 +18,8 @@
   import { calculateWorkingDays } from '$lib/api/holidays';
   import type { ProductionEmployee, ProductionWork } from '$lib/api/production';
   import { formatDateTimeLocal, formatDateLocal, parseUTCDate } from '$lib/utils/formatDate';
+  import { formatTimeVerbose, formatTimeFromMinutes } from '$lib/utils/timeFormatUtils';
+  import { calculateBreakTimeInMinutes } from '$lib/utils/breakTimeUtils';
   import * as XLSX from 'xlsx';
   import { exportToCSV } from '$lib/utils/exportUtils';
 
@@ -1763,46 +1766,9 @@
     }
   }
 
-  // Calculate break time in minutes that overlaps with a time range
+  // Use shared utility for break time calculation
   function calculateBreakTimeInRange(fromTime: string, toTime: string): number {
-    if (!fromTime || !toTime || shiftBreakTimes.length === 0) {
-      return 0;
-    }
-
-    try {
-      const plannedStart = new Date(`2000-01-01T${fromTime}`);
-      let plannedEnd = new Date(`2000-01-01T${toTime}`);
-      
-      if (plannedEnd < plannedStart) {
-        plannedEnd.setDate(plannedEnd.getDate() + 1);
-      }
-
-      let totalBreakMinutes = 0;
-
-      shiftBreakTimes.forEach((breakTime) => {
-        const breakStart = new Date(`2000-01-01T${breakTime.start_time}`);
-        let breakEnd = new Date(`2000-01-01T${breakTime.end_time}`);
-        
-        if (breakEnd < breakStart) {
-          breakEnd.setDate(breakEnd.getDate() + 1);
-        }
-
-        // Calculate overlap between planned time and break time
-        const overlapStart = new Date(Math.max(plannedStart.getTime(), breakStart.getTime()));
-        const overlapEnd = new Date(Math.min(plannedEnd.getTime(), breakEnd.getTime()));
-        
-        if (overlapStart < overlapEnd) {
-          const overlapMs = overlapEnd.getTime() - overlapStart.getTime();
-          const overlapMinutes = overlapMs / (1000 * 60);
-          totalBreakMinutes += overlapMinutes;
-        }
-      });
-
-      return totalBreakMinutes;
-    } catch (error) {
-      console.error('Error calculating break time in range:', error);
-      return 0;
-    }
+    return calculateBreakTimeInMinutes(fromTime, toTime, shiftBreakTimes);
   }
 
   function calculatePlannedHoursFromTimes(fromTime: string, toTime: string): string {
@@ -1834,12 +1800,8 @@
     }
   }
 
-  function formatTime(hours: number): string {
-    if (!hours) return '0 Hr 0 Min';
-    const h = Math.floor(hours);
-    const m = Math.round((hours - h) * 60);
-    return `${h} Hr ${m} Min`;
-  }
+  // Use shared utility for verbose time format
+  const formatTime = formatTimeVerbose;
 
   // Format lost time details for display
   function formatLostTimeDetails(ltDetails: any[] | null): string {
@@ -1886,13 +1848,8 @@
       return;
     }
 
-    // Helper function to format time in minutes to "Xh Ym" format
-    function formatTime(minutes: number): string {
-      if (!minutes || minutes === 0) return '0h 0m';
-      const hours = Math.floor(minutes / 60);
-      const mins = Math.round(minutes % 60);
-      return `${hours}h ${mins}m`;
-    }
+    // Use shared utility for minutes format
+    const formatTimeMinutes = formatTimeFromMinutes;
 
     // Helper function to format skills
     function formatSkills(work: any): string {
@@ -2009,7 +1966,7 @@
             ? formatTime(work.std_vehicle_work_flow.estimated_duration_minutes) 
             : 'N/A',
           work.time_taken 
-            ? formatTime(work.time_taken * 60) 
+            ? formatTimeMinutes(work.time_taken * 60) 
             : '0h 0m',
           work.remaining_time 
             ? formatTime(work.remaining_time * 60) 
@@ -3765,7 +3722,13 @@
         </div>
 
         <!-- Favicon -->
-        <img src="/favicon.png" alt="Company Logo" class="h-8 w-auto" />
+        <button
+          on:click={() => goto('/dashboard')}
+          class="flex items-center hover:opacity-80 transition-opacity cursor-pointer"
+          aria-label="Go to dashboard"
+        >
+          <img src="/favicon.png" alt="Company Logo" class="h-8 w-auto" />
+        </button>
       </div>
     </div>
   </div>

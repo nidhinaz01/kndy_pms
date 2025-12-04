@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { ProductionPlan, ProductionPlanWithTimes } from '$lib/api/planning';
+  import { formatDateGB } from '$lib/utils/formatDate';
 
   export let tableData: ProductionPlanWithTimes[] = [];
   export let expandTable: boolean = false;
@@ -8,18 +9,9 @@
   export let onDeleteRow: (id: number) => void;
   export let onEditRow: (plan: ProductionPlanWithTimes) => void;
 
-  function formatDate(dateString: string): string {
-    const date = new Date(dateString);
-    return date.toLocaleDateString('en-GB', {
-      day: '2-digit',
-      month: 'short',
-      year: 'numeric'
-    });
-  }
-
   function handleDelete(plan: ProductionPlanWithTimes, event: Event) {
     event.stopPropagation();
-    if (confirm(`Are you sure you want to delete the production plan for ${formatDate(plan.dt_wef)}?`)) {
+    if (confirm(`Are you sure you want to delete the production plan for ${formatDateGB(plan.dt_wef)}?`)) {
       onDeleteRow(plan.id);
     }
   }
@@ -94,9 +86,9 @@
                     {/each}
                   </div>
                 </td>
-                <td class="py-3 px-4 theme-text-primary">{formatDate(plan.dt_wef)}</td>
+                <td class="py-3 px-4 theme-text-primary">{formatDateGB(plan.dt_wef)}</td>
                 <td class="py-3 px-4 theme-text-primary">{plan.created_by}</td>
-                <td class="py-3 px-4 theme-text-primary">{formatDate(plan.created_dt)}</td>
+                <td class="py-3 px-4 theme-text-primary">{formatDateGB(plan.created_dt)}</td>
                   <td class="py-3 px-4 text-right">
                     <div class="flex items-center justify-end gap-2">
                       <button

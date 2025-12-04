@@ -228,6 +228,8 @@ export async function fetchWorkOrderTypes(): Promise<string[]> {
 /**
  * Get work order statistics by type based on the 5 key columns
  * wo_model (type_name), wo_date, wo_prdn_start, wo_prdn_end, wo_delivery
+ * 
+ * Uses database function get_work_order_statistics for efficient calculation
  */
 export async function getWorkOrderStatistics(period?: { start: string; end: string }): Promise<{
   typeStats: Array<{
@@ -243,49 +245,24 @@ export async function getWorkOrderStatistics(period?: { start: string; end: stri
   };
 }> {
   try {
-    // First get all work order types
-    const types = await fetchWorkOrderTypes();
-    
-    // Build the query to get work orders with the 5 key columns
-    let query = supabase
-      .from('prdn_wo_details')
-      .select('wo_model, wo_date, wo_prdn_start, wo_prdn_end, wo_delivery');
-
-    // Apply date filter if period is provided
-    if (period) {
-      query = query.gte('wo_date', period.start).lte('wo_date', period.end);
-    }
-
-    const { data, error } = await query;
+    // Call database function instead of fetching all records
+    const { data, error } = await supabase.rpc('get_work_order_statistics', {
+      p_start_date: period?.start || null,
+      p_end_date: period?.end || null
+    });
 
     if (error) {
       console.error('Error fetching work order statistics:', error);
       throw error;
     }
 
-    const workOrders = data || [];
-    const typeStats = types.map(type => {
-      const typeOrders = workOrders.filter(wo => wo.wo_model === type);
-      
-      const ordered = typeOrders.length;
-      const wip = typeOrders.filter(wo => wo.wo_prdn_start && !wo.wo_delivery).length;
-      const delivered = typeOrders.filter(wo => wo.wo_delivery).length;
-
-      return {
-        label: type,
-        ordered,
-        wip,
-        delivered
-      };
-    });
-
-    const totalStats = {
-      ordered: workOrders.length,
-      wip: workOrders.filter(wo => wo.wo_prdn_start && !wo.wo_delivery).length,
-      delivered: workOrders.filter(wo => wo.wo_delivery).length
+    // Database function returns JSONB, which Supabase converts to object
+    const result = data as {
+      typeStats: Array<{ label: string; ordered: number; wip: number; delivered: number }>;
+      totalStats: { ordered: number; wip: number; delivered: number };
     };
 
-    return { typeStats, totalStats };
+    return result;
   } catch (error) {
     console.error('Error in getWorkOrderStatistics:', error);
     throw error;

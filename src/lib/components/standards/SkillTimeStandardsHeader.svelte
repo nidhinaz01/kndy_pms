@@ -1,5 +1,6 @@
 <script lang="ts">
   import Button from '$lib/components/common/Button.svelte';
+  import { goto } from '$app/navigation';
   export let onSidebarToggle: () => void;
   export let onAddItem: () => void;
   export let onImportClick: () => void;
@@ -31,6 +32,12 @@
       </svg>
       Add Time Standard
     </Button>
-    <img src="/favicon.png" alt="Company Logo" class="h-8 w-auto" />
+    <button
+      on:click={() => goto('/dashboard')}
+      class="flex items-center hover:opacity-80 transition-opacity cursor-pointer"
+      aria-label="Go to dashboard"
+    >
+      <img src="/favicon.png" alt="Company Logo" class="h-8 w-auto" />
+    </button>
   </div>
 </div> 

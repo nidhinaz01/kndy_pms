@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { goto } from '$app/navigation';
   export let onSidebarToggle: () => void;
   export let onAddHoliday: () => void;
   export let onImportHolidays: () => void;
@@ -93,6 +94,15 @@
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
       </svg>
       Add Holiday
+    </button>
+    
+    <!-- Favicon -->
+    <button
+      on:click={() => goto('/dashboard')}
+      class="flex items-center hover:opacity-80 transition-opacity cursor-pointer"
+      aria-label="Go to dashboard"
+    >
+      <img src="/favicon.png" alt="Company Logo" class="h-8 w-auto" />
     </button>
   </div>
 </div> 
