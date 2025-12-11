@@ -15,6 +15,8 @@ interface ReportWork {
   completion_status: 'C' | 'NC';
   lt_minutes_total?: number;
   lt_details?: Array<{ lt_minutes: number; lt_reason: string; is_lt_payable: boolean; lt_value: number }>;
+  overtime_minutes?: number | null;
+  overtime_amount?: number | null;
   prdn_work_planning?: any;
   vehicleWorkFlow?: any;
   skillTimeStandard?: any;
@@ -55,8 +57,8 @@ export function generateReportPDF(
     const groupedReportWorks = groupReportWorks(reportWorks);
 
     // Table headers - Report tab columns
-    const headers = ['Work Order', 'PWO Number', 'Work Code', 'Work Name', 'Skill Competency', 'Standard Time', 'Worker', 'SC', 'Time Worked Till Date', 'From Time', 'To Time', 'Hours Worked', 'Total Hours', 'Lost Time', 'Status', 'Reported On'];
-    const colWidths = [22, 22, 24, 50, 28, 22, 35, 18, 25, 18, 18, 20, 20, 20, 20, 30];
+    const headers = ['Work Order', 'PWO Number', 'Work Code', 'Work Name', 'Skill Competency', 'Standard Time', 'Worker', 'SC', 'Time Worked Till Date', 'From Time', 'To Time', 'Hours Worked', 'Total Hours', 'OT Hours', 'Lost Time', 'Status', 'Reported On'];
+    const colWidths = [22, 22, 24, 50, 28, 22, 35, 18, 25, 18, 18, 20, 20, 18, 20, 20, 30];
     const startX = margin;
     let x = startX;
 
@@ -173,6 +175,17 @@ export function generateReportPDF(
         doc.text(totalHours, x, currentY);
         x += colWidths[12];
 
+        // OT Hours
+        const otHours = report.overtime_minutes && report.overtime_minutes > 0 
+          ? formatTime((report.overtime_minutes || 0) / 60)
+          : '-';
+        if (report.overtime_minutes && report.overtime_minutes > 0) {
+          doc.setTextColor(255, 140, 0); // Orange color for OT
+        }
+        doc.text(otHours, x, currentY);
+        doc.setTextColor(0, 0, 0); // Reset to black
+        x += colWidths[13];
+
         // Lost Time
         const lostTime = report.lt_minutes_total ? `${report.lt_minutes_total} min` : '0 min';
         if (report.lt_minutes_total && report.lt_minutes_total > 0) {
@@ -180,19 +193,19 @@ export function generateReportPDF(
         }
         doc.text(lostTime, x, currentY);
         doc.setTextColor(0, 0, 0); // Reset to black
-        x += colWidths[13];
+        x += colWidths[14];
 
         // Status
         const status = report.completion_status === 'C' ? 'Completed' : report.completion_status === 'NC' ? 'Not Completed' : 'Unknown';
         doc.text(status, x, currentY);
-        x += colWidths[14];
+        x += colWidths[15];
 
         // Reported On
         const reportedOn = report.created_dt 
           ? new Date(report.created_dt).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: '2-digit', hour: '2-digit', minute: '2-digit' })
           : 'N/A';
         doc.text(reportedOn, x, currentY);
-        x += colWidths[15];
+        x += colWidths[16];
 
         currentY += lineHeight + 1;
       });

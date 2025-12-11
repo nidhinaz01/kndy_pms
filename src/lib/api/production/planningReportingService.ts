@@ -11,22 +11,64 @@ import { getCurrentUsername, getCurrentTimestamp } from '$lib/utils/userUtils';
 
 /**
  * Create a planning submission
- * Always creates a new submission record (allows multiple submissions per stage-date)
+ * Supports versioning for resubmissions after rejection
  */
 export async function createPlanningSubmission(
   stageCode: string,
   planningDate: string
-): Promise<{ success: boolean; submissionId?: number; error?: string }> {
+): Promise<{ success: boolean; submissionId?: number; version?: number; error?: string }> {
   try {
     const currentUser = getCurrentUsername();
     const now = getCurrentTimestamp();
 
-    // Always create a new submission (unique constraint removed from database)
+    // Check if there's a pending_approval or approved submission (block resubmission in these cases)
+    const { data: activeSubmission } = await supabase
+      .from('prdn_planning_submissions')
+      .select('id, status, version')
+      .eq('stage_code', stageCode)
+      .eq('planning_date', planningDate)
+      .in('status', ['pending_approval', 'approved'])
+      .eq('is_deleted', false)
+      .order('version', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (activeSubmission) {
+      if (activeSubmission.status === 'pending_approval') {
+        return { success: false, error: 'A submission is already pending approval for this stage and date' };
+      }
+      if (activeSubmission.status === 'approved') {
+        return { success: false, error: 'A submission has already been approved for this stage and date' };
+      }
+    }
+
+    // Find the maximum version number for this stage-date combination
+    const { data: maxVersionData, error: maxVersionError } = await supabase
+      .from('prdn_planning_submissions')
+      .select('version')
+      .eq('stage_code', stageCode)
+      .eq('planning_date', planningDate)
+      .eq('is_deleted', false)
+      .order('version', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (maxVersionError && maxVersionError.code !== 'PGRST116') {
+      // PGRST116 = no rows found, which is fine
+      console.error('Error fetching max version:', maxVersionError);
+      throw maxVersionError;
+    }
+
+    // Calculate next version number
+    const nextVersion = maxVersionData?.version ? maxVersionData.version + 1 : 1;
+
+    // Create new submission with incremented version
     const { data, error } = await supabase
       .from('prdn_planning_submissions')
       .insert({
         stage_code: stageCode,
         planning_date: planningDate,
+        version: nextVersion,
         submitted_by: currentUser,
         submitted_dt: now,
         status: 'pending_approval',
@@ -40,7 +82,9 @@ export async function createPlanningSubmission(
 
     if (error) throw error;
 
-    return { success: true, submissionId: data.id };
+    console.log(`Created planning submission v${nextVersion} for ${stageCode} on ${planningDate}`);
+
+    return { success: true, submissionId: data.id, version: nextVersion };
   } catch (error) {
     console.error('Error creating planning submission:', error);
     return { success: false, error: (error as Error).message };
@@ -341,35 +385,64 @@ export async function submitPlanning(
 
 /**
  * Create a reporting submission
+ * Supports versioning for resubmissions after rejection
  */
 export async function createReportingSubmission(
   stageCode: string,
   reportingDate: string
-): Promise<{ success: boolean; submissionId?: number; error?: string }> {
+): Promise<{ success: boolean; submissionId?: number; version?: number; error?: string }> {
   try {
     const currentUser = getCurrentUsername();
     const now = getCurrentTimestamp();
 
-    // Check if submission already exists
-    const { data: existing } = await supabase
+    // Check if there's a pending_approval or approved submission (block resubmission in these cases)
+    const { data: activeSubmission } = await supabase
       .from('prdn_reporting_submissions')
-      .select('id, status')
+      .select('id, status, version')
       .eq('stage_code', stageCode)
       .eq('reporting_date', reportingDate)
+      .in('status', ['pending_approval', 'approved'])
       .eq('is_deleted', false)
+      .order('version', { ascending: false })
+      .limit(1)
       .maybeSingle();
 
-    if (existing) {
-      if (existing.status === 'pending_approval' || existing.status === 'approved') {
-        return { success: false, error: 'A submission already exists for this stage and date' };
+    if (activeSubmission) {
+      if (activeSubmission.status === 'pending_approval') {
+        return { success: false, error: 'A submission is already pending approval for this stage and date' };
+      }
+      if (activeSubmission.status === 'approved') {
+        return { success: false, error: 'A submission has already been approved for this stage and date' };
       }
     }
 
+    // Find the maximum version number for this stage-date combination
+    const { data: maxVersionData, error: maxVersionError } = await supabase
+      .from('prdn_reporting_submissions')
+      .select('version')
+      .eq('stage_code', stageCode)
+      .eq('reporting_date', reportingDate)
+      .eq('is_deleted', false)
+      .order('version', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (maxVersionError && maxVersionError.code !== 'PGRST116') {
+      // PGRST116 = no rows found, which is fine
+      console.error('Error fetching max version:', maxVersionError);
+      throw maxVersionError;
+    }
+
+    // Calculate next version number
+    const nextVersion = maxVersionData?.version ? maxVersionData.version + 1 : 1;
+
+    // Create new submission with incremented version
     const { data, error } = await supabase
       .from('prdn_reporting_submissions')
       .insert({
         stage_code: stageCode,
         reporting_date: reportingDate,
+        version: nextVersion,
         submitted_by: currentUser,
         submitted_dt: now,
         status: 'pending_approval',
@@ -383,7 +456,9 @@ export async function createReportingSubmission(
 
     if (error) throw error;
 
-    return { success: true, submissionId: data.id };
+    console.log(`Created reporting submission v${nextVersion} for ${stageCode} on ${reportingDate}`);
+
+    return { success: true, submissionId: data.id, version: nextVersion };
   } catch (error) {
     console.error('Error creating reporting submission:', error);
     return { success: false, error: (error as Error).message };

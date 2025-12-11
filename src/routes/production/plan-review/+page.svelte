@@ -135,7 +135,7 @@
     try {
       let query = supabase
         .from('prdn_planning_submissions')
-        .select('*')
+        .select('*, version')
         .eq('status', 'pending_approval')
         .eq('is_deleted', false);
       
@@ -144,7 +144,7 @@
         query = query.eq('planning_date', selectedDate);
       }
       
-      const { data, error } = await query.order('submitted_dt', { ascending: false });
+      const { data, error } = await query.order('version', { ascending: false }).order('submitted_dt', { ascending: false });
 
       if (error) throw error;
       pendingSubmissions = data || [];
@@ -161,7 +161,7 @@
     try {
       let query = supabase
         .from('prdn_planning_submissions')
-        .select('*')
+        .select('*, version')
         .eq('status', 'approved')
         .eq('is_deleted', false);
       
@@ -170,7 +170,7 @@
         query = query.eq('planning_date', selectedDate);
       }
       
-      const { data, error } = await query.order('reviewed_dt', { ascending: false });
+      const { data, error } = await query.order('version', { ascending: false }).order('reviewed_dt', { ascending: false });
 
       if (error) throw error;
       approvedSubmissions = data || [];
@@ -604,7 +604,12 @@
                 on:click={() => handleSubmissionSelect(submission)}
                 class="w-full text-left p-3 rounded-lg border theme-border transition-colors {selectedSubmission?.id === submission.id && selectedSubmission?.status === 'pending_approval' ? 'bg-blue-50 dark:bg-blue-900/20 border-blue-300' : 'theme-bg-secondary hover:theme-bg-secondary'}"
               >
-                <div class="font-medium theme-text-primary">{submission.stage_code}</div>
+                <div class="font-medium theme-text-primary">
+                  {submission.stage_code}
+                  {#if submission.version && submission.version > 1}
+                    <span class="text-xs font-normal theme-text-secondary"> (v{submission.version})</span>
+                  {/if}
+                </div>
                 <div class="text-sm theme-text-secondary">{submission.planning_date}</div>
                 <div class="text-xs theme-text-secondary mt-1">
                   By: {submission.submitted_by} | {formatDateTimeLocal(submission.submitted_dt)}
@@ -636,7 +641,12 @@
                 on:click={() => handleApprovedSubmissionSelect(submission)}
                 class="w-full text-left p-3 rounded-lg border theme-border transition-colors {selectedSubmission?.id === submission.id && selectedSubmission?.status === 'approved' ? 'bg-green-50 dark:bg-green-900/20 border-green-300' : 'theme-bg-secondary hover:theme-bg-secondary'}"
               >
-                <div class="font-medium theme-text-primary">{submission.stage_code}</div>
+                <div class="font-medium theme-text-primary">
+                  {submission.stage_code}
+                  {#if submission.version && submission.version > 1}
+                    <span class="text-xs font-normal theme-text-secondary"> (v{submission.version})</span>
+                  {/if}
+                </div>
                 <div class="text-sm theme-text-secondary">{submission.planning_date}</div>
                 <div class="text-xs theme-text-secondary mt-1">
                   Reviewed: {submission.reviewed_by} | {formatDateTimeLocal(submission.reviewed_dt)}
@@ -660,6 +670,9 @@
           <div>
             <h2 class="text-xl font-semibold theme-text-primary">
               {selectedSubmission.status === 'approved' ? 'Approved Plan' : 'Review'}: {selectedSubmission.stage_code} - {selectedSubmission.planning_date}
+              {#if selectedSubmission.version && selectedSubmission.version > 1}
+                <span class="text-sm font-normal theme-text-secondary">(v{selectedSubmission.version})</span>
+              {/if}
             </h2>
             <p class="text-sm theme-text-secondary mt-1">
               {selectedSubmission.status === 'approved' 

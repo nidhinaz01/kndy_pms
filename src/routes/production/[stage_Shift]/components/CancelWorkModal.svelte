@@ -10,10 +10,18 @@
   const dispatch = createEventDispatcher();
 
   let cancellationReason: string = '';
+  let storedWorks: any[] = [];
+
+  // Store works when modal opens to prevent them from being cleared
+  $: if (isOpen && works && works.length > 0) {
+    storedWorks = works;
+    console.log('🔴 CancelWorkModal: Stored works:', storedWorks);
+  }
 
   function handleClose() {
     dispatch('close');
     cancellationReason = '';
+    storedWorks = [];
   }
 
   function handleConfirm() {
@@ -22,26 +30,33 @@
       return;
     }
 
-    const confirmed = confirm(
-      'Are you sure you want to cancel this work?\n\n' +
-      'This action cannot be reversed. The workers will be freed and the plan will be marked as cancelled.\n\n' +
-      'Reason: ' + cancellationReason.trim()
-    );
-
-    if (confirmed) {
-      dispatch('confirm', { reason: cancellationReason.trim() });
+    // Use stored works if available, otherwise use current works prop
+    const worksToCancel = storedWorks.length > 0 ? storedWorks : works;
+    
+    // Validate that we have works to cancel
+    if (!worksToCancel || worksToCancel.length === 0) {
+      console.error('🔴 CancelWorkModal: No works available for cancellation', { storedWorks, works });
+      alert('No works selected for cancellation. Please try again.');
+      return;
     }
+
+    console.log('🔴 CancelWorkModal: Confirming cancellation with works:', worksToCancel);
+    
+    // Dispatch confirm event with reason and works - the parent will handle the final confirmation
+    dispatch('confirm', { reason: cancellationReason.trim(), works: worksToCancel });
   }
 
-  $: workCode = works.length > 0 
-    ? (works[0]?.std_work_type_details?.derived_sw_code || works[0]?.std_work_type_details?.sw_code || works[0]?.other_work_code || 'N/A')
+  $: displayWorks = storedWorks.length > 0 ? storedWorks : works;
+  
+  $: workCode = displayWorks.length > 0 
+    ? (displayWorks[0]?.std_work_type_details?.derived_sw_code || displayWorks[0]?.std_work_type_details?.sw_code || displayWorks[0]?.other_work_code || 'N/A')
     : 'N/A';
   
-  $: workName = works.length > 0
-    ? (works[0]?.std_work_type_details?.std_work_type?.sw_name || 'N/A')
+  $: workName = displayWorks.length > 0
+    ? (displayWorks[0]?.std_work_type_details?.std_work_details?.sw_name || displayWorks[0]?.std_work_type_details?.type_description || displayWorks[0]?.workAdditionData?.other_work_desc || 'N/A')
     : 'N/A';
   
-  $: workersCount = works.length;
+  $: workersCount = displayWorks.length;
 </script>
 
 {#if isOpen}

@@ -79,6 +79,8 @@ export interface EventHandlerContext {
   setExpandedReportGroups: (value: string[] | ((prev: string[]) => string[])) => void;
   setDraftPlanLoading: (value: boolean) => void;
   setDraftReportLoading: (value: boolean) => void;
+  setIsPlannedWorksLoading: (value: boolean) => void;
+  setIsReportLoading: (value: boolean) => void;
   setActiveTab?: (value: string) => void;
   
   // State getters
@@ -272,13 +274,22 @@ export async function handleReportWork(context: EventHandlerContext, event: Cust
 export async function handleCancelWork(context: EventHandlerContext, event: CustomEvent) {
   const { works, group } = event.detail;
   
+  console.log('🔴 handleCancelWork called with:', { works, group, worksLength: works?.length });
+  
   if (!works || !Array.isArray(works) || works.length === 0) {
     alert('No works to cancel');
     return;
   }
 
   // Show cancellation modal
-  context.setSelectedWorksForCancellation(works);
+  // Make sure we're storing the actual work objects with their IDs
+  const worksToCancel = works.map((work: any) => ({
+    ...work,
+    id: work.id || work.planning_id
+  }));
+  
+  console.log('🔴 Setting works for cancellation:', worksToCancel);
+  context.setSelectedWorksForCancellation(worksToCancel);
   context.setShowCancelWorkModal(true);
 }
 
@@ -294,11 +305,23 @@ export function handleCancelWorkModalClose(context: EventHandlerContext) {
  * Handle cancel work confirmation
  */
 export async function handleCancelWorkConfirm(context: EventHandlerContext, event: CustomEvent) {
-  const { reason } = event.detail;
-  const works = context.selectedWorksForCancellation || [];
+  const { reason, works: eventWorks } = event.detail;
+  
+  // Prefer works from event (passed by modal), fallback to context
+  const works = eventWorks || context.selectedWorksForCancellation || [];
+  
+  console.log('🔴 handleCancelWorkConfirm called with:', { 
+    reason, 
+    worksLength: works.length, 
+    works,
+    eventWorks,
+    selectedWorksForCancellation: context.selectedWorksForCancellation 
+  });
   
   if (!works || works.length === 0) {
-    alert('No works to cancel');
+    console.error('🔴 No works found in event or context');
+    alert('No works to cancel. The selected works may have been cleared. Please try cancelling again.');
+    context.setShowCancelWorkModal(false);
     return;
   }
 
@@ -307,20 +330,38 @@ export async function handleCancelWorkConfirm(context: EventHandlerContext, even
     return;
   }
 
-  const planningIds = works.map((work: any) => work.id).filter(Boolean);
+  // Show final confirmation
+  const confirmed = confirm(
+    `Are you sure you want to cancel ${works.length} work plan(s)?\n\n` +
+    'This action cannot be reversed. The workers will be freed and the plan will be marked as cancelled.\n\n' +
+    `Reason: ${reason.trim()}`
+  );
+
+  if (!confirmed) {
+    return; // User cancelled
+  }
+
+  // Try multiple ways to get the planning ID
+  const planningIds = works
+    .map((work: any) => work.id || work.planning_id || work.planningId)
+    .filter((id: any) => id !== null && id !== undefined && id !== '');
+  
+  console.log('🔴 Extracted planning IDs:', planningIds);
   
   if (planningIds.length === 0) {
-    alert('No valid planning IDs found');
+    console.error('🔴 No valid planning IDs found in works:', works);
+    alert('No valid planning IDs found. Please try again.');
     return;
   }
 
-  context.setDraftPlanLoading(true);
+  context.setIsPlannedWorksLoading(true);
   try {
     const { cancelWorkPlans } = await import('$lib/services/workCancellationService');
     const result = await cancelWorkPlans(planningIds, reason);
     
     if (result.success) {
-      alert(`Successfully cancelled ${planningIds.length} work plan(s)`);
+      const cancelledCount = result.cancelledCount || planningIds.length;
+      alert(`Successfully cancelled ${cancelledCount} work plan(s)`);
       await context.loadPlannedWorksData();
       handleCancelWorkModalClose(context);
     } else {
@@ -330,7 +371,7 @@ export async function handleCancelWorkConfirm(context: EventHandlerContext, even
     console.error('Error cancelling work:', error);
     alert(`Error cancelling work: ${(error as Error).message}`);
   } finally {
-    context.setDraftPlanLoading(false);
+    context.setIsPlannedWorksLoading(false);
   }
 }
 
@@ -1056,87 +1097,342 @@ export async function handleReportOvertime(context: EventHandlerContext, event: 
  */
 export async function handleSubmitReporting(context: EventHandlerContext) {
   context.setDraftReportLoading(true);
-  const dateStr = context.selectedDate.split('T')[0];
-  
-  // Check for overtime before submitting
-  const { calculateOvertime } = await import('$lib/services/overtimeCalculationService');
-  const otResult = await calculateOvertime(context.stageCode, dateStr);
-  
-  if (otResult.hasOvertime) {
-    // Check if OT has been reported
-    const { data: draftReports } = await supabase
-      .from('prdn_work_reporting')
-      .select('id, overtime_minutes, overtime_amount')
-      .eq('from_date', dateStr)
-      .eq('status', 'draft')
-      .eq('is_deleted', false);
+  try {
+    // Parse date string
+    let dateStr: string;
+    if (typeof context.selectedDate === 'string') {
+      dateStr = context.selectedDate.split('T')[0];
+    } else {
+      dateStr = new Date(context.selectedDate).toISOString().split('T')[0];
+    }
     
-    // Check if all workers with OT have reported OT
-    const allWorkersWithOTReported = otResult.workers.every(worker => 
-      worker.works.every(work => {
-        const report = draftReports?.find((r: any) => r.id === work.reportingId);
-        return report && 
-               report.overtime_minutes !== null && 
-               report.overtime_minutes !== undefined &&
-               report.overtime_minutes > 0;
-      })
-    );
-    
-    if (!allWorkersWithOTReported) {
-      alert(
-        'Cannot submit report. Overtime has been detected but not all overtime values have been reported.\n\n' +
-        'Please click "Report OT" to calculate and save overtime hours and amounts before submitting.'
-      );
+    // Check for overtime before submitting
+    const { calculateOvertime } = await import('$lib/services/overtimeCalculationService');
+    let otResult;
+    try {
+      otResult = await calculateOvertime(context.stageCode, dateStr);
+      
+      // Log any errors from overtime calculation for debugging
+      if (otResult.errors && otResult.errors.length > 0) {
+        console.warn('Overtime calculation warnings:', otResult.errors);
+      }
+    } catch (error) {
+      console.error('Error calculating overtime:', error);
+      alert('Error checking overtime: ' + ((error as Error).message || 'Unknown error'));
       context.setDraftReportLoading(false);
       return;
     }
     
-    // Recalculate OT to validate stored values
-    const revalidationResult = await calculateOvertime(context.stageCode, dateStr);
-    if (revalidationResult.hasOvertime) {
-      // Compare stored values with calculated values
-      let hasMismatch = false;
-      const mismatches: string[] = [];
-      
-      for (const worker of revalidationResult.workers) {
-        for (const work of worker.works) {
+    // Fetch all reports for this stage and date to check OT status (both draft and pending_approval)
+    // When submitting, we need to check OT for all reports regardless of status
+    const { data: draftReports, error: draftReportsError } = await supabase
+      .from('prdn_work_reporting')
+      .select(`
+        id,
+        overtime_minutes,
+        overtime_amount,
+        worker_id,
+        from_time,
+        to_time,
+        hours_worked_today,
+        prdn_work_planning!inner(stage_code)
+      `)
+      .eq('from_date', dateStr)
+      .in('status', ['draft', 'pending_approval'])
+      .eq('is_deleted', false)
+      .eq('prdn_work_planning.stage_code', context.stageCode);
+    
+    if (draftReportsError) {
+      console.error('Error fetching draft reports for OT check:', draftReportsError);
+      alert('Error checking overtime status: ' + draftReportsError.message);
+      context.setDraftReportLoading(false);
+      return;
+    }
+    
+    if (otResult.hasOvertime) {
+      // Check if all workers with OT have reported OT
+      const allWorkersWithOTReported = otResult.workers.every(worker => 
+        worker.works.every(work => {
           const report = draftReports?.find((r: any) => r.id === work.reportingId);
-          if (report) {
-            const storedMinutes = report.overtime_minutes || 0;
-            const calculatedMinutes = work.overtimeMinutes;
-            
-            // Allow small difference (1 minute) due to rounding
-            if (Math.abs(storedMinutes - calculatedMinutes) > 1) {
-              hasMismatch = true;
-              mismatches.push(
-                `${worker.workerName}: Work ${work.workCode} - Stored: ${storedMinutes}min, Calculated: ${calculatedMinutes}min`
-              );
-            }
-          } else {
-            hasMismatch = true;
-            mismatches.push(
-              `${worker.workerName}: Work ${work.workCode} - Report not found`
-            );
-          }
-        }
-      }
+          return report && 
+                 report.overtime_minutes !== null && 
+                 report.overtime_minutes !== undefined &&
+                 report.overtime_minutes > 0;
+        })
+      );
       
-      if (hasMismatch) {
+      if (!allWorkersWithOTReported) {
         alert(
-          'Cannot submit report. Overtime values do not match calculated values.\n\n' +
-          'Please click "Report OT" again to recalculate and update overtime values.\n\n' +
-          'Mismatches:\n' + mismatches.slice(0, 5).join('\n') +
-          (mismatches.length > 5 ? `\n... and ${mismatches.length - 5} more` : '')
+          'Cannot submit report. Overtime has been detected but not all overtime values have been reported.\n\n' +
+          'Please click "Report OT" to calculate and save overtime hours and amounts before submitting.'
         );
         context.setDraftReportLoading(false);
         return;
       }
+      
+      // Recalculate OT to validate stored values
+      let revalidationResult;
+      try {
+        revalidationResult = await calculateOvertime(context.stageCode, dateStr);
+      } catch (error) {
+        console.error('Error revalidating overtime:', error);
+        alert('Error validating overtime values: ' + ((error as Error).message || 'Unknown error'));
+        context.setDraftReportLoading(false);
+        return;
+      }
+      
+      if (revalidationResult.hasOvertime) {
+        // Compare stored values with calculated values
+        let hasMismatch = false;
+        const mismatches: string[] = [];
+        
+        for (const worker of revalidationResult.workers) {
+          for (const work of worker.works) {
+            const report = draftReports?.find((r: any) => r.id === work.reportingId);
+            if (report) {
+              const storedMinutes = report.overtime_minutes || 0;
+              const calculatedMinutes = work.overtimeMinutes;
+              
+              // Allow small difference (1 minute) due to rounding
+              if (Math.abs(storedMinutes - calculatedMinutes) > 1) {
+                hasMismatch = true;
+                mismatches.push(
+                  `${worker.workerName}: Work ${work.workCode} - Stored: ${storedMinutes}min, Calculated: ${calculatedMinutes}min`
+                );
+              }
+            } else {
+              hasMismatch = true;
+              mismatches.push(
+                `${worker.workerName}: Work ${work.workCode} - Report not found`
+              );
+            }
+          }
+        }
+        
+        if (hasMismatch) {
+          alert(
+            'Cannot submit report. Overtime values do not match calculated values.\n\n' +
+            'Please click "Report OT" again to recalculate and update overtime values.\n\n' +
+            'Mismatches:\n' + mismatches.slice(0, 5).join('\n') +
+            (mismatches.length > 5 ? `\n... and ${mismatches.length - 5} more` : '')
+          );
+          context.setDraftReportLoading(false);
+          return;
+        }
+      }
+    } else {
+      // Secondary validation: Even if calculateOvertime didn't detect OT, manually verify
+      // This catches cases where calculateOvertime fails due to missing data or errors
+      const reportsWithWorkers = (draftReports || []).filter((r: any) => r.worker_id !== null);
+      
+      if (reportsWithWorkers.length > 0) {
+        // Group reports by worker
+        const reportsByWorker = new Map<string, any[]>();
+        reportsWithWorkers.forEach((report: any) => {
+          const workerId = report.worker_id;
+          if (!reportsByWorker.has(workerId)) {
+            reportsByWorker.set(workerId, []);
+          }
+          reportsByWorker.get(workerId)!.push(report);
+        });
+        
+        // For each worker, check if OT might exist
+        const workersNeedingOTCheck: Array<{ workerId: string; totalWorkedMinutes: number; shiftCode?: string }> = [];
+        
+        // Get unique worker IDs to fetch their shift details
+        const workerIds = Array.from(reportsByWorker.keys());
+        const { data: workerShiftData } = await supabase
+          .from('hr_emp')
+          .select('emp_id, emp_name, shift_code')
+          .in('emp_id', workerIds)
+          .eq('is_active', true)
+          .eq('is_deleted', false);
+        
+        const workerShiftMap = new Map<string, { name: string; shiftCode?: string }>();
+        (workerShiftData || []).forEach((w: any) => {
+          workerShiftMap.set(w.emp_id, { name: w.emp_name || w.emp_id, shiftCode: w.shift_code });
+        });
+        
+        // Get unique shift codes
+        const shiftCodes = new Set<string>();
+        workerShiftMap.forEach((w) => {
+          if (w.shiftCode) shiftCodes.add(w.shiftCode);
+        });
+        
+        // Fetch shift details
+        const shiftDetailsMap = new Map<string, { startTime: string; endTime: string; breakTimes: any[] }>();
+        for (const shiftCode of shiftCodes) {
+          const { data: shiftData } = await supabase
+            .from('hr_shift_master')
+            .select('shift_id, start_time, end_time')
+            .eq('shift_code', shiftCode)
+            .eq('is_active', true)
+            .eq('is_deleted', false)
+            .maybeSingle();
+          
+          if (shiftData) {
+            const { data: breaksData } = await supabase
+              .from('hr_shift_break_master')
+              .select('start_time, end_time')
+              .eq('shift_id', shiftData.shift_id)
+              .eq('is_active', true)
+              .eq('is_deleted', false)
+              .order('start_time', { ascending: true });
+            
+            shiftDetailsMap.set(shiftCode, {
+              startTime: shiftData.start_time,
+              endTime: shiftData.end_time,
+              breakTimes: breaksData || []
+            });
+          }
+        }
+        
+        // Helper function to convert time to minutes
+        const timeToMinutes = (timeStr: string): number => {
+          if (!timeStr) return 0;
+          const parts = timeStr.split(':');
+          const hours = parseInt(parts[0] || '0', 10);
+          const minutes = parseInt(parts[1] || '0', 10);
+          return hours * 60 + minutes;
+        };
+        
+        // Helper function to calculate break time
+        const calculateBreakTime = (startTime: string, endTime: string, breakTimes: any[]): number => {
+          if (!breakTimes || breakTimes.length === 0) return 0;
+          let totalBreak = 0;
+          const startMin = timeToMinutes(startTime);
+          let endMin = timeToMinutes(endTime);
+          if (endMin < startMin) endMin += 24 * 60;
+          
+          breakTimes.forEach((bt: any) => {
+            let breakStart = timeToMinutes(bt.start_time);
+            let breakEnd = timeToMinutes(bt.end_time);
+            if (breakEnd < breakStart) breakEnd += 24 * 60;
+            
+            const overlapStart = Math.max(startMin, breakStart);
+            const overlapEnd = Math.min(endMin, breakEnd);
+            if (overlapStart < overlapEnd) {
+              totalBreak += (overlapEnd - overlapStart);
+            }
+          });
+          return totalBreak;
+        };
+        
+        // Check each worker for potential OT
+        for (const [workerId, workerReports] of reportsByWorker.entries()) {
+          const workerInfo = workerShiftMap.get(workerId);
+          if (!workerInfo) continue;
+          
+          // Calculate total worked time for this worker
+          let totalWorkedMinutes = 0;
+          workerReports.forEach((report: any) => {
+            const workedMinutes = report.hours_worked_today 
+              ? Math.round(report.hours_worked_today * 60)
+              : 0;
+            totalWorkedMinutes += workedMinutes;
+          });
+          
+          // Check if OT has been reported for this worker
+          const hasReportedOT = workerReports.some((r: any) => 
+            r.overtime_minutes !== null && 
+            r.overtime_minutes !== undefined &&
+            r.overtime_minutes > 0
+          );
+          
+          if (hasReportedOT) continue; // OT already reported, skip
+          
+          // If worker has shift details, calculate available work time
+          if (workerInfo.shiftCode) {
+            const shiftDetails = shiftDetailsMap.get(workerInfo.shiftCode);
+            if (shiftDetails) {
+              const shiftStartMin = timeToMinutes(shiftDetails.startTime);
+              let shiftEndMin = timeToMinutes(shiftDetails.endTime);
+              if (shiftEndMin < shiftStartMin) shiftEndMin += 24 * 60;
+              
+              const shiftDuration = shiftEndMin - shiftStartMin;
+              const breakMinutes = calculateBreakTime(shiftDetails.startTime, shiftDetails.endTime, shiftDetails.breakTimes);
+              const availableWorkMinutes = shiftDuration - breakMinutes;
+              
+              // If total worked time exceeds available work time, OT exists
+              if (totalWorkedMinutes > availableWorkMinutes) {
+                workersNeedingOTCheck.push({
+                  workerId,
+                  totalWorkedMinutes,
+                  shiftCode: workerInfo.shiftCode
+                });
+              }
+            } else {
+              // No shift details found - use conservative check (8 hours)
+              if (totalWorkedMinutes > 480) {
+                workersNeedingOTCheck.push({
+                  workerId,
+                  totalWorkedMinutes
+                });
+              }
+            }
+          } else {
+            // No shift code - use conservative check (8 hours)
+            if (totalWorkedMinutes > 480) {
+              workersNeedingOTCheck.push({
+                workerId,
+                totalWorkedMinutes
+              });
+            }
+          }
+        }
+        
+        // If we found workers who have OT but haven't reported it, block submission
+        if (workersNeedingOTCheck.length > 0) {
+          const workerNames = workersNeedingOTCheck
+            .map(w => {
+              const workerInfo = workerShiftMap.get(w.workerId);
+              return workerInfo?.name || w.workerId;
+            })
+            .join(', ');
+          
+          const hoursWorked = workersNeedingOTCheck
+            .map(w => `${(w.totalWorkedMinutes / 60).toFixed(1)}h`)
+            .join(', ');
+          
+          alert(
+            `Cannot submit report. Overtime detected for worker(s): ${workerNames}\n\n` +
+            `Total hours worked: ${hoursWorked}\n\n` +
+            `Overtime has not been calculated or reported for these workers.\n\n` +
+            `Please click "Report OT" to calculate and save overtime hours and amounts before submitting.\n\n` +
+            `If calculateOvertime had errors, please check:\n` +
+            `- Workers have shift codes assigned\n` +
+            `- Shift details are configured correctly\n` +
+            `- All reports have valid worker assignments`
+          );
+          context.setDraftReportLoading(false);
+          return;
+        }
+        
+        // If calculateOvertime had errors, log them for debugging
+        if (otResult.errors && otResult.errors.length > 0) {
+          console.warn('Overtime calculation had errors:', otResult.errors);
+        }
+      }
     }
+    
+    // Submit the reporting
+    const result = await submitReporting(context.stageCode, dateStr);
+    
+    if (!result.success) {
+      alert('Error submitting report: ' + (result.error || 'Unknown error'));
+      context.setDraftReportLoading(false);
+      return;
+    }
+    
+    // Reload data and show success message
+    await context.loadDraftReportData();
+    alert('Report submitted successfully!');
+  } catch (error) {
+    console.error('Error submitting reporting:', error);
+    alert('Error submitting report: ' + ((error as Error).message || 'Unknown error'));
+  } finally {
+    context.setDraftReportLoading(false);
   }
-  
-  await submitReporting(context.stageCode, dateStr);
-  await context.loadDraftReportData();
-  context.setDraftReportLoading(false);
 }
 
 /**

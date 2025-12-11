@@ -36,6 +36,57 @@ export async function loadWorksData(stageCode: string, selectedDate: string) {
 /**
  * Load planned works data
  */
+/**
+ * Load cancelled works for Plan tab (they should still be visible)
+ */
+async function loadStagePlannedWorksWithCancelled(stageCode: string, date: string): Promise<any[]> {
+  try {
+    const dateStr = date instanceof Date 
+      ? date.toISOString().split('T')[0]
+      : date.split('T')[0];
+    
+    // Fetch cancelled works (is_deleted=true, status='cancelled')
+    const { data, error } = await supabase
+      .from('prdn_work_planning')
+      .select(`
+        *,
+        hr_emp!inner(
+          emp_id,
+          emp_name,
+          skill_short
+        ),
+        std_work_type_details(
+          derived_sw_code,
+          sw_code,
+          type_description,
+          std_work_details(sw_name)
+        ),
+        prdn_wo_details!inner(
+          wo_no,
+          pwo_no,
+          wo_model,
+          customer_name
+        ),
+        std_work_skill_mapping(
+          wsm_id,
+          sc_name
+        )
+      `)
+      .eq('stage_code', stageCode)
+      .eq('from_date', dateStr)
+      .eq('status', 'cancelled')
+      .eq('is_deleted', true)
+      .eq('is_active', true)
+      .order('from_time', { ascending: true });
+
+    if (error) throw error;
+    return data || [];
+  } catch (error) {
+    console.error('Error loading cancelled planned works:', error);
+    return [];
+  }
+}
+
 export async function loadPlannedWorksData(stageCode: string, selectedDate: string) {
   if (!selectedDate) return [];
   
@@ -49,7 +100,17 @@ export async function loadPlannedWorksData(stageCode: string, selectedDate: stri
       dateStr = String(selectedDate || '').split('T')[0];
     }
     
-    const data = await loadStagePlannedWorks(stageCode, dateStr, 'approved');
+    // Load approved works
+    const approvedData = await loadStagePlannedWorks(stageCode, dateStr, 'approved');
+    
+    // Also load cancelled works (they should still appear in Plan tab)
+    const cancelledData = await loadStagePlannedWorksWithCancelled(stageCode, dateStr);
+    
+    // Combine both, with cancelled works marked
+    const data = [
+      ...approvedData.map(w => ({ ...w, isCancelled: false })),
+      ...cancelledData.map(w => ({ ...w, isCancelled: true }))
+    ];
     console.log(`📋 Loaded ${data.length} planned works for ${stageCode} on ${dateStr}`);
     
     // Enrich with skill-specific time standards and vehicle work flow (same as Draft Plan)
@@ -253,16 +314,14 @@ export async function getPlanningSubmissionStatus(stageCode: string, planningDat
       dateStr = String(planningDate || '').split('T')[0];
     }
 
-    // Get the latest submission (most recent submitted_dt)
-    // Order by submitted_dt DESC, then by id DESC as tiebreaker
+    // Get the latest submission (highest version number)
     const { data, error } = await supabase
       .from('prdn_planning_submissions')
-      .select('id, status, submitted_dt, reviewed_dt, reviewed_by, rejection_reason')
+      .select('id, status, submitted_dt, reviewed_dt, reviewed_by, rejection_reason, version')
       .eq('stage_code', stageCode)
       .eq('planning_date', dateStr)
       .eq('is_deleted', false)
-      .order('submitted_dt', { ascending: false })
-      .order('id', { ascending: false })
+      .order('version', { ascending: false })
       .limit(1)
       .maybeSingle();
 
@@ -288,6 +347,7 @@ export async function getPlanningSubmissionStatus(stageCode: string, planningDat
 
 /**
  * Get reporting submission status for a stage and date
+ * Returns the latest version (highest version number)
  */
 export async function getReportingSubmissionStatus(stageCode: string, reportingDate: string) {
   try {
@@ -300,12 +360,15 @@ export async function getReportingSubmissionStatus(stageCode: string, reportingD
       dateStr = String(reportingDate || '').split('T')[0];
     }
 
+    // Get the latest version (max version number) for this stage-date
     const { data, error } = await supabase
       .from('prdn_reporting_submissions')
-      .select('id, status, submitted_dt, reviewed_dt, reviewed_by, rejection_reason')
+      .select('id, status, submitted_dt, reviewed_dt, reviewed_by, rejection_reason, version')
       .eq('stage_code', stageCode)
       .eq('reporting_date', dateStr)
       .eq('is_deleted', false)
+      .order('version', { ascending: false })
+      .limit(1)
       .maybeSingle();
 
     if (error && error.code !== 'PGRST116') { // PGRST116 = no rows returned

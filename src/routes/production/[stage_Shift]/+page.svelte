@@ -34,6 +34,8 @@
   // Import Excel/PDF generators
   import { generatePlanExcel } from './utils/generatePlanExcel';
   import { generatePlanPDF } from './utils/generatePlanPDF';
+  import { generateReportExcel } from './utils/generateReportExcel';
+  import { generateReportPDF } from './utils/generateReportPDF';
 
   // Parse route parameters
   $: stageShiftParam = $page.params.stage_Shift || '{stageCode}-GEN';
@@ -190,6 +192,8 @@
     setExpandedReportGroups: (v) => expandedReportGroups = typeof v === 'function' ? v(expandedReportGroups) : v,
     setDraftPlanLoading: (v) => isDraftPlanLoading = v,
     setDraftReportLoading: (v) => isDraftReportLoading = v,
+    setIsPlannedWorksLoading: (v) => isPlannedWorksLoading = v,
+    setIsReportLoading: (v) => isReportLoading = v,
     setActiveTab: (v) => activeTab = v,
     workOrdersData,
     plannedWorksWithStatus,
@@ -305,12 +309,30 @@
     generatePlanPDF(plannedWorksWithStatus, stageCode, shiftCode, selectedDate, shiftBreakTimes);
   }
 
-  function generateReportExcel() {
-    alert('Excel generation - to be implemented');
+  function handleGenerateReportExcel() {
+    if (!reportData || reportData.length === 0) {
+      alert('No report data available to generate Excel.');
+      return;
+    }
+    try {
+      generateReportExcel(reportData, stageCode, shiftCode, selectedDate);
+    } catch (error) {
+      console.error('Error generating Excel:', error);
+      alert('Error generating Excel file. Please try again.');
+    }
   }
 
-  function generateReportPDF() {
-    alert('PDF generation - to be implemented');
+  function handleGenerateReportPDF() {
+    if (!reportData || reportData.length === 0) {
+      alert('No report data available to generate PDF.');
+      return;
+    }
+    try {
+      generateReportPDF(reportData, stageCode, shiftCode, selectedDate);
+    } catch (error) {
+      console.error('Error generating PDF:', error);
+      alert('Error generating PDF file. Please try again.');
+    }
   }
 
   // Update data loading context when reactive values change
@@ -456,6 +478,7 @@
         on:generatePDF={generatePlanPDFHandler}
         on:multiReport={() => eventHandlers.handleMultiReport(eventHandlerContext)}
         on:reportWork={(e) => eventHandlers.handleReportWork(eventHandlerContext, e)}
+        on:cancelWork={(e) => eventHandlers.handleCancelWork(eventHandlerContext, e)}
         on:toggleGroup={(e) => eventHandlers.toggleGroup(eventHandlerContext, e.detail)}
         on:toggleRowSelection={(e) => eventHandlers.toggleRowSelection(eventHandlerContext, e.detail)}
         on:selectAllInGroup={(e) => eventHandlers.selectAllInGroup(eventHandlerContext, e)}
@@ -480,11 +503,9 @@
         isLoading={isDraftReportLoading}
         {stageCode}
         {selectedDate}
-        {expandedReportGroups}
         {reportingSubmissionStatus}
         on:submit={() => eventHandlers.handleSubmitReporting(eventHandlerContext)}
         on:refresh={() => dataLoading.loadDraftReportData(dataLoadingContext)}
-        on:toggleGroup={(e) => eventHandlers.toggleReportGroup(eventHandlerContext, e.detail)}
         on:reportOvertime={(e) => eventHandlers.handleReportOvertime(eventHandlerContext, e)}
       />
     {:else if activeTab === 'report'}
@@ -495,8 +516,8 @@
         {selectedDate}
         {expandedReportGroups}
         on:refresh={() => dataLoading.loadReportData(dataLoadingContext)}
-        on:generateExcel={generateReportExcel}
-        on:generatePDF={generateReportPDF}
+        on:generateExcel={handleGenerateReportExcel}
+        on:generatePDF={handleGenerateReportPDF}
         on:toggleGroup={(e) => eventHandlers.toggleReportGroup(eventHandlerContext, e.detail)}
       />
     {/if}

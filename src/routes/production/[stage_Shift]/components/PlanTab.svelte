@@ -182,6 +182,8 @@
             {@const typedGroup = group}
             {@const allSelected = typedGroup.items.every((item: any) => selectedRows.has(item.id))}
             {@const someSelected = typedGroup.items.some((item: any) => selectedRows.has(item.id))}
+            {@const isCancelled = typedGroup.items.some((item: any) => item.status === 'cancelled' || item.isCancelled)}
+            {@const hasReported = typedGroup.items.some((item: any) => item.workLifecycleStatus && item.workLifecycleStatus !== 'Planned' && item.workLifecycleStatus !== undefined)}
             <!-- Single Row per Work -->
             <tr class="hover:theme-bg-secondary transition-colors">
               <td class="px-6 py-4 whitespace-nowrap text-sm font-medium theme-text-primary">
@@ -234,9 +236,12 @@
               </td>
               <td class="px-6 py-4 whitespace-nowrap text-sm">
                 {#if typedGroup.items && typedGroup.items.length > 0}
+                  {@const isCancelled = typedGroup.items.some((item: any) => item.status === 'cancelled' || item.isCancelled)}
                   {@const allReported = typedGroup.items.every((item: any) => item.workLifecycleStatus && item.workLifecycleStatus !== 'Planned')}
                   {@const anyReported = typedGroup.items.some((item: any) => item.workLifecycleStatus && item.workLifecycleStatus !== 'Planned')}
-                  {#if allReported}
+                  {#if isCancelled}
+                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-400">Cancelled</span>
+                  {:else if allReported}
                     <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-400">Reported</span>
                   {:else if anyReported}
                     <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-800 dark:bg-orange-900/20 dark:text-orange-400">Partially Reported</span>
@@ -323,7 +328,7 @@
                   <Button 
                     variant="primary" 
                     size="sm" 
-                    disabled={typedGroup.items.some((item: any) => item.workLifecycleStatus !== 'Planned' && item.workLifecycleStatus !== undefined)}
+                    disabled={isCancelled || hasReported}
                     on:click={() => handleReportWork(typedGroup)}
                   >
                     Report
@@ -331,6 +336,7 @@
                   <Button 
                     variant="danger" 
                     size="sm" 
+                    disabled={isCancelled || hasReported}
                     on:click={() => handleCancelWork(typedGroup)}
                   >
                     Cancel

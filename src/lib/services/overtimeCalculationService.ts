@@ -74,7 +74,8 @@ export async function calculateOvertime(
     // Ensure date is in YYYY-MM-DD format
     const dateStr = reportingDate.includes('T') ? reportingDate.split('T')[0] : reportingDate;
 
-    // 1. Get all draft work reports for this stage and date
+    // 1. Get all work reports for this stage and date (both draft and pending_approval)
+    // When submitting, we need to check OT for all reports regardless of status
     const { data: draftReports, error: reportsError } = await supabase
       .from('prdn_work_reporting')
       .select(`
@@ -86,9 +87,12 @@ export async function calculateOvertime(
         hours_worked_today,
         prdn_work_planning!inner(
           stage_code,
-          std_work_type_details:derived_sw_code,
+          derived_sw_code,
           other_work_code,
-          std_work_type_details:std_work_type!inner(sw_name)
+          std_work_type_details(
+            derived_sw_code,
+            std_work_details(sw_name)
+          )
         ),
         hr_emp!inner(
           emp_id,
@@ -97,7 +101,7 @@ export async function calculateOvertime(
         )
       `)
       .eq('from_date', dateStr)
-      .eq('status', 'draft')
+      .in('status', ['draft', 'pending_approval'])
       .eq('is_deleted', false)
       .eq('prdn_work_planning.stage_code', stageCode);
 
@@ -294,10 +298,10 @@ export async function calculateOvertime(
             remainingOvertimeMinutes -= workOvertimeMinutes;
 
             // Get work details
-            const workCode = report.prdn_work_planning?.std_work_type_details?.derived_sw_code 
+            const workCode = report.prdn_work_planning?.derived_sw_code 
               || report.prdn_work_planning?.other_work_code 
               || 'N/A';
-            const workName = report.prdn_work_planning?.std_work_type_details?.std_work_type?.sw_name || 'N/A';
+            const workName = report.prdn_work_planning?.std_work_type_details?.std_work_details?.sw_name || 'N/A';
 
             // Calculate OT amount (will be calculated later with employee salary)
             overtimeWorks.push({
@@ -336,9 +340,9 @@ export async function calculateOvertime(
       const month = reportingDateObj.getMonth() + 1;
       const daysInMonth = new Date(year, month, 0).getDate();
 
-      // Calculate OT rate per minute
+      // Calculate OT rate per minute (overtime is paid at double the regular rate)
       const monthlySalary = empData.basic_da || empData.salary || 0;
-      const otRatePerMinute = monthlySalary / daysInMonth / 480; // 480 minutes = 8 hours
+      const otRatePerMinute = (monthlySalary / daysInMonth / 480) * 2; // 480 minutes = 8 hours, × 2 for double rate
 
       // Calculate OT amount for each work
       let totalOvertimeAmount = 0;

@@ -211,6 +211,7 @@ export async function fetchProductionEmployees(
       .select(`
         worker_id,
         hours_worked_today,
+        overtime_minutes,
         prdn_work_planning!inner(
           stage_code
         )
@@ -457,11 +458,23 @@ export async function fetchProductionEmployees(
     console.log('📊 Final planned hours map:', Array.from(plannedHoursMap.entries()));
 
     const reportedHoursMap = new Map<string, number>();
+    const otHoursMap = new Map<string, number>();
     (workReportingData || []).forEach(report => {
       if (report.worker_id && report.hours_worked_today) {
         const currentHours = reportedHoursMap.get(report.worker_id) || 0;
         reportedHoursMap.set(report.worker_id, currentHours + (report.hours_worked_today || 0));
       }
+      // Aggregate overtime minutes and convert to hours
+      if (report.worker_id && report.overtime_minutes) {
+        const currentOTMinutes = otHoursMap.get(report.worker_id) || 0;
+        otHoursMap.set(report.worker_id, currentOTMinutes + (report.overtime_minutes || 0));
+      }
+    });
+    
+    // Convert OT minutes to hours
+    const otHoursMapConverted = new Map<string, number>();
+    otHoursMap.forEach((minutes, empId) => {
+      otHoursMapConverted.set(empId, minutes / 60);
     });
 
     // Process employees with joined data
@@ -515,7 +528,7 @@ export async function fetchProductionEmployees(
         attendance_status: attendance ? (attendance.attendance_status || null) : null,
         hours_planned: plannedHoursMap.get(emp.emp_id) || 0,
         hours_reported: reportedHoursMap.get(emp.emp_id) || 0,
-        ot_hours: 0,
+        ot_hours: mode === 'reporting' ? (otHoursMapConverted.get(emp.emp_id) || 0) : 0,
         lt_hours: mode === 'reporting' ? (ltMap.get(emp.emp_id) || 0) : 0,
         ltp_hours: ltpHours,
         ltnp_hours: ltnpHours,

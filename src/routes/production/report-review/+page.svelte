@@ -10,6 +10,8 @@
   import { goto } from '$app/navigation';
   import PDFViewer from '../plan-review/components/PDFViewer.svelte';
   import { X } from 'lucide-svelte';
+  import { formatTime, formatLostTimeDetails } from '../[stage_Shift]/utils/timeUtils';
+  import { groupReportWorks } from '../[stage_Shift]/utils/planTabUtils';
 
   let showSidebar = false;
   let menus: any[] = [];
@@ -55,6 +57,9 @@
   // Works report data
   let worksReportData: any[] = [];
   let isWorksReportLoading = false;
+  
+  // Group works report data
+  $: groupedReportWorks = groupReportWorks(worksReportData);
 
   // Manpower report data
   let manpowerReportData: any[] = [];
@@ -91,7 +96,7 @@
     try {
       let query = supabase
         .from('prdn_reporting_submissions')
-        .select('*')
+        .select('*, version')
         .eq('status', 'pending_approval')
         .eq('is_deleted', false);
       
@@ -105,7 +110,7 @@
         query = query.eq('stage_code', selectedStage);
       }
       
-      const { data, error } = await query.order('submitted_dt', { ascending: false });
+      const { data, error } = await query.order('version', { ascending: false }).order('submitted_dt', { ascending: false });
 
       if (error) {
         console.error('Error loading pending submissions:', error);
@@ -127,7 +132,7 @@
     try {
       let query = supabase
         .from('prdn_reporting_submissions')
-        .select('*')
+        .select('*, version')
         .eq('status', 'approved')
         .eq('is_deleted', false);
       
@@ -141,7 +146,7 @@
         query = query.eq('stage_code', selectedStage);
       }
       
-      const { data, error } = await query.order('reviewed_dt', { ascending: false });
+      const { data, error } = await query.order('version', { ascending: false }).order('reviewed_dt', { ascending: false });
 
       if (error) throw error;
       approvedSubmissions = data || [];
@@ -175,11 +180,11 @@
         .from('prdn_work_reporting')
         .select(`
           *,
-          prdn_work_planning!inner(
+          prdn_work_planning(
             *,
             std_work_type_details(derived_sw_code, sw_code, type_description, std_work_details(sw_name)),
             hr_emp(emp_id, emp_name, skill_short),
-            prdn_wo_details!inner(wo_no, pwo_no, wo_model, customer_name),
+            prdn_wo_details(wo_no, pwo_no, wo_model, customer_name),
             std_work_skill_mapping(wsm_id, sc_name)
           )
         `)
@@ -188,19 +193,120 @@
         .order('from_time', { ascending: true });
 
       if (worksError) throw worksError;
-      worksReportData = worksData || [];
+      let rawWorksReportData = worksData || [];
       
       // Load deviations for all reports
-      const reportIds = (worksReportData || []).map((r: any) => r.id).filter(Boolean);
+      const reportIds = (rawWorksReportData || []).map((r: any) => r.id).filter(Boolean);
+      let deviationsMap = new Map<number, any[]>();
       if (reportIds.length > 0) {
         const { getDeviationsForReportings } = await import('$lib/services/workReportingDeviationService');
-        const deviationsMap = await getDeviationsForReportings(reportIds);
-        // Attach deviations to reports
-        worksReportData = worksReportData.map((report: any) => ({
-          ...report,
-          deviations: deviationsMap.get(report.id) || []
-        }));
+        deviationsMap = await getDeviationsForReportings(reportIds);
       }
+      
+      // Enrich work reports with skill-specific time standards and vehicle work flow
+      worksReportData = await Promise.all(
+        rawWorksReportData.map(async (report: any) => {
+          // Attach deviations to report
+          const deviations = deviationsMap.get(report.id) || [];
+          report.deviations = deviations;
+          
+          const planningRecord = report.prdn_work_planning;
+          const derivedSwCode = planningRecord?.std_work_type_details?.derived_sw_code;
+          const skillShort = planningRecord?.hr_emp?.skill_short;
+          const scRequired = planningRecord?.sc_required;
+          
+          // Fetch vehicle work flow
+          let vehicleWorkFlow = null;
+          if (derivedSwCode) {
+            try {
+              const { data: vwfData } = await supabase
+                .from('std_vehicle_work_flow')
+                .select('estimated_duration_minutes')
+                .eq('derived_sw_code', derivedSwCode)
+                .eq('is_deleted', false)
+                .eq('is_active', true)
+                .limit(1)
+                .maybeSingle();
+              vehicleWorkFlow = vwfData;
+            } catch (error) {
+              console.error('Error fetching vehicle work flow:', error);
+            }
+          }
+          
+          if (!derivedSwCode || !skillShort || !scRequired) {
+            return { ...report, skillTimeStandard: null, skillMapping: null, vehicleWorkFlow: vehicleWorkFlow };
+          }
+
+          // Find skill combination that contains the required skill
+          let matchingWsm = null;
+          try {
+            const { data: allMappings } = await supabase
+              .from('std_work_skill_mapping')
+              .select(`
+                wsm_id,
+                sc_name,
+                std_skill_combinations!inner(
+                  skill_combination
+                )
+              `)
+              .eq('derived_sw_code', derivedSwCode)
+              .eq('is_deleted', false)
+              .eq('is_active', true);
+
+            if (allMappings && allMappings.length > 0) {
+              for (const mapping of allMappings) {
+                const skillCombination = (mapping as any).std_skill_combinations?.skill_combination;
+                if (skillCombination && Array.isArray(skillCombination)) {
+                  const hasSkill = skillCombination.some((skill: any) => 
+                    skill.skill_name === scRequired || skill.skill_short === scRequired
+                  );
+                  if (hasSkill) {
+                    matchingWsm = mapping;
+                    break;
+                  }
+                }
+              }
+            }
+          } catch (error) {
+            console.error('Error fetching skill mappings:', error);
+          }
+
+          if (!matchingWsm) {
+            return { ...report, skillTimeStandard: null, skillMapping: null, vehicleWorkFlow: vehicleWorkFlow };
+          }
+
+          // Get skill time standard
+          let skillTimeStandard = null;
+          try {
+            const { data: stsData } = await supabase
+              .from('std_skill_time_standards')
+              .select('*')
+              .eq('wsm_id', matchingWsm.wsm_id)
+              .eq('skill_short', scRequired)
+              .eq('is_deleted', false)
+              .eq('is_active', true)
+              .maybeSingle();
+            skillTimeStandard = stsData;
+          } catch (error) {
+            console.error('Error fetching skill time standard:', error);
+          }
+          
+          // Calculate remaining time
+          let remainingTimeMinutes = null;
+          if (skillTimeStandard && skillTimeStandard.standard_time_minutes) {
+            const totalWorkedMinutes = ((report.hours_worked_till_date || 0) + (report.hours_worked_today || 0)) * 60;
+            remainingTimeMinutes = Math.max(0, skillTimeStandard.standard_time_minutes - totalWorkedMinutes);
+          }
+
+          return {
+            ...report,
+            skillTimeStandard: skillTimeStandard,
+            skillMapping: matchingWsm,
+            vehicleWorkFlow: vehicleWorkFlow,
+            remainingTimeMinutes: remainingTimeMinutes
+          };
+        })
+      );
 
       // Load manpower reports
       const { data: manpowerData, error: manpowerError } = await supabase
@@ -216,16 +322,47 @@
       manpowerReportData = manpowerData || [];
 
       // Load stage reassignments
-      const { data: reassignmentsData, error: reassignmentsError } = await supabase
-        .from('prdn_reporting_stage_reassignment')
-        .select(`
-          *,
-          hr_emp!inner(emp_id, emp_name, skill_short)
-        `)
-        .eq('reporting_submission_id', selectedSubmission.id)
-        .eq('is_deleted', false);
-
-      if (reassignmentsError) throw reassignmentsError;
+      // Try with reporting_submission_id first, fallback to date/stage if column doesn't exist
+      let reassignmentsData: any[] = [];
+      let reassignmentsError: any = null;
+      
+      try {
+        const { data, error } = await supabase
+          .from('prdn_reporting_stage_reassignment')
+          .select(`
+            *,
+            hr_emp!inner(emp_id, emp_name, skill_short)
+          `)
+          .eq('reporting_submission_id', selectedSubmission.id)
+          .eq('is_deleted', false);
+        
+        reassignmentsData = data || [];
+        reassignmentsError = error;
+      } catch (err: any) {
+        // If column doesn't exist, try querying by date and stage
+        if (err?.message?.includes('reporting_submission_id') || err?.code === '42703') {
+          console.warn('reporting_submission_id column not found, using fallback query');
+          const { data: fallbackData, error: fallbackError } = await supabase
+            .from('prdn_reporting_stage_reassignment')
+            .select(`
+              *,
+              hr_emp!inner(emp_id, emp_name, skill_short)
+            `)
+            .eq('reporting_date', selectedSubmission.reporting_date)
+            .eq('to_stage_code', selectedSubmission.stage_code)
+            .eq('is_deleted', false);
+          
+          reassignmentsData = fallbackData || [];
+          reassignmentsError = fallbackError;
+        } else {
+          reassignmentsError = err;
+        }
+      }
+      
+      if (reassignmentsError && !reassignmentsError.message?.includes('reporting_submission_id')) {
+        console.warn('Error loading stage reassignments:', reassignmentsError);
+        // Don't throw - continue without stage reassignments
+      }
       // Combine with manpower report data
       manpowerReportData = [...manpowerReportData, ...(reassignmentsData || [])];
       
@@ -379,34 +516,81 @@
 
       if (manpowerError) throw manpowerError;
 
-      // Update stage reassignments (only if table has status column)
+      // Update stage reassignments (only if table has status column and reporting_submission_id)
       try {
-        const { error: reassignmentsError } = await supabase
-          .from('prdn_reporting_stage_reassignment')
-          .update({
-            status: newStatus,
-            modified_by: currentUser,
-            modified_dt: now
-          })
-          .eq('reporting_submission_id', selectedSubmission.id);
+        // First try with reporting_submission_id
+        let reassignmentsError: any = null;
+        try {
+          const { error } = await supabase
+            .from('prdn_reporting_stage_reassignment')
+            .update({
+              status: newStatus,
+              modified_by: currentUser,
+              modified_dt: now
+            })
+            .eq('reporting_submission_id', selectedSubmission.id);
+          
+          reassignmentsError = error;
+        } catch (err: any) {
+          // If reporting_submission_id column doesn't exist, use fallback
+          if (err?.message?.includes('reporting_submission_id') || err?.code === '42703') {
+            console.warn('reporting_submission_id column not found, using fallback update');
+            const { error: fallbackError } = await supabase
+              .from('prdn_reporting_stage_reassignment')
+              .update({
+                status: newStatus,
+                modified_by: currentUser,
+                modified_dt: now
+              })
+              .eq('reporting_date', selectedSubmission.reporting_date)
+              .eq('to_stage_code', selectedSubmission.stage_code);
+            
+            reassignmentsError = fallbackError;
+          } else {
+            reassignmentsError = err;
+          }
+        }
 
         if (reassignmentsError) {
           // If error is about missing column, log but don't fail
           if (reassignmentsError.message?.includes('status') || reassignmentsError.message?.includes('column')) {
             console.warn('prdn_reporting_stage_reassignment table may not have status column:', reassignmentsError.message);
             // Try updating without status column
-            const { error: reassignmentsErrorNoStatus } = await supabase
-              .from('prdn_reporting_stage_reassignment')
-              .update({
-                modified_by: currentUser,
-                modified_dt: now
-              })
-              .eq('reporting_submission_id', selectedSubmission.id);
-            if (reassignmentsErrorNoStatus) {
-              console.error('Error updating stage reassignments:', reassignmentsErrorNoStatus);
+            let updateError: any = null;
+            try {
+              const { error } = await supabase
+                .from('prdn_reporting_stage_reassignment')
+                .update({
+                  modified_by: currentUser,
+                  modified_dt: now
+                })
+                .eq('reporting_submission_id', selectedSubmission.id);
+              
+              updateError = error;
+            } catch (err: any) {
+              // If reporting_submission_id doesn't exist, use fallback
+              if (err?.message?.includes('reporting_submission_id') || err?.code === '42703') {
+                const { error: fallbackError } = await supabase
+                  .from('prdn_reporting_stage_reassignment')
+                  .update({
+                    modified_by: currentUser,
+                    modified_dt: now
+                  })
+                  .eq('reporting_date', selectedSubmission.reporting_date)
+                  .eq('to_stage_code', selectedSubmission.stage_code);
+                
+                updateError = fallbackError;
+              } else {
+                updateError = err;
+              }
+            }
+            
+            if (updateError) {
+              console.error('Error updating stage reassignments:', updateError);
             }
           } else {
-            throw reassignmentsError;
+            console.warn('Error updating stage reassignments:', reassignmentsError);
+            // Don't throw - allow approval to continue even if stage reassignment update fails
           }
         }
       } catch (error) {
@@ -436,30 +620,78 @@
           })
           .eq('reporting_submission_id', selectedSubmission.id);
 
-        // Update stage reassignments (only if table has status column)
+        // Update stage reassignments (only if table has status column and reporting_submission_id)
         try {
-          const { error: reassignmentsRejectError } = await supabase
-            .from('prdn_reporting_stage_reassignment')
-            .update({
-              status: 'draft',
-              reporting_submission_id: null,
-              modified_by: currentUser,
-              modified_dt: now
-            })
-            .eq('reporting_submission_id', selectedSubmission.id);
+          let reassignmentsRejectError: any = null;
+          try {
+            const { error } = await supabase
+              .from('prdn_reporting_stage_reassignment')
+              .update({
+                status: 'draft',
+                reporting_submission_id: null,
+                modified_by: currentUser,
+                modified_dt: now
+              })
+              .eq('reporting_submission_id', selectedSubmission.id);
+            
+            reassignmentsRejectError = error;
+          } catch (err: any) {
+            // If reporting_submission_id column doesn't exist, use fallback
+            if (err?.message?.includes('reporting_submission_id') || err?.code === '42703') {
+              console.warn('reporting_submission_id column not found, using fallback update for reject');
+              const { error: fallbackError } = await supabase
+                .from('prdn_reporting_stage_reassignment')
+                .update({
+                  status: 'draft',
+                  modified_by: currentUser,
+                  modified_dt: now
+                })
+                .eq('reporting_date', selectedSubmission.reporting_date)
+                .eq('to_stage_code', selectedSubmission.stage_code);
+              
+              reassignmentsRejectError = fallbackError;
+            } else {
+              reassignmentsRejectError = err;
+            }
+          }
           
           if (reassignmentsRejectError) {
             // If error is about missing column, try without status
             if (reassignmentsRejectError.message?.includes('status') || reassignmentsRejectError.message?.includes('column')) {
               console.warn('prdn_reporting_stage_reassignment table may not have status column:', reassignmentsRejectError.message);
-              await supabase
-                .from('prdn_reporting_stage_reassignment')
-                .update({
-                  reporting_submission_id: null,
-                  modified_by: currentUser,
-                  modified_dt: now
-                })
-                .eq('reporting_submission_id', selectedSubmission.id);
+              let updateError: any = null;
+              try {
+                const { error } = await supabase
+                  .from('prdn_reporting_stage_reassignment')
+                  .update({
+                    reporting_submission_id: null,
+                    modified_by: currentUser,
+                    modified_dt: now
+                  })
+                  .eq('reporting_submission_id', selectedSubmission.id);
+                
+                updateError = error;
+              } catch (err: any) {
+                // If reporting_submission_id doesn't exist, use fallback
+                if (err?.message?.includes('reporting_submission_id') || err?.code === '42703') {
+                  const { error: fallbackError } = await supabase
+                    .from('prdn_reporting_stage_reassignment')
+                    .update({
+                      modified_by: currentUser,
+                      modified_dt: now
+                    })
+                    .eq('reporting_date', selectedSubmission.reporting_date)
+                    .eq('to_stage_code', selectedSubmission.stage_code);
+                  
+                  updateError = fallbackError;
+                } else {
+                  updateError = err;
+                }
+              }
+              
+              if (updateError) {
+                console.error('Error updating stage reassignments on reject:', updateError);
+              }
             } else {
               console.error('Error updating stage reassignments on reject:', reassignmentsRejectError);
             }
@@ -597,7 +829,12 @@
                 on:click={() => handleSubmissionSelect(submission)}
                 class="w-full text-left p-3 rounded-lg border theme-border transition-colors {selectedSubmission?.id === submission.id && selectedSubmission?.status === 'pending_approval' ? 'bg-blue-50 dark:bg-blue-900/20 border-blue-300' : 'theme-bg-secondary hover:theme-bg-secondary'}"
               >
-                <div class="font-medium theme-text-primary">{submission.stage_code}</div>
+                <div class="font-medium theme-text-primary">
+                  {submission.stage_code}
+                  {#if submission.version && submission.version > 1}
+                    <span class="text-xs font-normal theme-text-secondary"> (v{submission.version})</span>
+                  {/if}
+                </div>
                 <div class="text-sm theme-text-secondary">{submission.reporting_date}</div>
                 <div class="text-xs theme-text-secondary mt-1">
                   By: {submission.submitted_by} | {formatDateTimeLocal(submission.submitted_dt)}
@@ -629,7 +866,12 @@
                 on:click={() => handleApprovedSubmissionSelect(submission)}
                 class="w-full text-left p-3 rounded-lg border theme-border transition-colors {selectedSubmission?.id === submission.id && selectedSubmission?.status === 'approved' ? 'bg-green-50 dark:bg-green-900/20 border-green-300' : 'theme-bg-secondary hover:theme-bg-secondary'}"
               >
-                <div class="font-medium theme-text-primary">{submission.stage_code}</div>
+                <div class="font-medium theme-text-primary">
+                  {submission.stage_code}
+                  {#if submission.version && submission.version > 1}
+                    <span class="text-xs font-normal theme-text-secondary"> (v{submission.version})</span>
+                  {/if}
+                </div>
                 <div class="text-sm theme-text-secondary">{submission.reporting_date}</div>
                 <div class="text-xs theme-text-secondary mt-1">
                   Reviewed: {submission.reviewed_by} | {formatDateTimeLocal(submission.reviewed_dt)}
@@ -653,6 +895,9 @@
           <div>
             <h2 class="text-xl font-semibold theme-text-primary">
               Review: {selectedSubmission.stage_code} - {selectedSubmission.reporting_date}
+              {#if selectedSubmission.version && selectedSubmission.version > 1}
+                <span class="text-sm font-normal theme-text-secondary">(v{selectedSubmission.version})</span>
+              {/if}
             </h2>
             <p class="text-sm theme-text-secondary mt-1">
               {selectedSubmission.status === 'pending_approval' 
@@ -712,49 +957,209 @@
             </div>
           {:else}
             <div class="overflow-x-auto">
-              <table class="w-full">
+              <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700" style="table-layout: fixed; width: 100%;">
                 <thead class="theme-bg-secondary">
                   <tr>
-                    <th class="px-4 py-2 text-left text-xs font-medium theme-text-secondary uppercase">Work Order</th>
-                    <th class="px-4 py-2 text-left text-xs font-medium theme-text-secondary uppercase">Work Code</th>
-                    <th class="px-4 py-2 text-left text-xs font-medium theme-text-secondary uppercase">Worker</th>
-                    <th class="px-4 py-2 text-left text-xs font-medium theme-text-secondary uppercase">Hours Worked</th>
-                    <th class="px-4 py-2 text-left text-xs font-medium theme-text-secondary uppercase">Status</th>
-                    <th class="px-4 py-2 text-left text-xs font-medium theme-text-secondary uppercase">Lost Time</th>
+                    <th class="px-4 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider" style="width: 100px;">Work Order</th>
+                    <th class="px-4 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider" style="width: 120px;">PWO Number</th>
+                    <th class="px-4 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider" style="width: 120px;">Work Code</th>
+                    <th class="px-4 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider" style="width: 250px;">Work Name</th>
+                    <th class="px-4 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider" style="width: 180px;">Skills Required</th>
+                    <th class="px-4 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider" style="width: 120px;">Standard Time</th>
+                    <th class="px-4 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider" style="width: 120px;">Status</th>
+                    <th class="px-4 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider" style="width: 180px;">Worker (Skill)</th>
+                    <th class="px-4 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider" style="width: 140px;">Time Worked Till Date</th>
+                    <th class="px-4 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider" style="width: 100px;">From Time</th>
+                    <th class="px-4 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider" style="width: 100px;">To Time</th>
+                    <th class="px-4 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider" style="width: 140px;">Hours Worked</th>
+                    <th class="px-4 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider" style="width: 140px;">Total Hours Worked</th>
+                    <th class="px-4 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider" style="width: 120px;">OT Hours</th>
+                    <th class="px-4 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider" style="width: 120px;">Lost Time</th>
+                    <th class="px-4 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider" style="width: 200px;">Reason</th>
+                    <th class="px-4 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider" style="width: 150px;">Reported On</th>
                   </tr>
                 </thead>
-                <tbody class="divide-y theme-border">
-                  {#each worksReportData as report}
-                    <tr class="hover:theme-bg-secondary">
-                      <td class="px-4 py-2 text-sm theme-text-primary">
-                        {report.prdn_work_planning?.prdn_wo_details?.wo_no || 'N/A'}
+                <tbody class="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+                  {#each Object.values(groupedReportWorks) as group (group.workCode)}
+                    {@const typedGroup = group}
+                    <!-- Single Row per Work -->
+                    <tr class="hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors" 
+                        class:lost-time={typedGroup.hasLostTime}>
+                      <td class="px-4 py-2 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-gray-100">
+                        {typedGroup.woNo}
                       </td>
-                      <td class="px-4 py-2 text-sm theme-text-primary">
-                        {report.prdn_work_planning?.derived_sw_code || report.prdn_work_planning?.other_work_code || 'N/A'}
+                      <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">
+                        {typedGroup.pwoNo}
                       </td>
-                      <td class="px-4 py-2 text-sm theme-text-primary">
-                        {#if report.deviations && report.deviations.length > 0}
-                          {@const deviation = report.deviations[0]}
-                          <div class="flex items-center space-x-2">
-                            <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-orange-100 text-orange-800 dark:bg-orange-900/20 dark:text-orange-400">
-                              ⚠️ Deviation: {deviation.deviation_type}
+                      <td class="px-4 py-2 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-gray-100">
+                        {typedGroup.workCode}
+                      </td>
+                      <td class="px-4 py-2 text-sm text-gray-900 dark:text-gray-100" style="word-wrap: break-word;">
+                        {typedGroup.workName}
+                      </td>
+                      <td class="px-4 py-2 text-sm text-gray-900 dark:text-gray-100">
+                        <div class="flex flex-wrap gap-1">
+                          {#each typedGroup.items as report}
+                            {@const skillName = report.skillMapping?.sc_name || report.prdn_work_planning?.std_work_skill_mapping?.sc_name || report.prdn_work_planning?.sc_required || 'N/A'}
+                            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-400">
+                              {skillName}
                             </span>
-                          </div>
-                          <div class="mt-1 text-xs text-orange-600 dark:text-orange-400">
-                            {deviation.reason}
-                          </div>
-                        {:else if report.prdn_work_planning?.hr_emp?.emp_name}
-                          {report.prdn_work_planning.hr_emp.emp_name}
+                          {/each}
+                        </div>
+                      </td>
+                      <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">
+                        {#if typedGroup.items && typedGroup.items.length > 0}
+                          {@const firstItem = typedGroup.items[0]}
+                          {#if firstItem?.vehicleWorkFlow?.estimated_duration_minutes}
+                            {formatTime(firstItem.vehicleWorkFlow.estimated_duration_minutes / 60)}
+                          {:else if firstItem?.skillTimeStandard?.standard_time_minutes}
+                            {formatTime(firstItem.skillTimeStandard.standard_time_minutes / 60)}
+                          {:else}
+                            N/A
+                          {/if}
                         {:else}
-                          <span class="text-gray-400 italic">No worker assigned</span>
+                          N/A
                         {/if}
                       </td>
-                      <td class="px-4 py-2 text-sm theme-text-primary">{report.hours_worked_today || 0}h</td>
-                      <td class="px-4 py-2 text-sm theme-text-primary">
-                        {report.completion_status === 'C' ? 'Completed' : 'Not Completed'}
+                      <td class="px-4 py-2 text-sm">
+                        <div class="flex flex-wrap gap-1">
+                          {#each typedGroup.items as report}
+                            {#if report.completion_status === 'C'}
+                              <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-400">Completed</span>
+                            {:else if report.completion_status === 'NC'}
+                              <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-800 dark:bg-orange-900/20 dark:text-orange-400">Not Completed</span>
+                            {:else}
+                              <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300">
+                                {report.completion_status || 'Unknown'}
+                              </span>
+                            {/if}
+                          {/each}
+                        </div>
                       </td>
-                      <td class="px-4 py-2 text-sm theme-text-primary">
-                        {report.lt_minutes_total || 0} min
+                      <td class="px-4 py-2 text-sm text-gray-900 dark:text-gray-100">
+                        <div class="flex flex-col gap-0.5">
+                          {#each typedGroup.items as report}
+                            <div class="text-xs">
+                              {#if report.deviations && report.deviations.length > 0}
+                                {@const deviation = report.deviations[0]}
+                                <div class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-orange-100 text-orange-800 dark:bg-orange-900/20 dark:text-orange-400">
+                                  ⚠️ {deviation.deviation_type}
+                                </div>
+                                <div class="mt-0.5 text-xs text-orange-600 dark:text-orange-400 truncate" title={deviation.reason}>
+                                  {deviation.reason}
+                                </div>
+                              {:else if report.worker_id && report.prdn_work_planning?.hr_emp}
+                                <span class="font-medium">{report.prdn_work_planning.hr_emp.emp_name || 'N/A'}</span>
+                                <span class="text-xs {report.lt_minutes_total > 0 ? 'text-gray-600' : 'theme-text-secondary'}"> ({report.prdn_work_planning.hr_emp.skill_short || 'N/A'})</span>
+                              {:else}
+                                <span class="text-gray-400 italic text-xs">No worker</span>
+                              {/if}
+                            </div>
+                          {/each}
+                        </div>
+                      </td>
+                      <td class="px-4 py-2 text-sm text-gray-900 dark:text-gray-100">
+                        <div class="flex flex-col gap-0.5">
+                          {#each typedGroup.items as report}
+                            <div class="text-xs font-medium">
+                              {formatTime(report.hours_worked_till_date || 0)}
+                            </div>
+                          {/each}
+                        </div>
+                      </td>
+                      <td class="px-4 py-2 text-sm text-gray-900 dark:text-gray-100">
+                        <div class="flex flex-col gap-0.5">
+                          {#each typedGroup.items as report}
+                            <div class="text-xs">{report.from_time || 'N/A'}</div>
+                          {/each}
+                        </div>
+                      </td>
+                      <td class="px-4 py-2 text-sm text-gray-900 dark:text-gray-100">
+                        <div class="flex flex-col gap-0.5">
+                          {#each typedGroup.items as report}
+                            <div class="text-xs">{report.to_time || 'N/A'}</div>
+                          {/each}
+                        </div>
+                      </td>
+                      <td class="px-4 py-2 text-sm text-gray-900 dark:text-gray-100">
+                        <div class="flex flex-col gap-0.5">
+                          {#each typedGroup.items as report}
+                            <div class="text-xs">
+                              <div class="font-medium">
+                                {formatTime(report.hours_worked_today || 0)}
+                              </div>
+                              {#if report.skillTimeStandard}
+                                <div class="text-xs text-gray-600 dark:text-gray-400">
+                                  Std: {formatTime(report.skillTimeStandard.standard_time_minutes / 60)}
+                                </div>
+                                <div class="text-xs text-gray-600 dark:text-gray-400">
+                                  Rem: {formatTime(report.remainingTimeMinutes / 60)}
+                                </div>
+                              {/if}
+                            </div>
+                          {/each}
+                        </div>
+                      </td>
+                      <td class="px-4 py-2 text-sm text-gray-900 dark:text-gray-100">
+                        <div class="flex flex-col gap-0.5">
+                          {#each typedGroup.items as report}
+                            <div class="text-xs font-medium">
+                              {formatTime((report.hours_worked_till_date || 0) + (report.hours_worked_today || 0))}
+                            </div>
+                          {/each}
+                        </div>
+                      </td>
+                      <td class="px-4 py-2 text-sm text-gray-900 dark:text-gray-100">
+                        <div class="flex flex-col gap-0.5">
+                          {#each typedGroup.items as report}
+                            <div class="text-xs">
+                              {#if report.overtime_minutes && report.overtime_minutes > 0}
+                                <span class="text-orange-600 dark:text-orange-400 font-medium">
+                                  {formatTime((report.overtime_minutes || 0) / 60)}
+                                </span>
+                              {:else}
+                                <span class="text-gray-400">-</span>
+                              {/if}
+                            </div>
+                          {/each}
+                        </div>
+                      </td>
+                      <td class="px-4 py-2 text-sm text-gray-900 dark:text-gray-100">
+                        <div class="flex flex-col gap-0.5">
+                          {#each typedGroup.items as report}
+                            <div class="text-xs">
+                              {#if report.lt_minutes_total > 0}
+                                <span class="text-yellow-600 dark:text-yellow-400 font-medium">
+                                  {report.lt_minutes_total}m
+                                </span>
+                              {:else}
+                                <span class="text-green-600 dark:text-green-400">-</span>
+                              {/if}
+                            </div>
+                          {/each}
+                        </div>
+                      </td>
+                      <td class="px-4 py-2 text-sm text-gray-900 dark:text-gray-100">
+                        <div class="flex flex-col gap-0.5">
+                          {#each typedGroup.items as report}
+                            <div class="text-xs truncate text-gray-700 dark:text-gray-300" title={report.lt_details && Array.isArray(report.lt_details) && report.lt_details.length > 0 ? formatLostTimeDetails(report.lt_details) : ''}>
+                              {#if report.lt_details && Array.isArray(report.lt_details) && report.lt_details.length > 0}
+                                {formatLostTimeDetails(report.lt_details)}
+                              {:else if report.lt_minutes_total > 0}
+                                <span class="text-gray-500 dark:text-gray-400">N/A</span>
+                              {:else}
+                                <span class="text-gray-500 dark:text-gray-400">-</span>
+                              {/if}
+                            </div>
+                          {/each}
+                        </div>
+                      </td>
+                      <td class="px-4 py-2 text-sm text-gray-900 dark:text-gray-100">
+                        <div class="flex flex-col gap-0.5">
+                          {#each typedGroup.items as report}
+                            <div class="text-xs">{formatDateTimeLocal(report.created_dt)}</div>
+                          {/each}
+                        </div>
                       </td>
                     </tr>
                   {/each}

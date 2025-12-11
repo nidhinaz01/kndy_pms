@@ -15,6 +15,8 @@ interface ReportWork {
   completion_status: 'C' | 'NC';
   lt_minutes_total?: number;
   lt_details?: Array<{ lt_minutes: number; lt_reason: string; is_lt_payable: boolean; lt_value: number }>;
+  overtime_minutes?: number | null;
+  overtime_amount?: number | null;
   prdn_work_planning?: any;
   vehicleWorkFlow?: any;
   skillTimeStandard?: any;
@@ -83,6 +85,7 @@ export function generateReportExcel(
           'To Time': report.to_time || 'N/A',
           'Hours Worked': formatTime(report.hours_worked_today || 0),
           'Total Hours Worked': formatTime((report.hours_worked_till_date || 0) + (report.hours_worked_today || 0)),
+          'OT Hours': report.overtime_minutes && report.overtime_minutes > 0 ? formatTime((report.overtime_minutes || 0) / 60) : '-',
           'Lost Time (minutes)': report.lt_minutes_total || 0,
           'Lost Time Details': report.lt_details && Array.isArray(report.lt_details) && report.lt_details.length > 0
             ? report.lt_details.map((lt: any) => `${lt.lt_minutes} min - ${lt.lt_reason} (${lt.is_lt_payable ? 'Payable' : 'Non-Payable'})`).join('; ')
@@ -137,6 +140,7 @@ export function generateReportExcel(
       { wch: 12 }, // To Time
       { wch: 15 }, // Hours Worked
       { wch: 18 }, // Total Hours Worked
+      { wch: 15 }, // OT Hours
       { wch: 18 }, // Lost Time (minutes)
       { wch: 50 }, // Lost Time Details
       { wch: 15 }, // Status
