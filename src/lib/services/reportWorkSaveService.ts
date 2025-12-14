@@ -1,5 +1,6 @@
 import { supabase } from '$lib/supabaseClient';
 import type { ReportWorkFormData } from '$lib/types/reportWork';
+import { calculatePieceRateForPlanning } from './pieceRateCalculationService';
 
 export async function saveWorkReport(
   plannedWork: any,
@@ -48,6 +49,15 @@ export async function saveWorkReport(
 
     if (error) {
       return { success: false, error: error.message || 'Unknown error' };
+    }
+
+    // Calculate piece rate if work is completed
+    if (formData.completionStatus === 'C') {
+      const pieceRateResult = await calculatePieceRateForPlanning(plannedWork.id);
+      if (!pieceRateResult.success) {
+        console.warn('Piece rate calculation failed:', pieceRateResult.error);
+        // Don't fail the save, just log the warning
+      }
     }
 
     return { success: true, data };

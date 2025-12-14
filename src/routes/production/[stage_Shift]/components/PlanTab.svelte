@@ -214,9 +214,9 @@
               <td class="px-6 py-4 whitespace-nowrap text-sm theme-text-primary">
                 <div class="flex flex-wrap gap-1">
                   {#each typedGroup.items as plannedWork}
-                    <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-400">
+                  <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-400">
                       {plannedWork.sc_required || 'N/A'}
-                    </span>
+                  </span>
                   {/each}
                 </div>
               </td>
@@ -263,76 +263,76 @@
               </td>
               <td class="px-6 py-4 text-sm theme-text-primary">
                 <div class="space-y-1">
-                  {#each typedGroup.items as plannedWork}
+              {#each typedGroup.items as plannedWork}
                     <div>{plannedWork.from_time || 'N/A'}</div>
                   {/each}
                 </div>
-              </td>
+                  </td>
               <td class="px-6 py-4 text-sm theme-text-primary">
                 <div class="space-y-1">
                   {#each typedGroup.items as plannedWork}
                     <div>{plannedWork.to_time || 'N/A'}</div>
                   {/each}
                 </div>
-              </td>
+                  </td>
               <td class="px-6 py-4 text-sm theme-text-primary">
                 <div class="space-y-1">
                   {#each typedGroup.items as plannedWork}
-                    <div class="font-medium">
-                      {#if plannedWork.from_time && plannedWork.to_time}
-                        {@const calculatedHours = (() => {
-                          try {
-                            const from = new Date(`2000-01-01T${plannedWork.from_time}`);
-                            const to = new Date(`2000-01-01T${plannedWork.to_time}`);
-                            if (to < from) to.setDate(to.getDate() + 1);
-                            const diffMs = to.getTime() - from.getTime();
-                            const totalHours = diffMs / (1000 * 60 * 60);
-                            const breakMinutes = calculateBreakTimeInRange(plannedWork.from_time, plannedWork.to_time, shiftBreakTimes);
-                            const breakHours = breakMinutes / 60;
-                            const plannedHours = totalHours - breakHours;
-                            return Math.max(0, plannedHours);
-                          } catch {
-                            return 0;
-                          }
-                        })()}
-                        {formatTime(calculatedHours)}
-                      {:else if plannedWork.planned_hours}
-                        {formatTime(plannedWork.planned_hours)}
-                      {:else}
-                        N/A
-                      {/if}
-                    </div>
+                      <div class="font-medium">
+                        {#if plannedWork.from_time && plannedWork.to_time}
+                          {@const calculatedHours = (() => {
+                            try {
+                              const from = new Date(`2000-01-01T${plannedWork.from_time}`);
+                              const to = new Date(`2000-01-01T${plannedWork.to_time}`);
+                              if (to < from) to.setDate(to.getDate() + 1);
+                              const diffMs = to.getTime() - from.getTime();
+                              const totalHours = diffMs / (1000 * 60 * 60);
+                              const breakMinutes = calculateBreakTimeInRange(plannedWork.from_time, plannedWork.to_time, shiftBreakTimes);
+                              const breakHours = breakMinutes / 60;
+                              const plannedHours = totalHours - breakHours;
+                              return Math.max(0, plannedHours);
+                            } catch {
+                              return 0;
+                            }
+                          })()}
+                          {formatTime(calculatedHours)}
+                        {:else if plannedWork.planned_hours}
+                          {formatTime(plannedWork.planned_hours)}
+                        {:else}
+                          N/A
+                        {/if}
+                      </div>
                   {/each}
-                </div>
-              </td>
+                    </div>
+                  </td>
               <td class="px-6 py-4 text-sm theme-text-primary">
                 <div class="space-y-1">
                   {#each typedGroup.items as plannedWork}
-                    <div class="font-medium">
-                      {plannedWork.time_worked_till_date ? formatTime(plannedWork.time_worked_till_date) : '0h 0m'}
-                    </div>
+                      <div class="font-medium">
+                        {plannedWork.time_worked_till_date ? formatTime(plannedWork.time_worked_till_date) : '0h 0m'}
+                      </div>
                   {/each}
-                </div>
-              </td>
+                    </div>
+                  </td>
               <td class="px-6 py-4 text-sm theme-text-primary">
                 <div class="space-y-1">
                   {#each typedGroup.items as plannedWork}
-                    <div class="font-medium">
-                      {plannedWork.remaining_time ? formatTime(plannedWork.remaining_time) : 'N/A'}
-                    </div>
+                      <div class="font-medium">
+                        {plannedWork.remaining_time ? formatTime(plannedWork.remaining_time) : 'N/A'}
+                      </div>
                   {/each}
-                </div>
-              </td>
-              <td class="px-6 py-4 whitespace-nowrap text-sm theme-text-primary">
-                <div class="flex space-x-2">
-                  <Button 
-                    variant="primary" 
-                    size="sm" 
+                    </div>
+                  </td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm theme-text-primary">
+                    <div class="flex space-x-2">
+                      <Button 
+                        variant="primary" 
+                        size="sm" 
                     disabled={isCancelled || hasReported}
                     on:click={() => handleReportWork(typedGroup)}
-                  >
-                    Report
-                  </Button>
+                      >
+                        Report
+                      </Button>
                   <Button 
                     variant="danger" 
                     size="sm" 
@@ -341,9 +341,9 @@
                   >
                     Cancel
                   </Button>
-                </div>
-              </td>
-            </tr>
+                    </div>
+                  </td>
+                </tr>
           {/each}
         </tbody>
       </table>

@@ -103,7 +103,7 @@
               updatedItem.cost = Math.round(totalCost * 100) / 100; // Round to 2 decimal places
             } else {
               // Fallback to average salary if no workers provided
-              const salaryPerMinute = (employeeSalary || 0) / daysInMonth / 480;
+            const salaryPerMinute = (employeeSalary || 0) / daysInMonth / 480;
               const cost = updatedItem.minutes * salaryPerMinute;
               updatedItem.cost = Math.round(cost * 100) / 100;
             }
@@ -223,8 +223,8 @@
                 totalCost += workerCost;
               });
               const newCost = Math.round(totalCost * 100) / 100;
-              
-              // Only update if cost actually changed
+            
+            // Only update if cost actually changed
               if (Math.abs(newCost - item.cost) > 0.01 || JSON.stringify(workerCosts) !== JSON.stringify(item.workerCosts || {})) {
                 return { ...item, cost: newCost, workerCosts };
               }
@@ -234,8 +234,8 @@
               const calculatedCost = item.minutes * salaryPerMinute;
               const newCost = Math.round(calculatedCost * 100) / 100;
               
-              if (Math.abs(newCost - item.cost) > 0.01) {
-                return { ...item, cost: newCost };
+            if (Math.abs(newCost - item.cost) > 0.01) {
+              return { ...item, cost: newCost };
               }
             }
           } else if (item.cost !== 0) {

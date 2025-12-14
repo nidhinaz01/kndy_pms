@@ -19,6 +19,7 @@
   export let workOrder: any = null;
   export let selectedSlot: any = null;
   export let calculatedDates: any = null;
+  export let isPastEntryMode = false; // Whether this is a past entry
 
   // State
   let isLoading = false;
@@ -63,7 +64,9 @@
       }
 
       // Calculate stage dates and times sequentially
-      let currentDateTime = new Date(calculatedDates.productionEntryDate + 'T' + selectedSlot.time);
+      // Use productionEntryTime if available (for past entries), otherwise use selectedSlot.time
+      const entryTime = calculatedDates.productionEntryTime || selectedSlot.time;
+      let currentDateTime = new Date(calculatedDates.productionEntryDate + 'T' + entryTime);
       stageDates = [];
       clearShiftInfoCache(); // Clear cache for new calculation
 
@@ -108,14 +111,17 @@
       return false;
     }
 
-    // Validate that the selected date is not in the past
-    const selectedDate = new Date(selectedSlot.date);
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    
-    if (selectedDate < today) {
-      error = 'Cannot schedule production for past dates';
-      return false;
+    // Skip past date validation if this is a past entry mode
+    if (!isPastEntryMode) {
+      // Validate that the selected date is not in the past
+      const selectedDate = new Date(selectedSlot.date);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      
+      if (selectedDate < today) {
+        error = 'Cannot schedule production for past dates';
+        return false;
+      }
     }
 
     // Validate time format (HH:MM)
@@ -151,12 +157,14 @@
       const now = getCurrentTimestamp();
 
       // Save all dates to prdn_dates table
+      // Use productionEntryTime if available (for past entries), otherwise use selectedSlot.time
+      const entryTime = calculatedDates.productionEntryTime || selectedSlot?.time;
       const datesToSave = [
         // Chassis arrival - using same time as production entry
         {
           sales_order_id: workOrder.id,
           date_type: 'chassis_arrival',
-          planned_date: `${calculatedDates.chassisArrivalDate}T${selectedSlot?.time}:00`,
+          planned_date: `${calculatedDates.chassisArrivalDate}T${entryTime}:00`,
           stage_code: null,
           created_by: username,
           created_dt: now,
@@ -197,7 +205,7 @@
         datesToSave.push({
           sales_order_id: workOrder.id,
           date_type: 'rnd_documents',
-          planned_date: `${calculatedDates.documentReleaseDate}T${selectedSlot?.time}:00`,
+          planned_date: `${calculatedDates.documentReleaseDate}T${entryTime}:00`,
           stage_code: stage.stage,
           created_by: username,
           created_dt: now,
@@ -412,8 +420,8 @@
             <div>
               <span class="font-medium {textSecondary}">Production Start:</span>
               <div class="ml-2">
-                <div class="{textPrimary} font-medium">{formatDateWithWeekday(selectedSlot?.date)}</div>
-                <div class="{textSecondary} text-sm">at {selectedSlot?.time}</div>
+                <div class="{textPrimary} font-medium">{formatDateWithWeekday(calculatedDates.productionEntryDate || selectedSlot?.date)}</div>
+                <div class="{textSecondary} text-sm">at {calculatedDates.productionEntryTime || selectedSlot?.time}</div>
               </div>
             </div>
           </div>
@@ -451,17 +459,17 @@
                 <div class="text-center p-3 {cardBg} rounded-lg">
                   <div class="text-sm {textSecondary} mb-1">Chassis Arrival</div>
                   <div class="text-lg font-semibold {textPrimary}">{formatDateWithWeekday(calculatedDates.chassisArrivalDate)}</div>
-                  <div class="text-sm {textSecondary}">at {selectedSlot?.time}</div>
+                  <div class="text-sm {textSecondary}">at {calculatedDates.productionEntryTime || selectedSlot?.time}</div>
                 </div>
                 <div class="text-center p-3 {cardBg} rounded-lg">
                   <div class="text-sm {textSecondary} mb-1">Document Release</div>
                   <div class="text-lg font-semibold {textPrimary}">{formatDateWithWeekday(calculatedDates.documentReleaseDate)}</div>
-                  <div class="text-sm {textSecondary}">at {selectedSlot?.time}</div>
+                  <div class="text-sm {textSecondary}">at {calculatedDates.productionEntryTime || selectedSlot?.time}</div>
                 </div>
                 <div class="text-center p-3 {cardBg} rounded-lg">
                   <div class="text-sm {textSecondary} mb-1">Production Start</div>
                   <div class="text-lg font-semibold {textPrimary}">{formatDateWithWeekday(calculatedDates.productionEntryDate)}</div>
-                  <div class="text-sm {textSecondary}">at {selectedSlot?.time}</div>
+                  <div class="text-sm {textSecondary}">at {calculatedDates.productionEntryTime || selectedSlot?.time}</div>
                 </div>
               </div>
             </div>

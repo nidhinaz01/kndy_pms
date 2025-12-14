@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Menu, FileText, Users, Circle, Settings, ClipboardList, BusFront, ChartNoAxesCombined, IdCardLanyard, IndianRupee, ChartGantt, Factory, Codesandbox, Atom, BarChart3, Calendar, Database, UserCheck, Cog } from 'lucide-svelte';
+  import { Menu, FileText, Users, Circle, Settings, ClipboardList, BusFront, ChartNoAxesCombined, IdCardLanyard, IndianRupee, ChartGantt, Factory, Codesandbox, Atom, BarChart3, Calendar, Database, UserCheck, Cog, Calculator } from 'lucide-svelte';
 
   export let name: string;
 
@@ -21,7 +21,8 @@
     'Standards': Atom,
     'QC': UserCheck,
     'Finance': IndianRupee,
-    'Management': Cog
+    'Management': Cog,
+    'Piece Rate': Calculator
   };
 
   const IconComponent = iconMap[name] || Circle;

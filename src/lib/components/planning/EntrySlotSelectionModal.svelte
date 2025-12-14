@@ -9,11 +9,13 @@
   import { calculateDateBefore, isHoliday } from '$lib/utils/dateCalculationUtils';
   import { formatDateWithWeekday } from '$lib/utils/formatDate';
   import { fetchShiftsForStage } from '$lib/api/hrShiftStageMaster';
+  import { validateTimeAgainstShifts, calculatePastEntryDates } from '../../../routes/planning/entry-plan/services/pastEntryDateService';
 
   const dispatch = createEventDispatcher();
 
   export let showModal = false;
   export let workOrder: any = null;
+  export let isPastEntryMode = false; // Toggle state from parent
 
   // State
   let availableSlots: Array<{
@@ -29,6 +31,12 @@
   let error = '';
   let holidays: any[] = [];
   let allowedShiftCodes: string[] = []; // Shifts allowed for the first stage
+  let firstStageCode: string | null = null; // First stage code for validation
+
+  // Past entry mode state
+  let pastEntryDate = '';
+  let pastEntryTime = '';
+  let isTimeValidating = false;
 
   // Lead time configuration
   let chassisLeadTime = 5;
@@ -42,7 +50,7 @@
       error = '';
 
       // First, get the first stage for this work order type
-      let firstStageCode: string | null = null;
+      firstStageCode = null;
       if (workOrder?.wo_model) {
         const { data: stageOrderData } = await supabase
           .from('plan_wo_stage_order')
@@ -341,31 +349,101 @@
     selectedSlot = slot;
   }
 
-  function handleConfirm() {
-    if (!selectedSlot) {
-      error = 'Please select an entry slot';
-      return;
-    }
-
-    // Calculate dates
-    const productionEntryDate = selectedSlot.date;
-    const documentReleaseDate = calculateDateBefore(productionEntryDate, documentLeadTime, holidays);
-    const chassisArrivalDate = calculateDateBefore(productionEntryDate, chassisLeadTime, holidays);
-
-    // Dispatch event with calculated dates
-    dispatch('confirm', {
-      workOrder,
-      selectedSlot,
-      calculatedDates: {
-        productionEntryDate,
-        documentReleaseDate,
-        chassisArrivalDate,
-        finalInspectionLeadTime,
-        deliveryLeadTime
+  async function handleConfirm() {
+    if (isPastEntryMode) {
+      // Validate past entry mode
+      if (!pastEntryDate || !pastEntryTime) {
+        error = 'Please enter both date and time for production entry';
+        return;
       }
-    });
 
-    closeModal();
+      // Validate time format
+      const timeRegex = /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/;
+      if (!timeRegex.test(pastEntryTime)) {
+        error = 'Invalid time format. Please use HH:MM format';
+        return;
+      }
+
+      // Validate time against shift hours if first stage is known
+      if (firstStageCode) {
+        isTimeValidating = true;
+        error = '';
+        const timeValidation = await validateTimeAgainstShifts(pastEntryTime, firstStageCode);
+        isTimeValidating = false;
+        
+        if (!timeValidation.isValid) {
+          error = timeValidation.error || 'Time validation failed';
+          return;
+        }
+      }
+
+      // Calculate dates for past entry
+      const calculatedDates = calculatePastEntryDates(
+        pastEntryDate,
+        pastEntryTime,
+        chassisLeadTime,
+        documentLeadTime,
+        holidays
+      );
+
+      // Create a slot-like object for consistency
+      const pastEntrySlot = {
+        date: pastEntryDate,
+        time: pastEntryTime,
+        isPastEntry: true
+      };
+
+      // Dispatch event with calculated dates
+      dispatch('confirm', {
+        workOrder,
+        selectedSlot: pastEntrySlot,
+        calculatedDates: {
+          ...calculatedDates,
+          finalInspectionLeadTime,
+          deliveryLeadTime
+        },
+        isPastEntryMode: true
+      });
+
+      closeModal();
+    } else {
+      // Original slot selection mode
+      if (!selectedSlot) {
+        error = 'Please select an entry slot';
+        return;
+      }
+
+      // Calculate dates
+      const productionEntryDate = selectedSlot.date;
+      const documentReleaseDate = calculateDateBefore(productionEntryDate, documentLeadTime, holidays);
+      const chassisArrivalDate = calculateDateBefore(productionEntryDate, chassisLeadTime, holidays);
+
+      // Dispatch event with calculated dates
+      dispatch('confirm', {
+        workOrder,
+        selectedSlot,
+        calculatedDates: {
+          productionEntryDate,
+          documentReleaseDate,
+          chassisArrivalDate,
+          finalInspectionLeadTime,
+          deliveryLeadTime
+        },
+        isPastEntryMode: false
+      });
+
+      closeModal();
+    }
+  }
+
+  function handleToggleChange() {
+    // Reset selection when toggling
+    selectedSlot = null;
+    pastEntryDate = '';
+    pastEntryTime = '';
+    error = '';
+    // Dispatch toggle change to parent
+    dispatch('toggleChange', { isPastEntryMode: !isPastEntryMode });
   }
 
 
@@ -464,13 +542,74 @@
           <!-- Available Slots -->
           <div class="space-y-4">
             <div class="mb-4">
-              <h3 class="text-lg font-semibold mb-2 {currentTheme === 'dark' ? 'text-white' : 'text-gray-900'}">Available Entry Slots</h3>
-              <p class="text-sm {currentTheme === 'dark' ? 'text-gray-400' : 'text-gray-600'}">
-                Select a specific date and time slot for production entry. Each slot combines a date with a specific time.
-              </p>
+              <div class="flex items-center justify-between mb-2">
+                <h3 class="text-lg font-semibold {currentTheme === 'dark' ? 'text-white' : 'text-gray-900'}">Available Entry Slots</h3>
+                <!-- Toggle Switch -->
+                <div class="flex items-center gap-2">
+                  <label class="text-sm font-medium {currentTheme === 'dark' ? 'text-gray-300' : 'text-gray-700'}">
+                    Already entered production
+                  </label>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={isPastEntryMode}
+                    on:click={handleToggleChange}
+                    class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 {isPastEntryMode ? 'bg-blue-600' : 'bg-gray-300'}"
+                  >
+                    <span
+                      class="inline-block h-4 w-4 transform rounded-full bg-white transition-transform {isPastEntryMode ? 'translate-x-6' : 'translate-x-1'}"
+                    ></span>
+                  </button>
+                </div>
+              </div>
+              {#if !isPastEntryMode}
+                <p class="text-sm {currentTheme === 'dark' ? 'text-gray-400' : 'text-gray-600'}">
+                  Select a specific date and time slot for production entry. Each slot combines a date with a specific time.
+                </p>
+              {:else}
+                <p class="text-sm {currentTheme === 'dark' ? 'text-yellow-300' : 'text-yellow-700'}">
+                  Enter the date and time when the work order entered production. Other dates will be calculated automatically.
+                </p>
+              {/if}
             </div>
+
+            <!-- Past Entry Date/Time Picker -->
+            {#if isPastEntryMode}
+              <div class="mb-4 p-4 rounded-lg border-2 {currentTheme === 'dark' ? 'bg-gray-800 border-blue-600' : 'bg-blue-50 border-blue-300'}">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label for="pastEntryDate" class="block text-sm font-medium mb-2 {currentTheme === 'dark' ? 'text-white' : 'text-gray-900'}">
+                      Production Entry Date *
+                    </label>
+                    <input
+                      id="pastEntryDate"
+                      type="date"
+                      bind:value={pastEntryDate}
+                      class="w-full px-3 py-2 border rounded-lg {currentTheme === 'dark' ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'} focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    />
+                  </div>
+                  <div>
+                    <label for="pastEntryTime" class="block text-sm font-medium mb-2 {currentTheme === 'dark' ? 'text-white' : 'text-gray-900'}">
+                      Production Entry Time *
+                    </label>
+                    <input
+                      id="pastEntryTime"
+                      type="time"
+                      bind:value={pastEntryTime}
+                      class="w-full px-3 py-2 border rounded-lg {currentTheme === 'dark' ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'} focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    />
+                    {#if isTimeValidating}
+                      <p class="text-xs mt-1 {currentTheme === 'dark' ? 'text-gray-400' : 'text-gray-600'}">Validating time...</p>
+                    {/if}
+                  </div>
+                </div>
+                {#if error && isPastEntryMode}
+                  <p class="text-sm text-red-600 mt-2">{error}</p>
+                {/if}
+              </div>
+            {/if}
             
-            <div class="grid gap-4">
+            <div class="grid gap-4 {isPastEntryMode ? 'opacity-50 pointer-events-none' : ''}">
               {#each availableSlots as slot}
                 <div 
                   class="border-2 rounded-lg p-4 cursor-pointer transition-all duration-200 {selectedSlot === slot ? (currentTheme === 'dark' ? 'border-blue-500 bg-blue-900/20' : 'border-blue-500 bg-blue-50') : (currentTheme === 'dark' ? 'border-gray-700 hover:border-blue-600' : 'border-gray-200 hover:border-blue-300')}"
@@ -552,9 +691,9 @@
         <Button 
           variant="primary" 
           on:click={handleConfirm}
-          disabled={!selectedSlot}
+          disabled={isPastEntryMode ? (!pastEntryDate || !pastEntryTime || isTimeValidating) : !selectedSlot}
         >
-          Confirm Selection
+          {isPastEntryMode ? 'Confirm Entry Date' : 'Confirm Selection'}
         </Button>
       </div>
     </div>

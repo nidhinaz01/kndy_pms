@@ -21,6 +21,7 @@
   let selectedWorkOrder: any = null;
   let selectedSlot: any = null;
   let calculatedDates: any = null;
+  let isPastEntryMode = false; // Toggle state for past entry mode
 
   // Data
   let workOrders: any[] = [];
@@ -184,16 +185,22 @@
 
   function handleCreateEntryPlan(workOrder: any) {
     selectedWorkOrder = workOrder;
+    isPastEntryMode = false; // Reset toggle state when opening modal
     showEntrySlotModal = true;
   }
 
   function handleEntrySlotConfirm(event: any) {
-    const { workOrder, selectedSlot: slot, calculatedDates: dates } = event.detail;
+    const { workOrder, selectedSlot: slot, calculatedDates: dates, isPastEntryMode: pastMode } = event.detail;
     selectedWorkOrder = workOrder;
     selectedSlot = slot;
     calculatedDates = dates;
+    isPastEntryMode = pastMode || false; // Preserve toggle state
     showEntrySlotModal = false;
     showPlanSummaryModal = true;
+  }
+
+  function handleToggleChange(event: any) {
+    isPastEntryMode = event.detail.isPastEntryMode;
   }
 
   function handlePlanSaved(event: any) {
@@ -202,6 +209,7 @@
     selectedWorkOrder = null;
     selectedSlot = null;
     calculatedDates = null;
+    isPastEntryMode = false; // Reset toggle state after saving
   }
 
   function handleViewWorkOrder(workOrder: any) {
@@ -655,7 +663,9 @@
 <EntrySlotSelectionModal 
   bind:showModal={showEntrySlotModal}
   workOrder={selectedWorkOrder}
+  isPastEntryMode={isPastEntryMode}
   on:confirm={handleEntrySlotConfirm}
+  on:toggleChange={handleToggleChange}
   on:close={() => showEntrySlotModal = false}
 />
 
@@ -665,6 +675,7 @@
   workOrder={selectedWorkOrder}
   selectedSlot={selectedSlot}
   calculatedDates={calculatedDates}
+  isPastEntryMode={isPastEntryMode}
   on:saved={handlePlanSaved}
   on:back={() => {
     showPlanSummaryModal = false;

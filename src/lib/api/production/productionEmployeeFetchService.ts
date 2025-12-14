@@ -171,7 +171,7 @@ export async function fetchProductionEmployees(
     
     // Get unique shift codes from employees
     const uniqueShiftCodes = [...new Set(employees.map(emp => emp.shift_code).filter(Boolean))];
-    
+      
     // Fetch break times for each unique shift
     for (const shiftCode of uniqueShiftCodes) {
       const { data: shiftData } = await supabase
@@ -193,8 +193,8 @@ export async function fetchProductionEmployees(
         
         if (breaksData) {
           shiftBreakTimesMap.set(shiftCode, breaksData);
-        }
       }
+    }
     }
     
     // Create a map of worker_id -> shift_code for quick lookup

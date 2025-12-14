@@ -1,6 +1,7 @@
 import { supabase } from '$lib/supabaseClient';
 import type { MultiSkillReportFormData, BreakdownData } from '$lib/types/multiSkillReport';
 import type { LostTimeReason } from '$lib/api/lostTimeReasons';
+import { calculatePieceRateForPlanning } from './pieceRateCalculationService';
 
 export async function saveMultiSkillReports(
   selectedWorks: any[],
@@ -149,6 +150,23 @@ export async function saveMultiSkillReports(
     }
 
     const savedReports = data || [];
+    
+    // Calculate piece rate for all planning_ids if any report is completed
+    const completedPlanningIds = new Set<number>();
+    savedReports.forEach((report: any) => {
+      if (report.completion_status === 'C') {
+        completedPlanningIds.add(report.planning_id);
+      }
+    });
+
+    // Calculate piece rate for each completed planning
+    for (const planningId of completedPlanningIds) {
+      const pieceRateResult = await calculatePieceRateForPlanning(planningId);
+      if (!pieceRateResult.success) {
+        console.warn(`Piece rate calculation failed for planning ${planningId}:`, pieceRateResult.error);
+        // Don't fail the save, just log the warning
+      }
+    }
     
     // Create deviation records for skills with deviations
     const deviationsToCreate: Array<{
