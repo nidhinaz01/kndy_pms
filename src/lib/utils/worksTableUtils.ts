@@ -41,7 +41,9 @@ export function applyFilters(data: any[], filters: WorksTableFilters): any[] {
       (work.std_work_type_details?.derived_sw_code || work.sw_code)?.toLowerCase().includes(filters.searchTerm.toLowerCase()) ||
       work.sw_name?.toLowerCase().includes(filters.searchTerm.toLowerCase()) ||
       work.std_work_type_details?.type_description?.toLowerCase().includes(filters.searchTerm.toLowerCase()) ||
-      work.mstr_wo_type?.wo_type_name?.toLowerCase().includes(filters.searchTerm.toLowerCase())
+      work.mstr_wo_type?.wo_type_name?.toLowerCase().includes(filters.searchTerm.toLowerCase()) ||
+      (work.wo_no || '').toLowerCase().includes(filters.searchTerm.toLowerCase()) ||
+      (work.pwo_no || '').toLowerCase().includes(filters.searchTerm.toLowerCase())
     );
   }
 

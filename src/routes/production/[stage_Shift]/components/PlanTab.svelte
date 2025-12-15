@@ -3,6 +3,7 @@
   import Button from '$lib/components/common/Button.svelte';
   import { formatTime, calculateBreakTimeInRange } from '../utils/timeUtils';
   import { groupPlannedWorks, areAllSkillsReported, hasReportedSkillsSelected } from '../utils/planTabUtils';
+  import { filterGroupedWorksBySearch } from '../utils/productionTabSearchUtils';
 
   export let plannedWorksData: any[] = [];
   export let plannedWorksWithStatus: any[] = [];
@@ -18,9 +19,13 @@
 
   const dispatch = createEventDispatcher();
 
+  // Search state
+  let searchTerm = '';
+
   $: groupedPlannedWorks = groupPlannedWorks(plannedWorksWithStatus || []);
+  $: filteredGroupedPlannedWorks = filterGroupedWorksBySearch(groupedPlannedWorks, searchTerm);
   // Count unique works (by work code), not individual skill competencies
-  $: totalPlans = Object.keys(groupedPlannedWorks).length;
+  $: totalPlans = Object.keys(filteredGroupedPlannedWorks).length;
 
   function handleRefresh() {
     dispatch('refresh');
@@ -100,6 +105,15 @@
         </Button>
       </div>
     </div>
+    <!-- Search Box -->
+    <div class="mt-4">
+      <input
+        type="text"
+        bind:value={searchTerm}
+        placeholder="Search by work code, work name, WO number, PWO number, worker, or skill..."
+        class="w-full px-4 py-2 border theme-border rounded-lg theme-bg-primary theme-text-primary focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+      />
+    </div>
   </div>
   
   {#if isLoading}
@@ -178,7 +192,7 @@
           </tr>
         </thead>
         <tbody class="theme-bg-primary divide-y divide-gray-200 dark:divide-gray-700">
-          {#each Object.values(groupedPlannedWorks) as group}
+          {#each Object.values(filteredGroupedPlannedWorks) as group}
             {@const typedGroup = group}
             {@const allSelected = typedGroup.items.every((item: any) => selectedRows.has(item.id))}
             {@const someSelected = typedGroup.items.some((item: any) => selectedRows.has(item.id))}

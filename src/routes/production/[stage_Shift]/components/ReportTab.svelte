@@ -3,6 +3,7 @@
   import Button from '$lib/components/common/Button.svelte';
   import { formatTime, formatLostTimeDetails } from '../utils/timeUtils';
   import { groupReportWorks } from '../utils/planTabUtils';
+  import { filterGroupedWorksBySearch } from '../utils/productionTabSearchUtils';
   import { formatDateTimeLocal } from '$lib/utils/formatDate';
 
   export let reportData: any[] = [];
@@ -13,7 +14,10 @@
 
   const dispatch = createEventDispatcher();
 
+  let searchTerm = '';
+
   $: groupedReportWorks = groupReportWorks(reportData);
+  $: filteredGroupedReportWorks = filterGroupedWorksBySearch(groupedReportWorks, searchTerm);
   $: totalReports = reportData.length;
 
   function handleRefresh() {
@@ -56,6 +60,15 @@
         Generate PDF
       </Button>
     </div>
+    <!-- Search Box -->
+    <div class="mt-4">
+      <input
+        type="text"
+        bind:value={searchTerm}
+        placeholder="Search by work code, work name, WO number, PWO number, worker, or skill..."
+        class="w-full px-4 py-2 border theme-border rounded-lg theme-bg-primary theme-text-primary focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+      />
+    </div>
   </div>
 
   {#if isLoading}
@@ -97,7 +110,7 @@
           </tr>
         </thead>
         <tbody class="theme-bg-primary divide-y divide-gray-200 dark:divide-gray-700">
-          {#each Object.values(groupedReportWorks) as group (group.workCode)}
+          {#each Object.values(filteredGroupedReportWorks) as group (group.workCode)}
             {@const typedGroup = group}
             <!-- Single Row per Work -->
             <tr class="hover:theme-bg-secondary transition-colors" 

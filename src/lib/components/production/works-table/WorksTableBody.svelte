@@ -101,7 +101,10 @@
   {:else}
     {#each filteredData as work}
       {@const derivedSwCode = work.std_work_type_details?.derived_sw_code || work.sw_code}
-      {@const workKey = `${derivedSwCode}_${stageCode}`}
+      {@const otherWorkCode = work.is_added_work ? (work.sw_code || null) : null}
+      {@const workCode = derivedSwCode || otherWorkCode || 'Unknown'}
+      {@const woDetailsId = work.wo_details_id}
+      {@const workKey = `${workCode}_${woDetailsId}_${stageCode}`}
       {@const status = workStatus[workKey] || 'To be planned'}
       {@const planningStatus = workPlanningStatus[workKey] || { canPlan: false }}
       {@const isPlanned = isWorkPlanned(work)}

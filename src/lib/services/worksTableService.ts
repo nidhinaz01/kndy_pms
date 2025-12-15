@@ -3,6 +3,9 @@ import { canPlanWork } from '$lib/api/production';
 import type { WorkPlanningStatus, WorkStatus } from '$lib/types/worksTable';
 import { parseUTCDate } from '$lib/utils/formatDate';
 
+/**
+ * Optimized batched version that groups works by work code and fetches all data in minimal queries
+ */
 export async function checkWorkStatus(
   works: any[],
   stageCode: string,
@@ -10,6 +13,10 @@ export async function checkWorkStatus(
 ): Promise<{ [key: string]: WorkStatus }> {
   const workStatus: { [key: string]: WorkStatus } = {};
   
+  if (!works || works.length === 0) {
+    return workStatus;
+  }
+
   // Format selectedDate if provided
   let dateStr: string | undefined;
   if (selectedDate) {
@@ -21,7 +28,21 @@ export async function checkWorkStatus(
       dateStr = String(selectedDate || '').split('T')[0];
     }
   }
-  
+
+  // Step 1: Track works individually by work code AND wo_details_id
+  const workMap = new Map<string, {
+    work: any;
+    workCode: string;
+    derivedSwCode: string | null;
+    otherWorkCode: string | null;
+    woDetailsId: number;
+    workKey: string;
+  }>();
+
+  // Collect unique work codes and wo_details_ids for batch queries
+  const uniqueWorkCodes = new Set<string>();
+  const uniqueWoDetailsIds = new Set<number>();
+
   for (const work of works) {
     const hasDerivedSwCode = !!work.std_work_type_details?.derived_sw_code;
     const isNonStandardWork = work.is_added_work === true || !hasDerivedSwCode;
@@ -30,26 +51,218 @@ export async function checkWorkStatus(
     const otherWorkCode = isNonStandardWork ? (work.sw_code || null) : null;
     const workCode = derivedSwCode || otherWorkCode || 'Unknown';
     const woDetailsId = work.wo_details_id;
-    const workKey = `${workCode}_${stageCode}`;
     
-    try {
-      if (!woDetailsId || !workCode || workCode === 'Unknown') {
-        workStatus[workKey] = 'To be planned';
-        continue;
+    // Include wo_details_id in workKey to differentiate between work orders
+    const workKey = `${workCode}_${woDetailsId}_${stageCode}`;
+
+    if (!woDetailsId || !workCode || workCode === 'Unknown') {
+      workStatus[workKey] = 'To be planned';
+      continue;
+    }
+
+    workMap.set(workKey, {
+      work,
+      workCode,
+      derivedSwCode,
+      otherWorkCode,
+      woDetailsId,
+      workKey
+    });
+
+    uniqueWorkCodes.add(workCode);
+    uniqueWoDetailsIds.add(woDetailsId);
+  }
+
+  if (workMap.size === 0) {
+    return workStatus;
+  }
+
+  // Step 2: Batch fetch work status data for all work codes
+  const allWorkCodes = Array.from(uniqueWorkCodes);
+  const derivedSwCodes = Array.from(workMap.values())
+    .map(w => w.derivedSwCode)
+    .filter((code): code is string => !!code);
+  const otherWorkCodes = Array.from(workMap.values())
+    .map(w => w.otherWorkCode)
+    .filter((code): code is string => !!code);
+
+  // Batch fetch work status
+  let workStatusDataMap = new Map<string, any>();
+  try {
+    const orConditions: string[] = [];
+    if (derivedSwCodes.length > 0) {
+      orConditions.push(`derived_sw_code.in.(${derivedSwCodes.join(',')})`);
+    }
+    if (otherWorkCodes.length > 0) {
+      orConditions.push(`other_work_code.in.(${otherWorkCodes.join(',')})`);
+    }
+
+    if (orConditions.length > 0 && uniqueWoDetailsIds.size > 0) {
+      const { data: statusData } = await supabase
+        .from('prdn_work_status')
+        .select('derived_sw_code, other_work_code, wo_details_id, current_status')
+        .eq('stage_code', stageCode)
+        .in('wo_details_id', Array.from(uniqueWoDetailsIds))
+        .or(orConditions.join(','));
+
+      if (statusData) {
+        statusData.forEach(status => {
+          const code = status.derived_sw_code || status.other_work_code;
+          const woId = status.wo_details_id;
+          if (code && woId) {
+            // Key by work code AND wo_details_id
+            workStatusDataMap.set(`${code}_${woId}`, status);
+          }
+        });
+      }
+    }
+  } catch (error) {
+    console.error('Error batch fetching work status:', error);
+  }
+
+  // Step 3: Batch fetch planning data for selected date
+  let planningDataMap = new Map<string, any[]>();
+  let anyDatePlanningDataMap = new Map<string, any[]>();
+
+  try {
+    const orConditions: string[] = [];
+    if (derivedSwCodes.length > 0) {
+      orConditions.push(`derived_sw_code.in.(${derivedSwCodes.join(',')})`);
+    }
+    if (otherWorkCodes.length > 0) {
+      orConditions.push(`other_work_code.in.(${otherWorkCodes.join(',')})`);
+    }
+
+    if (orConditions.length > 0 && uniqueWoDetailsIds.size > 0) {
+      // Fetch plans for selected date (filter by wo_details_id as well)
+      if (dateStr) {
+        // Build query with wo_details_id filter and work code conditions
+        let query = supabase
+          .from('prdn_work_planning')
+          .select('id, derived_sw_code, other_work_code, wo_details_id, status, from_date, created_dt')
+          .eq('stage_code', stageCode)
+          .eq('from_date', dateStr)
+          .eq('is_deleted', false)
+          .eq('is_active', true)
+          .in('wo_details_id', Array.from(uniqueWoDetailsIds));
+        
+        // Apply work code filter
+        if (orConditions.length > 0) {
+          query = query.or(orConditions.join(','));
+        }
+        
+        const { data: datePlanningData, error: dateError } = await query;
+
+        if (dateError) {
+          console.error('Error fetching planning data for date:', dateError);
+        }
+
+        if (datePlanningData) {
+          datePlanningData.forEach(plan => {
+            const code = plan.derived_sw_code || plan.other_work_code;
+            const woId = plan.wo_details_id;
+            if (code && woId) {
+              // Key by work code AND wo_details_id
+              const key = `${code}_${woId}`;
+              if (!planningDataMap.has(key)) {
+                planningDataMap.set(key, []);
+              }
+              planningDataMap.get(key)!.push(plan);
+            }
+          });
+        }
       }
 
-      const { data: statusData, error: statusError } = await supabase
-        .from('prdn_work_status')
-        .select('current_status')
+      // Fetch plans for any date (filter by wo_details_id as well)
+      let anyDateQuery = supabase
+        .from('prdn_work_planning')
+        .select('id, derived_sw_code, other_work_code, wo_details_id, status, from_date, created_dt')
         .eq('stage_code', stageCode)
-        .eq('wo_details_id', woDetailsId)
-        .or(`derived_sw_code.eq.${workCode},other_work_code.eq.${workCode}`)
-        .maybeSingle();
+        .eq('is_deleted', false)
+        .eq('is_active', true)
+        .in('wo_details_id', Array.from(uniqueWoDetailsIds));
+      
+      // Apply work code filter
+      if (orConditions.length > 0) {
+        anyDateQuery = anyDateQuery.or(orConditions.join(','));
+      }
+      
+      const { data: anyDatePlanningData, error: anyDateError } = await anyDateQuery;
 
-      // Only use status from prdn_work_status if it's a definitive status (not 'To be Planned')
-      // If it's 'To be Planned', we need to check prdn_work_planning to see if there are actual plans
-      if (!statusError && statusData?.current_status) {
-        const dbStatus = statusData.current_status;
+      if (anyDateError) {
+        console.error('Error fetching any date planning data:', anyDateError);
+      }
+
+      if (anyDatePlanningData) {
+        anyDatePlanningData.forEach(plan => {
+          const code = plan.derived_sw_code || plan.other_work_code;
+          const woId = plan.wo_details_id;
+          if (code && woId) {
+            // Key by work code AND wo_details_id
+            const key = `${code}_${woId}`;
+            if (!anyDatePlanningDataMap.has(key)) {
+              anyDatePlanningDataMap.set(key, []);
+            }
+            anyDatePlanningDataMap.get(key)!.push(plan);
+          }
+        });
+      }
+    }
+  } catch (error) {
+    console.error('Error batch fetching planning data:', error);
+  }
+
+  // Step 4: Batch fetch reporting data for all planning IDs
+  const allPlanningIds = Array.from(planningDataMap.values())
+    .flat()
+    .map(p => p.id)
+    .filter((id): id is number => !!id);
+
+  let reportingDataMap = new Map<number, any[]>();
+  if (allPlanningIds.length > 0) {
+    try {
+      const { data: reportingData } = await supabase
+        .from('prdn_work_reporting')
+        .select('id, planning_id, created_dt, completion_status')
+        .in('planning_id', allPlanningIds)
+        .eq('is_deleted', false);
+
+      if (reportingData) {
+        reportingData.forEach(report => {
+          const planningId = report.planning_id;
+          if (planningId) {
+            if (!reportingDataMap.has(planningId)) {
+              reportingDataMap.set(planningId, []);
+            }
+            reportingDataMap.get(planningId)!.push(report);
+          }
+        });
+      }
+    } catch (error) {
+      console.error('Error batch fetching reporting data:', error);
+    }
+  }
+
+  // Step 5: Process each work individually (by work code AND wo_details_id)
+  for (const [workKey, workInfo] of workMap.entries()) {
+    const { workCode, derivedSwCode, otherWorkCode, woDetailsId } = workInfo;
+    
+    try {
+      // Check work status first (keyed by work code AND wo_details_id)
+      // Try both derived_sw_code and other_work_code keys
+      let statusKey = `${workCode}_${woDetailsId}`;
+      let statusRecord = workStatusDataMap.get(statusKey);
+      
+      // If not found, try with the alternative work code
+      if (!statusRecord && derivedSwCode && otherWorkCode) {
+        const altKey = `${otherWorkCode}_${woDetailsId}`;
+        statusRecord = workStatusDataMap.get(altKey);
+        if (statusRecord) {
+          statusKey = altKey;
+        }
+      }
+      if (statusRecord?.current_status) {
+        const dbStatus = statusRecord.current_status;
         if (dbStatus === 'Planned') {
           workStatus[workKey] = 'Planned';
           continue;
@@ -60,213 +273,175 @@ export async function checkWorkStatus(
           workStatus[workKey] = 'Completed';
           continue;
         } else if (dbStatus === 'Draft Plan') {
-          // If status says 'Draft Plan', use it but still check planning table to be sure
-          // (fall through to planning check)
+          // Respect the database status if it's 'Draft Plan'
+          workStatus[workKey] = 'Draft Plan';
+          continue;
         }
-        // If status is 'To be Planned', continue to check planning table
+        // If 'To be Planned' or other status, continue to check planning table
       }
 
-      // First, check for plans on the selected date
-      let planningQuery = supabase
-        .from('prdn_work_planning')
-        .select('id, status, from_date')
-        .eq('stage_code', stageCode)
-        .eq('is_deleted', false)
-        .eq('is_active', true);
+      // Get planning data for this specific work code AND wo_details_id
+      // Try all possible work code combinations to find matching planning data
+      let planningData: any[] = [];
+      let anyDateData: any[] = [];
       
-      if (derivedSwCode) {
-        planningQuery = planningQuery.eq('derived_sw_code', derivedSwCode);
-      } else if (otherWorkCode) {
-        planningQuery = planningQuery.eq('other_work_code', otherWorkCode);
-      } else {
-        workStatus[workKey] = 'To be planned';
-        continue;
-      }
-
-      // Filter by date if provided
-      if (dateStr) {
-        console.log(`🔍 checkWorkStatus: Filtering by from_date = ${dateStr} for work ${workCode}`);
-        planningQuery = planningQuery.eq('from_date', dateStr);
-      } else {
-        console.log(`🔍 checkWorkStatus: No date filter for work ${workCode}`);
-      }
-
-      const { data: planningData, error: planningError } = await planningQuery;
-
-      console.log(`🔍 checkWorkStatus: Found ${planningData?.length || 0} planning records for work ${workCode} on date ${dateStr || 'any'}`);
-      if (planningData && planningData.length > 0) {
-        console.log(`🔍 checkWorkStatus: Planning data:`, planningData.map(p => ({ id: p.id, status: p.status, from_date: p.from_date })));
-      }
-
-      // If no plans found for selected date, check if there are any plans for this work at all
-      if ((planningError || !planningData || planningData.length === 0) && dateStr) {
-        console.log(`🔍 checkWorkStatus: No plans for selected date ${dateStr}, checking for any plans for work ${workCode}`);
+      // Build list of possible keys to try
+      const possibleKeys: string[] = [];
+      if (workCode) possibleKeys.push(`${workCode}_${woDetailsId}`);
+      if (derivedSwCode) possibleKeys.push(`${derivedSwCode}_${woDetailsId}`);
+      if (otherWorkCode) possibleKeys.push(`${otherWorkCode}_${woDetailsId}`);
+      
+      // Remove duplicates
+      const uniqueKeys = [...new Set(possibleKeys)];
+      
+      // Try each key to find planning data
+      for (const key of uniqueKeys) {
+        const dateData = planningDataMap.get(key) || [];
+        const anyDate = anyDatePlanningDataMap.get(key) || [];
         
-        let anyDateQuery = supabase
-          .from('prdn_work_planning')
-          .select('id, status, from_date')
-          .eq('stage_code', stageCode)
-          .eq('is_deleted', false)
-          .eq('is_active', true);
-        
-        if (derivedSwCode) {
-          anyDateQuery = anyDateQuery.eq('derived_sw_code', derivedSwCode);
-        } else if (otherWorkCode) {
-          anyDateQuery = anyDateQuery.eq('other_work_code', otherWorkCode);
+        if (dateData.length > 0) {
+          planningData = dateData;
+        }
+        if (anyDate.length > 0) {
+          anyDateData = anyDate;
         }
         
-        const { data: anyDateData } = await anyDateQuery;
-        
-        if (anyDateData && anyDateData.length > 0) {
-          console.log(`🔍 checkWorkStatus: Found ${anyDateData.length} plans for other dates, checking status`);
+        // If we found data, we can stop searching
+        if (planningData.length > 0 && anyDateData.length > 0) {
+          break;
+        }
+      }
+      
+      // If no planning data for selected date, check any date planning data
+      if (planningData.length === 0 && anyDateData.length > 0) {
+        if (dateStr) {
+          // If we have a date filter but found plans for other dates, show appropriate status
           const hasDraftPlans = anyDateData.some(p => p.status === 'draft');
           const hasPendingApprovalPlans = anyDateData.some(p => p.status === 'pending_approval');
           const hasApprovedPlans = anyDateData.some(p => p.status === 'approved');
           
-          // Priority: pending_approval > draft > approved
           if (hasPendingApprovalPlans && !hasApprovedPlans) {
-            console.log(`🔍 checkWorkStatus: Setting status to 'Plan Pending Approval' (from other dates) for work ${workCode}`);
             workStatus[workKey] = 'Plan Pending Approval';
             continue;
           } else if (hasDraftPlans && !hasPendingApprovalPlans && !hasApprovedPlans) {
-            console.log(`🔍 checkWorkStatus: Setting status to 'Draft Plan' (from other dates) for work ${workCode}`);
             workStatus[workKey] = 'Draft Plan';
             continue;
           }
+          // If plans exist but don't match the selected date, show "To be planned" for that date
+        } else {
+          // No date filter - use any date planning data
+          planningData = anyDateData;
         }
-        
-        console.log(`🔍 checkWorkStatus: No planning data found, setting status to 'Yet to be planned' for work ${workCode}`);
-        workStatus[workKey] = 'To be planned';
-        continue;
-      } else if (planningError || !planningData || planningData.length === 0) {
-        console.log(`🔍 checkWorkStatus: No planning data found, setting status to 'Yet to be planned' for work ${workCode}`);
+      }
+
+      if (planningData.length === 0) {
         workStatus[workKey] = 'To be planned';
         continue;
       }
 
-      // Check plan statuses separately
+      // Check plan statuses
       const hasDraftPlans = planningData.some(p => p.status === 'draft');
       const hasPendingApprovalPlans = planningData.some(p => p.status === 'pending_approval');
       const hasApprovedPlans = planningData.some(p => p.status === 'approved');
       const hasRejectedPlans = planningData.some(p => p.status === 'rejected');
-      
-      console.log(`🔍 checkWorkStatus: hasDraftPlans=${hasDraftPlans}, hasPendingApprovalPlans=${hasPendingApprovalPlans}, hasApprovedPlans=${hasApprovedPlans}, hasRejectedPlans=${hasRejectedPlans} for work ${workCode}`);
-      
-      // Priority order:
-      // 1. If there are pending_approval plans (and no approved), show "Plan Pending Approval"
-      // 2. If there are only draft plans, show "Draft Plan"
-      // 3. If there are rejected plans (and no pending/approved), show "Draft Plan" (can be re-planned)
-      // 4. If there are approved plans, continue to check reporting status
-      
+
+      // Priority order: pending_approval > draft > approved
       if (hasPendingApprovalPlans && !hasApprovedPlans) {
-        console.log(`🔍 checkWorkStatus: Setting status to 'Plan Pending Approval' for work ${workCode}`);
         workStatus[workKey] = 'Plan Pending Approval';
         continue;
       }
-      
+
       if (hasDraftPlans && !hasPendingApprovalPlans && !hasApprovedPlans) {
-        console.log(`🔍 checkWorkStatus: Setting status to 'Draft Plan' for work ${workCode}`);
         workStatus[workKey] = 'Draft Plan';
         continue;
       }
 
       if (hasRejectedPlans && !hasPendingApprovalPlans && !hasApprovedPlans && !hasDraftPlans) {
-        console.log(`🔍 checkWorkStatus: Setting status to 'Draft Plan' (rejected, can be re-planned) for work ${workCode}`);
         workStatus[workKey] = 'Draft Plan';
         continue;
       }
 
-      // Use only approved plans for further checks (reporting, completion status, etc.)
+      // Use only approved plans for further checks
       const approvedPlans = planningData.filter(p => p.status === 'approved');
       const planningDataToUse = approvedPlans.length > 0 ? approvedPlans : planningData;
 
-      const { data: reportingData, error: reportingError } = await supabase
-        .from('prdn_work_reporting')
-        .select('id, planning_id, created_dt')
-        .in('planning_id', planningDataToUse.map(p => p.id))
-        .eq('is_deleted', false);
+      // Check reporting status
+      const planningIds = planningDataToUse.map(p => p.id);
+      const reportsForPlans = planningIds
+        .flatMap(id => reportingDataMap.get(id) || [])
+        .filter(Boolean);
 
-      if (reportingError || !reportingData || reportingData.length === 0) {
-        // If there are draft plans but also approved plans, show "Planned"
-        // If only draft plans exist, we already handled that above
+      if (reportsForPlans.length === 0) {
         workStatus[workKey] = 'Planned';
         continue;
       }
 
       const allPlannedWorksReported = planningDataToUse.every(plan => 
-        reportingData.some(report => (report as any).planning_id === plan.id)
+        reportsForPlans.some(report => report.planning_id === plan.id)
       );
 
       if (allPlannedWorksReported) {
-        const { data: completedReports, error: completedError } = await supabase
-          .from('prdn_work_reporting')
-          .select('completion_status')
-          .in('planning_id', planningDataToUse.map(p => p.id))
-          .eq('is_deleted', false);
-
-        if (completedError) {
-          workStatus[workKey] = 'In progress';
-          continue;
-        }
-
-        const allReportsCompleted = completedReports?.every(report => 
+        const allReportsCompleted = reportsForPlans.every(report => 
           report.completion_status === 'C'
-        ) || false;
+        );
 
         if (allReportsCompleted) {
           workStatus[workKey] = 'Completed';
         } else {
-          let newerPlanningQuery = supabase
-            .from('prdn_work_planning')
-            .select('id, created_dt')
-            .eq('stage_code', stageCode)
-            .eq('is_deleted', false)
-            .order('created_dt', { ascending: false })
-            .limit(1);
-
-          if (derivedSwCode) {
-            newerPlanningQuery = newerPlanningQuery.eq('derived_sw_code', derivedSwCode);
-          } else if (otherWorkCode) {
-            newerPlanningQuery = newerPlanningQuery.eq('other_work_code', otherWorkCode);
-          }
-
-          const { data: newerPlanningData, error: newerPlanningError } = await newerPlanningQuery;
-
-          if (newerPlanningError) {
-            workStatus[workKey] = 'In progress';
-            continue;
-          }
-
-          const latestReportDate = reportingData?.reduce((latest, report) => {
-            const reportDate = parseUTCDate((report as any).created_dt || '1970-01-01T00:00:00Z');
+          // Check if there's newer planning
+          const latestReportDate = reportsForPlans.reduce((latest, report) => {
+            const reportDate = parseUTCDate(report.created_dt || '1970-01-01T00:00:00Z');
             return reportDate > latest ? reportDate : latest;
           }, new Date(0));
 
-          const hasNewerPlanning = newerPlanningData?.some(plan => {
+          const latestPlanDate = planningDataToUse.reduce((latest, plan) => {
             const planDate = parseUTCDate(plan.created_dt);
-            return planDate > latestReportDate;
-          }) || false;
+            return planDate > latest ? planDate : latest;
+          }, new Date(0));
 
+          const hasNewerPlanning = latestPlanDate > latestReportDate;
           workStatus[workKey] = hasNewerPlanning ? 'Planned' : 'In progress';
         }
       } else {
         workStatus[workKey] = 'In progress';
       }
     } catch (error) {
-      console.error(`Error checking work status for ${workCode}:`, error);
+      console.error(`Error checking work status for ${workCode} (WO: ${woDetailsId}):`, error);
       workStatus[workKey] = 'Yet to be planned';
     }
   }
-  
+
   return workStatus;
 }
 
+/**
+ * Optimized batched version of checkPlanningStatus
+ * This now batches the canPlanWork checks by grouping works
+ */
 export async function checkPlanningStatus(
   works: any[],
   stageCode: string
 ): Promise<{ [key: string]: WorkPlanningStatus }> {
   const workPlanningStatus: { [key: string]: WorkPlanningStatus } = {};
   
+  if (!works || works.length === 0) {
+    return workPlanningStatus;
+  }
+
+  // Track works individually by work code AND wo_details_id
+  const workMap = new Map<string, {
+    work: any;
+    workCode: string;
+    derivedSwCode: string | null;
+    otherWorkCode: string | null;
+    woDetailsId: number;
+    workKey: string;
+  }>();
+
+  // Collect unique work codes and wo_details_ids for batch queries
+  const uniqueWorkCodes = new Set<string>();
+  const uniqueWoDetailsIds = new Set<number>();
+
   for (const work of works) {
     const hasDerivedSwCode = !!work.std_work_type_details?.derived_sw_code;
     const isNonStandardWork = work.is_added_work === true || !hasDerivedSwCode;
@@ -275,19 +450,158 @@ export async function checkPlanningStatus(
     const otherWorkCode = isNonStandardWork ? (work.sw_code || null) : null;
     const workCode = derivedSwCode || otherWorkCode || 'Unknown';
     const woDetailsId = work.wo_details_id;
-    const workKey = `${workCode}_${stageCode}`;
+    
+    // Include wo_details_id in workKey to differentiate between work orders
+    const workKey = `${workCode}_${woDetailsId}_${stageCode}`;
+
+    if (!woDetailsId || !workCode || workCode === 'Unknown') {
+      workPlanningStatus[workKey] = {
+        canPlan: false,
+        reason: 'Invalid work code or work order ID'
+      };
+      continue;
+    }
+
+    workMap.set(workKey, {
+      work,
+      workCode,
+      derivedSwCode,
+      otherWorkCode,
+      woDetailsId,
+      workKey
+    });
+
+    uniqueWorkCodes.add(workCode);
+    uniqueWoDetailsIds.add(woDetailsId);
+  }
+
+  // Batch fetch removal data
+  const derivedSwCodes = Array.from(workMap.values())
+    .map(w => w.derivedSwCode)
+    .filter((code): code is string => !!code);
+  const otherWorkCodes = Array.from(workMap.values())
+    .map(w => w.otherWorkCode)
+    .filter((code): code is string => !!code);
+
+  let removalDataMap = new Map<string, any>();
+  try {
+    const orConditions: string[] = [];
+    if (derivedSwCodes.length > 0) {
+      orConditions.push(`derived_sw_code.in.(${derivedSwCodes.join(',')})`);
+    }
+    if (otherWorkCodes.length > 0) {
+      orConditions.push(`other_work_code.in.(${otherWorkCodes.join(',')})`);
+    }
+
+    if (orConditions.length > 0 && uniqueWoDetailsIds.size > 0) {
+      const { data: removalData } = await supabase
+        .from('prdn_work_removals')
+        .select('derived_sw_code, other_work_code, wo_details_id, stage_code, removal_reason')
+        .eq('stage_code', stageCode)
+        .in('wo_details_id', Array.from(uniqueWoDetailsIds))
+        .or(orConditions.join(','));
+
+      if (removalData) {
+        removalData.forEach(removal => {
+          const code = removal.derived_sw_code || removal.other_work_code;
+          const woId = removal.wo_details_id;
+          if (code && woId) {
+            // Key by work code AND wo_details_id
+            removalDataMap.set(`${code}_${woId}`, removal);
+          }
+        });
+      }
+    }
+  } catch (error) {
+    console.error('Error batch fetching removal data:', error);
+  }
+
+  // Batch fetch last planning data
+  let lastPlanningDataMap = new Map<string, any>();
+  try {
+    const orConditions: string[] = [];
+    if (derivedSwCodes.length > 0) {
+      orConditions.push(`derived_sw_code.in.(${derivedSwCodes.join(',')})`);
+    }
+    if (otherWorkCodes.length > 0) {
+      orConditions.push(`other_work_code.in.(${otherWorkCodes.join(',')})`);
+    }
+
+    if (orConditions.length > 0 && uniqueWoDetailsIds.size > 0) {
+      // Fetch the latest plan for each work code AND wo_details_id combination
+      const { data: planningData } = await supabase
+        .from('prdn_work_planning')
+        .select('id, derived_sw_code, other_work_code, wo_details_id, status, from_date, created_dt')
+        .eq('stage_code', stageCode)
+        .eq('is_active', true)
+        .eq('is_deleted', false)
+        .in('wo_details_id', Array.from(uniqueWoDetailsIds))
+        .or(orConditions.join(','))
+        .order('created_dt', { ascending: false });
+
+      if (planningData) {
+        // Group by work code AND wo_details_id and take the first (latest) for each
+        const seenKeys = new Set<string>();
+        planningData.forEach(plan => {
+          const code = plan.derived_sw_code || plan.other_work_code;
+          const woId = plan.wo_details_id;
+          if (code && woId) {
+            const key = `${code}_${woId}`;
+            if (!seenKeys.has(key)) {
+              lastPlanningDataMap.set(key, plan);
+              seenKeys.add(key);
+            }
+          }
+        });
+      }
+    }
+  } catch (error) {
+    console.error('Error batch fetching last planning data:', error);
+  }
+
+  // Process each work individually (by work code AND wo_details_id)
+  for (const [workKey, workInfo] of workMap.entries()) {
+    const { workCode, woDetailsId } = workInfo;
     
     try {
-      const validation = await canPlanWork(derivedSwCode, stageCode, woDetailsId, otherWorkCode);
-      workPlanningStatus[workKey] = validation;
+      // Check if work is removed (keyed by work code AND wo_details_id)
+      const removalKey = `${workCode}_${woDetailsId}`;
+      const removal = removalDataMap.get(removalKey);
+      if (removal) {
+        const reason = `This work has been removed from production. Reason: ${removal.removal_reason || 'Not specified'}`;
+        workPlanningStatus[workKey] = {
+          canPlan: false,
+          reason
+        };
+        continue;
+      }
+
+      // Check last plan status (keyed by work code AND wo_details_id)
+      const lastPlan = lastPlanningDataMap.get(removalKey);
+      if (lastPlan) {
+        if (lastPlan.status === 'draft' || lastPlan.status === 'pending_approval') {
+          const reason = `Work already has a ${lastPlan.status} plan from ${lastPlan.from_date}. Please wait for approval or delete the existing plan first.`;
+          workPlanningStatus[workKey] = {
+            canPlan: false,
+            reason,
+            lastPlan: lastPlan
+          };
+          continue;
+        }
+      }
+
+      // Can plan
+      workPlanningStatus[workKey] = {
+        canPlan: true
+      };
     } catch (error) {
-      workPlanningStatus[workKey] = { 
-        canPlan: false, 
-        reason: `Error checking status: ${(error as Error)?.message || 'Unknown error'}` 
+      const reason = `Error checking status: ${(error as Error)?.message || 'Unknown error'}`;
+      workPlanningStatus[workKey] = {
+        canPlan: false,
+        reason
       };
     }
   }
-  
+
   return workPlanningStatus;
 }
-

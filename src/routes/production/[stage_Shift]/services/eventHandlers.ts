@@ -523,9 +523,10 @@ export async function handleMultiDelete(context: EventHandlerContext) {
       .select('wo_details_id, derived_sw_code, other_work_code')
       .in('id', planningIds);
     
+    // Hard delete the selected plans
     const { error } = await supabase
       .from('prdn_work_planning')
-      .update({ is_deleted: true, modified_by: getCurrentUsername(), modified_dt: getCurrentTimestamp() })
+      .delete()
       .in('id', planningIds);
     
     if (!error) {
@@ -559,8 +560,9 @@ export async function handleMultiDelete(context: EventHandlerContext) {
         );
       }
       
-      // Reload planned works data (for Plan tab), draft plan data (for Draft Plan tab), and manpower plan data (for Manpower Plan tab)
+      // Reload works data (for Works tab), planned works data (for Plan tab), draft plan data (for Draft Plan tab), and manpower plan data (for Manpower Plan tab)
       await Promise.all([
+        context.loadWorksData(),
         context.loadPlannedWorksData(),
         context.loadDraftPlanData(),
         context.loadManpowerPlanData()
@@ -612,8 +614,9 @@ export async function handleDeletePlan(context: EventHandlerContext, event: Cust
       context.selectedDate
     );
     
-    // Reload planned works data (for Plan tab), draft plan data (for Draft Plan tab), and manpower plan data (for Manpower Plan tab)
+    // Reload works data (for Works tab), planned works data (for Plan tab), draft plan data (for Draft Plan tab), and manpower plan data (for Manpower Plan tab)
     await Promise.all([
+      context.loadWorksData(),
       context.loadPlannedWorksData(),
       context.loadDraftPlanData(),
       context.loadManpowerPlanData()
@@ -630,17 +633,13 @@ export async function handleDeleteAllPlansForWork(context: EventHandlerContext, 
   const confirmed = confirm(`Are you sure you want to delete all plans for work "${workName}"? This will delete ${group.items.length} skill competency plan(s).`);
   if (!confirmed) return;
   
-  const { getCurrentUsername, getCurrentTimestamp } = await import('$lib/utils/userUtils');
-  const currentUser = getCurrentUsername();
-  const now = getCurrentTimestamp();
-  
-  // Delete all items in the group
+  // Hard delete all items in the group
   const planIds = group.items.map((item: any) => item.id).filter(Boolean);
   if (planIds.length === 0) return;
   
   const { error } = await supabase
     .from('prdn_work_planning')
-    .update({ is_deleted: true, modified_by: currentUser, modified_dt: now })
+    .delete()
     .in('id', planIds);
   
   if (!error && group.items.length > 0) {
@@ -654,8 +653,9 @@ export async function handleDeleteAllPlansForWork(context: EventHandlerContext, 
       context.selectedDate
     );
     
-    // Reload data
+    // Reload works data (for Works tab), planned works data (for Plan tab), draft plan data (for Draft Plan tab), and manpower plan data (for Manpower Plan tab)
     await Promise.all([
+      context.loadWorksData(),
       context.loadPlannedWorksData(),
       context.loadDraftPlanData(),
       context.loadManpowerPlanData()

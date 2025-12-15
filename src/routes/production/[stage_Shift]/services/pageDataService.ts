@@ -113,128 +113,9 @@ export async function loadPlannedWorksData(stageCode: string, selectedDate: stri
     ];
     console.log(`📋 Loaded ${data.length} planned works for ${stageCode} on ${dateStr}`);
     
-    // Enrich with skill-specific time standards and vehicle work flow (same as Draft Plan)
-    const enrichedPlannedWorks = await Promise.all(
-      (data || []).map(async (plannedWork) => {
-        const derivedSwCode = plannedWork.std_work_type_details?.derived_sw_code;
-        const otherWorkCode = plannedWork.other_work_code;
-        const skillShort = plannedWork.hr_emp?.skill_short;
-        const scRequired = plannedWork.sc_required;
-        
-        // For non-standard works, fetch work addition data
-        let workAdditionData = null;
-        if (otherWorkCode) {
-          try {
-            let query = supabase
-              .from('prdn_work_additions')
-              .select('other_work_code, other_work_desc, other_work_sc')
-              .eq('other_work_code', otherWorkCode)
-              .eq('stage_code', stageCode);
-            
-            // Include wo_details_id in filter if available for more precise matching
-            if (plannedWork.wo_details_id) {
-              query = query.eq('wo_details_id', plannedWork.wo_details_id);
-            }
-            
-            const { data: additionData, error: additionError } = await query.maybeSingle();
-            
-            if (additionError) {
-              // Log the error but don't throw - this is non-critical data
-              console.warn(`Error fetching work addition data for ${otherWorkCode} in ${stageCode}:`, additionError);
-            } else {
-              workAdditionData = additionData;
-            }
-          } catch (error) {
-            // Log but don't throw - this is enrichment data, not critical
-            console.warn(`Error fetching work addition data for ${otherWorkCode}:`, error);
-          }
-        }
-        
-        // Fetch vehicle work flow
-        let vehicleWorkFlow = null;
-        if (derivedSwCode) {
-          try {
-            const { data: vwfData } = await supabase
-              .from('std_vehicle_work_flow')
-              .select('estimated_duration_minutes')
-              .eq('derived_sw_code', derivedSwCode)
-              .eq('is_deleted', false)
-              .eq('is_active', true)
-              .limit(1)
-              .maybeSingle();
-            vehicleWorkFlow = vwfData;
-          } catch (error) {
-            console.error('Error fetching vehicle work flow:', error);
-          }
-        }
-        
-        if (!derivedSwCode || !skillShort || !scRequired) {
-          return { ...plannedWork, skillTimeStandard: null, skillMapping: null, vehicleWorkFlow: vehicleWorkFlow, workAdditionData: workAdditionData };
-        }
-
-        // Find skill combination that contains the required skill
-        let matchingWsm = null;
-        try {
-          const { data: allMappings } = await supabase
-            .from('std_work_skill_mapping')
-            .select(`
-              wsm_id,
-              sc_name,
-              std_skill_combinations!inner(
-                skill_combination
-              )
-            `)
-            .eq('derived_sw_code', derivedSwCode)
-            .eq('is_deleted', false)
-            .eq('is_active', true);
-
-          if (allMappings && allMappings.length > 0) {
-            for (const mapping of allMappings) {
-              const skillCombination = (mapping as any).std_skill_combinations?.skill_combination;
-              if (skillCombination && Array.isArray(skillCombination)) {
-                const hasSkill = skillCombination.some((skill: any) => 
-                  skill.skill_name === scRequired || skill.skill_short === scRequired
-                );
-                if (hasSkill) {
-                  matchingWsm = mapping;
-                  break;
-                }
-              }
-            }
-          }
-        } catch (error) {
-          console.error('Error fetching skill mappings:', error);
-        }
-
-        if (!matchingWsm) {
-          return { ...plannedWork, skillTimeStandard: null, skillMapping: null, vehicleWorkFlow: vehicleWorkFlow, workAdditionData: workAdditionData };
-        }
-
-        // Get skill time standard
-        let skillTimeStandard = null;
-        try {
-          const { data: stsData } = await supabase
-            .from('std_skill_time_standards')
-            .select('*')
-            .eq('wsm_id', matchingWsm.wsm_id)
-            .eq('skill_short', scRequired)
-            .eq('is_deleted', false)
-            .eq('is_active', true)
-            .maybeSingle();
-          skillTimeStandard = stsData;
-        } catch (error) {
-          console.error('Error fetching skill time standard:', error);
-        }
-
-        return {
-          ...plannedWork,
-          skillTimeStandard: skillTimeStandard,
-          skillMapping: matchingWsm,
-          vehicleWorkFlow: vehicleWorkFlow,
-          workAdditionData: workAdditionData
-        };
-      })
-    );
+    // Enrich with skill-specific time standards and vehicle work flow using batch queries
+    const { batchEnrichItems } = await import('$lib/utils/workEnrichmentService');
+    const enrichedPlannedWorks = await batchEnrichItems(data || [], stageCode);
 
     console.log(`✅ Enriched ${enrichedPlannedWorks.length} planned works with skill-specific data`);
     return enrichedPlannedWorks;
@@ -439,101 +320,15 @@ export async function loadDraftReportData(stageCode: string, selectedDate: strin
       deviationsMap = await getDeviationsForReportings(reportIds);
     }
     
-    // Enrich work reports with skill-specific time standards and vehicle work flow (same as Draft Plan)
-    const enrichedWorkReports = await Promise.all(
-      (rawWorkReports || []).map(async (report) => {
-        // Attach deviations to report
-        const deviations = deviationsMap.get(report.id) || [];
-        report.deviations = deviations;
-        const planningRecord = report.prdn_work_planning;
-        const derivedSwCode = planningRecord?.std_work_type_details?.derived_sw_code;
-        const skillShort = planningRecord?.hr_emp?.skill_short;
-        const scRequired = planningRecord?.sc_required;
-        
-        // Fetch vehicle work flow
-        let vehicleWorkFlow = null;
-        if (derivedSwCode) {
-          try {
-            const { data: vwfData } = await supabase
-              .from('std_vehicle_work_flow')
-              .select('estimated_duration_minutes')
-              .eq('derived_sw_code', derivedSwCode)
-              .eq('is_deleted', false)
-              .eq('is_active', true)
-              .limit(1)
-              .maybeSingle();
-            vehicleWorkFlow = vwfData;
-          } catch (error) {
-            console.error('Error fetching vehicle work flow:', error);
-          }
-        }
-        
-        if (!derivedSwCode || !skillShort || !scRequired) {
-          return { ...report, skillTimeStandard: null, skillMapping: null, vehicleWorkFlow: vehicleWorkFlow };
-        }
-
-        // Find skill combination that contains the required skill
-        let matchingWsm = null;
-        try {
-          const { data: allMappings } = await supabase
-            .from('std_work_skill_mapping')
-            .select(`
-              wsm_id,
-              sc_name,
-              std_skill_combinations!inner(
-                skill_combination
-              )
-            `)
-            .eq('derived_sw_code', derivedSwCode)
-            .eq('is_deleted', false)
-            .eq('is_active', true);
-
-          if (allMappings && allMappings.length > 0) {
-            for (const mapping of allMappings) {
-              const skillCombination = (mapping as any).std_skill_combinations?.skill_combination;
-              if (skillCombination && Array.isArray(skillCombination)) {
-                const hasSkill = skillCombination.some((skill: any) => 
-                  skill.skill_name === scRequired || skill.skill_short === scRequired
-                );
-                if (hasSkill) {
-                  matchingWsm = mapping;
-                  break;
-                }
-              }
-            }
-          }
-        } catch (error) {
-          console.error('Error fetching skill mappings:', error);
-        }
-
-        if (!matchingWsm) {
-          return { ...report, skillTimeStandard: null, skillMapping: null, vehicleWorkFlow: vehicleWorkFlow };
-        }
-
-        // Get skill time standard
-        let skillTimeStandard = null;
-        try {
-          const { data: stsData } = await supabase
-            .from('std_skill_time_standards')
-            .select('*')
-            .eq('wsm_id', matchingWsm.wsm_id)
-            .eq('skill_short', scRequired)
-            .eq('is_deleted', false)
-            .eq('is_active', true)
-            .maybeSingle();
-          skillTimeStandard = stsData;
-        } catch (error) {
-          console.error('Error fetching skill time standard:', error);
-        }
-
-        return {
-          ...report,
-          skillTimeStandard: skillTimeStandard,
-          skillMapping: matchingWsm,
-          vehicleWorkFlow: vehicleWorkFlow
-        };
-      })
-    );
+    // Attach deviations to reports first
+    (rawWorkReports || []).forEach(report => {
+      const deviations = deviationsMap.get(report.id) || [];
+      report.deviations = deviations;
+    });
+    
+    // Enrich work reports with skill-specific time standards and vehicle work flow using batch queries
+    const { batchEnrichItems } = await import('$lib/utils/workEnrichmentService');
+    const enrichedWorkReports = await batchEnrichItems(rawWorkReports || [], stageCode);
     
     return { workReports: enrichedWorkReports, manpowerReports };
   } catch (error) {

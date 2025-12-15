@@ -131,7 +131,8 @@
 
   function isWorkPlanned(work: any): boolean {
     const derivedSwCode = work.std_work_type_details?.derived_sw_code || work.sw_code;
-    const workKey = `${derivedSwCode}_${stageCode}`;
+    const woDetailsId = work.wo_details_id;
+    const workKey = `${derivedSwCode}_${woDetailsId}_${stageCode}`;
     const status = state.workStatus[workKey];
     const planningStatus = state.workPlanningStatus[workKey];
     
@@ -151,7 +152,8 @@
 
   function getRemoveWorkReason(work: any): { canRemove: boolean; reason?: string } {
     const derivedSwCode = work.std_work_type_details?.derived_sw_code || work.sw_code;
-    const workKey = `${derivedSwCode}_${stageCode}`;
+    const woDetailsId = work.wo_details_id;
+    const workKey = `${derivedSwCode}_${woDetailsId}_${stageCode}`;
     // Default to 'To be planned' if status is not yet loaded (matches template behavior)
     const status = state.workStatus[workKey] || 'To be planned';
     
@@ -198,7 +200,8 @@
 
   function getPlanningStatus(work: any) {
     const derivedSwCode = work.std_work_type_details?.derived_sw_code || work.sw_code;
-    const workKey = `${derivedSwCode}_${stageCode}`;
+    const woDetailsId = work.wo_details_id;
+    const workKey = `${derivedSwCode}_${woDetailsId}_${stageCode}`;
     return state.workPlanningStatus[workKey] || { canPlan: false };
   }
 

@@ -252,38 +252,84 @@ async function updateWorkStatus(
       return;
     }
 
-    // Get all required skill competencies for this work
-    let requiredSkills: string[] = [];
-    
+    // Check if there are any draft plans for this work (update status as soon as any plan exists)
     if (derivedSwCode) {
-      // Get skill mappings for standard work
-      const { data: skillMappings } = await supabase
-        .from('std_work_skill_mapping')
-        .select(`
-          sc_name,
-          std_skill_combinations!inner(
-            skill_combination
-          )
-        `)
+      const plansQuery = supabase
+        .from('prdn_work_planning')
+        .select('id, sc_required, status')
+        .eq('stage_code', stageCode)
+        .eq('wo_details_id', woDetailsId)
         .eq('derived_sw_code', derivedSwCode)
+        .eq('from_date', selectedDate)
         .eq('is_deleted', false)
-        .eq('is_active', true);
-
-      if (skillMappings && skillMappings.length > 0) {
-        // Extract all individual skills from all skill combinations
-        const allSkills = new Set<string>();
-        skillMappings.forEach((mapping: any) => {
-          const skillCombination = mapping.std_skill_combinations?.skill_combination;
-          if (skillCombination && Array.isArray(skillCombination)) {
-            skillCombination.forEach((skill: any) => {
-              if (skill.skill_short) {
-                allSkills.add(skill.skill_short);
-              }
-            });
-          }
-        });
-        requiredSkills = Array.from(allSkills);
+        .eq('is_active', true)
+        .eq('status', 'draft');
+      
+      const { data: plansData, error: plansError } = await plansQuery;
+      
+      if (plansError) {
+        console.error(`❌ Error fetching draft plans for ${derivedSwCode}:`, plansError);
+        return;
       }
+      
+      // Update status to 'Draft Plan' if there's at least one draft plan
+      if (plansData && plansData.length > 0) {
+        // First check if the work status record exists
+        const { data: existingStatus, error: checkError } = await supabase
+          .from('prdn_work_status')
+          .select('id')
+          .eq('stage_code', stageCode)
+          .eq('wo_details_id', woDetailsId)
+          .eq('derived_sw_code', derivedSwCode)
+          .maybeSingle();
+
+        if (checkError) {
+          console.error(`❌ Error checking work status for ${derivedSwCode}:`, checkError);
+          return;
+        }
+
+        if (existingStatus) {
+          // Update existing record
+          const { error: updateError } = await supabase
+            .from('prdn_work_status')
+            .update({
+              current_status: 'Draft Plan',
+              modified_by: currentUser,
+              modified_dt: now
+            })
+            .eq('id', existingStatus.id);
+
+          if (updateError) {
+            console.error(`❌ Error updating work status for ${derivedSwCode}:`, updateError);
+          } else {
+            console.log(`✅ Updated work status to Draft Plan for work ${derivedSwCode} (${plansData.length} draft plan(s) found)`);
+          }
+        } else {
+          // Create new record if it doesn't exist
+          const { error: insertError } = await supabase
+            .from('prdn_work_status')
+            .insert({
+              stage_code: stageCode,
+              wo_details_id: woDetailsId,
+              derived_sw_code: derivedSwCode,
+              other_work_code: null,
+              current_status: 'Draft Plan',
+              created_by: currentUser,
+              created_dt: now,
+              modified_by: currentUser,
+              modified_dt: now
+            });
+
+          if (insertError) {
+            console.error(`❌ Error creating work status for ${derivedSwCode}:`, insertError);
+          } else {
+            console.log(`✅ Created work status record with Draft Plan for work ${derivedSwCode} (${plansData.length} draft plan(s) found)`);
+          }
+        }
+      } else {
+        console.log(`ℹ️ No draft plans found for ${derivedSwCode} on ${selectedDate}, status not updated`);
+      }
+      return;
     } else if (otherWorkCode) {
       // For non-standard work, we can't determine required skills from mappings
       // Check if there are any existing plans to determine if it's fully planned
@@ -299,64 +345,60 @@ async function updateWorkStatus(
       
       // For non-standard work, if there's at least one plan, consider it fully planned
       if (existingPlans && existingPlans.length > 0) {
-        // Update to Draft Plan if there are any plans
-        let statusUpdateQuery = supabase
+        // First check if the work status record exists
+        const { data: existingStatus, error: checkError } = await supabase
           .from('prdn_work_status')
-          .update({
-            current_status: 'Draft Plan',
-            modified_by: currentUser,
-            modified_dt: now
-          })
+          .select('id')
           .eq('stage_code', stageCode)
           .eq('wo_details_id', woDetailsId)
-          .eq('other_work_code', otherWorkCode);
+          .eq('other_work_code', otherWorkCode)
+          .maybeSingle();
 
-        await statusUpdateQuery;
-        console.log(`✅ Updated work status to Draft Plan for non-standard work ${otherWorkCode}`);
+        if (checkError) {
+          console.error(`❌ Error checking work status for non-standard work ${otherWorkCode}:`, checkError);
+          return;
+        }
+
+        if (existingStatus) {
+          // Update existing record
+          const { error: updateError } = await supabase
+            .from('prdn_work_status')
+            .update({
+              current_status: 'Draft Plan',
+              modified_by: currentUser,
+              modified_dt: now
+            })
+            .eq('id', existingStatus.id);
+
+          if (updateError) {
+            console.error(`❌ Error updating work status for non-standard work ${otherWorkCode}:`, updateError);
+          } else {
+            console.log(`✅ Updated work status to Draft Plan for non-standard work ${otherWorkCode}`);
+          }
+        } else {
+          // Create new record if it doesn't exist
+          const { error: insertError } = await supabase
+            .from('prdn_work_status')
+            .insert({
+              stage_code: stageCode,
+              wo_details_id: woDetailsId,
+              derived_sw_code: null,
+              other_work_code: otherWorkCode,
+              current_status: 'Draft Plan',
+              created_by: currentUser,
+              created_dt: now,
+              modified_by: currentUser,
+              modified_dt: now
+            });
+
+          if (insertError) {
+            console.error(`❌ Error creating work status for non-standard work ${otherWorkCode}:`, insertError);
+          } else {
+            console.log(`✅ Created work status record with Draft Plan for non-standard work ${otherWorkCode}`);
+          }
+        }
       }
       return;
-    }
-
-    // If no required skills found, don't update status
-    if (requiredSkills.length === 0) {
-      return;
-    }
-
-    // Check if all required skills have draft plans
-    if (derivedSwCode) {
-      const plansQuery = supabase
-        .from('prdn_work_planning')
-        .select('sc_required')
-        .eq('stage_code', stageCode)
-        .eq('wo_details_id', woDetailsId)
-        .eq('derived_sw_code', derivedSwCode)
-        .eq('from_date', selectedDate)
-        .eq('is_deleted', false)
-        .eq('is_active', true)
-        .eq('status', 'draft');
-      
-      const { data: plansData } = await plansQuery;
-      const plannedSkills = new Set((plansData || []).map((p: any) => p.sc_required));
-      
-      // Check if all required skills are planned
-      const allSkillsPlanned = requiredSkills.every(skill => plannedSkills.has(skill));
-      
-      if (allSkillsPlanned) {
-        // Update status to 'Draft Plan' only when ALL skills are planned
-        let statusUpdateQuery = supabase
-          .from('prdn_work_status')
-          .update({
-            current_status: 'Draft Plan',
-            modified_by: currentUser,
-            modified_dt: now
-          })
-          .eq('stage_code', stageCode)
-          .eq('wo_details_id', woDetailsId)
-          .eq('derived_sw_code', derivedSwCode);
-
-        await statusUpdateQuery;
-        console.log(`✅ Updated work status to Draft Plan for work ${derivedSwCode} (all ${requiredSkills.length} skills planned)`);
-      }
     }
   } catch (error) {
     console.error('Error updating work status:', error);

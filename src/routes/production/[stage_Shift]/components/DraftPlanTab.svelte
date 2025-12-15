@@ -3,6 +3,7 @@
   import Button from '$lib/components/common/Button.svelte';
   import { formatTime, calculateBreakTimeInRange } from '../utils/timeUtils';
   import { groupPlannedWorks } from '../utils/planTabUtils';
+  import { filterGroupedWorksBySearch } from '../utils/productionTabSearchUtils';
   import PlanHistoryModal from './PlanHistoryModal.svelte';
   import { supabase } from '$lib/supabaseClient';
 
@@ -23,12 +24,14 @@
 
   let showHistoryModal = false;
   let hasRejectedSubmission = false; // Track if there's a previous rejected submission
+  let searchTerm = '';
 
   // Combine draft work plans and manpower plans (only work plans for now, as manpower plans have different structure)
   $: allDraftPlans = draftPlanData || [];
   $: groupedPlannedWorks = groupPlannedWorks(allDraftPlans);
+  $: filteredGroupedPlannedWorks = filterGroupedWorksBySearch(groupedPlannedWorks, searchTerm);
   // Count unique works (by work code), not individual skill competencies
-  $: totalPlans = Object.keys(groupedPlannedWorks).length;
+  $: totalPlans = Object.keys(filteredGroupedPlannedWorks).length;
 
   $: selectedDateDisplay = (() => {
     if (!selectedDate) return '';
@@ -196,6 +199,15 @@
         </Button>
       </div>
     </div>
+    <!-- Search Box -->
+    <div class="mt-4">
+      <input
+        type="text"
+        bind:value={searchTerm}
+        placeholder="Search by work code, work name, WO number, PWO number, worker, or skill..."
+        class="w-full px-4 py-2 border theme-border rounded-lg theme-bg-primary theme-text-primary focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+      />
+    </div>
   </div>
   
   <!-- Read-only notice -->
@@ -278,7 +290,7 @@
           </tr>
         </thead>
         <tbody class="theme-bg-primary divide-y divide-gray-200 dark:divide-gray-700">
-          {#each Object.values(groupedPlannedWorks) as group}
+          {#each Object.values(filteredGroupedPlannedWorks) as group}
             {@const typedGroup = group}
             {@const allSelected = typedGroup.items.every((item: any) => selectedRows.has(item.id))}
             {@const someSelected = typedGroup.items.some((item: any) => selectedRows.has(item.id))}
@@ -445,7 +457,7 @@
           <span class="font-medium">Total Draft Plans:</span> {totalPlans}
         </div>
         <div class="theme-text-secondary">
-          <span class="font-medium">Total Planned Hours:</span> {formatTime(Object.values(groupedPlannedWorks).reduce((sum, group) => {
+          <span class="font-medium">Total Planned Hours:</span> {formatTime(Object.values(filteredGroupedPlannedWorks).reduce((sum, group) => {
             // For each unique work, get the duration from the first item
             // Use vehicle work flow duration if available, otherwise calculate from time range
             if (group.items && group.items.length > 0) {

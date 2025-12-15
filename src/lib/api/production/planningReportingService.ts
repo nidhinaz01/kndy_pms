@@ -105,9 +105,9 @@ export async function getDraftWorkPlans(
       .from('prdn_work_planning')
       .select(`
         *,
-        hr_emp!inner(emp_id, emp_name, skill_short),
+        hr_emp(emp_id, emp_name, skill_short),
         std_work_type_details(derived_sw_code, sw_code, type_description, std_work_details(sw_name)),
-        prdn_wo_details!inner(wo_no, pwo_no, wo_model, customer_name),
+        prdn_wo_details(wo_no, pwo_no, wo_model, customer_name),
         std_work_skill_mapping(wsm_id, sc_name)
       `)
       .eq('stage_code', stageCode)
@@ -119,128 +119,19 @@ export async function getDraftWorkPlans(
 
     if (error) throw error;
     
-    // Enrich with skill-specific time standards and vehicle work flow
-    const enrichedPlannedWorks = await Promise.all(
-      (data || []).map(async (plannedWork) => {
-        const derivedSwCode = plannedWork.std_work_type_details?.derived_sw_code;
-        const otherWorkCode = plannedWork.other_work_code;
-        const skillShort = plannedWork.hr_emp?.skill_short;
-        const scRequired = plannedWork.sc_required;
-        
-        // For non-standard works, fetch work addition data
-        let workAdditionData = null;
-        if (otherWorkCode) {
-          try {
-            let query = supabase
-              .from('prdn_work_additions')
-              .select('other_work_code, other_work_desc, other_work_sc')
-              .eq('other_work_code', otherWorkCode)
-              .eq('stage_code', stageCode);
-            
-            // Include wo_details_id in filter if available for more precise matching
-            if (plannedWork.wo_details_id) {
-              query = query.eq('wo_details_id', plannedWork.wo_details_id);
-            }
-            
-            const { data: additionData, error: additionError } = await query.limit(1).maybeSingle();
-            
-            if (additionError) {
-              // Log the error but don't throw - this is non-critical data
-              console.warn(`Error fetching work addition data for ${otherWorkCode} in ${stageCode}:`, additionError);
-            } else {
-              workAdditionData = additionData;
-            }
-          } catch (error) {
-            // Log but don't throw - this is enrichment data, not critical
-            console.warn(`Error fetching work addition data for ${otherWorkCode}:`, error);
-          }
-        }
-        
-        // Fetch vehicle work flow
-        let vehicleWorkFlow = null;
-        if (derivedSwCode) {
-          try {
-            const { data: vwfData } = await supabase
-              .from('std_vehicle_work_flow')
-              .select('estimated_duration_minutes')
-              .eq('derived_sw_code', derivedSwCode)
-              .eq('is_deleted', false)
-              .eq('is_active', true)
-              .limit(1)
-              .maybeSingle();
-            vehicleWorkFlow = vwfData;
-          } catch (error) {
-            console.error('Error fetching vehicle work flow:', error);
-          }
-        }
-        
-        if (!derivedSwCode || !skillShort || !scRequired) {
-          return { ...plannedWork, skillTimeStandard: null, skillMapping: null, vehicleWorkFlow: vehicleWorkFlow, workAdditionData: workAdditionData };
-        }
-
-        // Find skill combination that contains the required skill
-        let matchingWsm = null;
-        try {
-          const { data: allMappings } = await supabase
-            .from('std_work_skill_mapping')
-            .select(`
-              wsm_id,
-              sc_name,
-              std_skill_combinations!inner(
-                skill_combination
-              )
-            `)
-            .eq('derived_sw_code', derivedSwCode)
-            .eq('is_deleted', false)
-            .eq('is_active', true);
-
-          if (allMappings && allMappings.length > 0) {
-            for (const mapping of allMappings) {
-              const skillCombination = (mapping as any).std_skill_combinations?.skill_combination;
-              if (skillCombination && Array.isArray(skillCombination)) {
-                const hasSkill = skillCombination.some((skill: any) => 
-                  skill.skill_name === scRequired || skill.skill_short === scRequired
-                );
-                if (hasSkill) {
-                  matchingWsm = mapping;
-                  break;
-                }
-              }
-            }
-          }
-        } catch (error) {
-          console.error('Error fetching skill mappings:', error);
-        }
-
-        if (!matchingWsm) {
-          return { ...plannedWork, skillTimeStandard: null, skillMapping: null, vehicleWorkFlow: vehicleWorkFlow, workAdditionData: workAdditionData };
-        }
-
-        // Get skill time standard
-        let skillTimeStandard = null;
-        try {
-          const { data: stsData } = await supabase
-            .from('std_skill_time_standards')
-            .select('*')
-            .eq('wsm_id', matchingWsm.wsm_id)
-            .eq('skill_short', scRequired)
-            .eq('is_deleted', false)
-            .eq('is_active', true)
-            .maybeSingle();
-          skillTimeStandard = stsData;
-        } catch (error) {
-          console.error('Error fetching skill time standard:', error);
-        }
-
-        return {
-          ...plannedWork,
-          skillTimeStandard: skillTimeStandard,
-          skillMapping: matchingWsm,
-          vehicleWorkFlow: vehicleWorkFlow,
-          workAdditionData: workAdditionData
-        };
-      })
-    );
+    // Warn about missing related records (but still include the plan)
+    (data || []).forEach(plannedWork => {
+      if (!plannedWork.hr_emp) {
+        console.warn(`⚠️ Draft plan ID ${plannedWork.id} has missing hr_emp record (worker_id: ${plannedWork.worker_id})`);
+      }
+      if (!plannedWork.prdn_wo_details) {
+        console.warn(`⚠️ Draft plan ID ${plannedWork.id} has missing prdn_wo_details record (wo_details_id: ${plannedWork.wo_details_id})`);
+      }
+    });
+    
+    // Enrich with skill-specific time standards and vehicle work flow using batch queries
+    const { batchEnrichItems } = await import('$lib/utils/workEnrichmentService');
+    const enrichedPlannedWorks = await batchEnrichItems(data || [], stageCode);
 
     return enrichedPlannedWorks;
   } catch (error) {
