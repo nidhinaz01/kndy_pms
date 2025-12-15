@@ -147,14 +147,43 @@ export async function recordWorkOrderEntry(
 
     const derivedWorkCodes = workFlow.map((wf: any) => wf.derived_sw_code);
 
+    // Filter works to only include those that belong to the current stage
+    onProgress?.('Filtering works by stage...');
+    const { data: workTypeDetails, error: workTypeDetailsError } = await supabase
+      .from('std_work_type_details')
+      .select(`
+        derived_sw_code,
+        std_work_details!inner(
+          plant_stage
+        )
+      `)
+      .in('derived_sw_code', derivedWorkCodes)
+      .eq('is_active', true)
+      .eq('is_deleted', false);
+
+    if (workTypeDetailsError) {
+      console.error('Error fetching work type details:', workTypeDetailsError);
+      throw new Error('Error fetching work details for stage filtering');
+    }
+
+    // Filter to only include works where plant_stage matches the stageCode being entered
+    const worksForThisStage = (workTypeDetails || [])
+      .filter((wtd: any) => wtd.std_work_details?.plant_stage === stageCode)
+      .map((wtd: any) => wtd.derived_sw_code);
+
+    if (worksForThisStage.length === 0) {
+      console.warn(`⚠️ No works found for stage ${stageCode} in work type ${workType.id}`);
+      // Don't throw error, just log warning - some stages might legitimately have no works
+    }
+
     // Get current username and timestamp
     onProgress?.('Preparing work status records...');
     const { getCurrentUsername, getCurrentTimestamp } = await import('$lib/utils/userUtils');
     const currentUser = getCurrentUsername();
     const now = getCurrentTimestamp();
 
-    // Prepare records for prdn_work_status
-    const statusRecords = derivedWorkCodes.map((derivedSwCode: string) => ({
+    // Prepare records for prdn_work_status - only for works belonging to this stage
+    const statusRecords = worksForThisStage.map((derivedSwCode: string) => ({
       stage_code: stageCode,
       wo_details_id: woDetailsId,
       derived_sw_code: derivedSwCode,
