@@ -18,7 +18,7 @@
   };
 
   const widthClass = fullWidth ? 'w-full' : '';
-  const disabledClass = disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer hover:opacity-90';
+  const disabledClass = disabled ? 'cursor-not-allowed' : 'cursor-pointer';
 
   $: classes = `${baseClasses} ${sizeClasses[size]} ${widthClass} ${disabledClass}`;
 </script>
@@ -46,15 +46,24 @@
     color: white !important;
     border: 2px solid #2563eb !important;
     cursor: pointer !important;
+    font-weight: 500 !important;
+    text-shadow: none !important;
   }
   
-  .btn-primary:hover {
+  .btn-primary:hover:not(:disabled) {
     background-color: #1d4ed8 !important;
     border-color: #1d4ed8 !important;
   }
   
   .btn-primary:focus {
     box-shadow: 0 0 0 2px #3b82f6 !important;
+  }
+  
+  .btn-primary:disabled {
+    opacity: 0.6 !important;
+    background-color: #2563eb !important;
+    color: white !important;
+    border-color: #2563eb !important;
   }
   
   .btn-secondary {

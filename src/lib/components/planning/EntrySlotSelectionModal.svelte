@@ -554,10 +554,21 @@
                     role="switch"
                     aria-checked={isPastEntryMode}
                     on:click={handleToggleChange}
-                    class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 {isPastEntryMode ? 'bg-blue-600' : 'bg-gray-300'}"
+                    class="relative inline-flex h-7 w-14 items-center rounded-full transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 {isPastEntryMode 
+                      ? (currentTheme === 'dark' ? 'bg-green-600 border-2 border-green-400 shadow-inner' : 'bg-green-500 border-2 border-green-600 shadow-inner') 
+                      : (currentTheme === 'dark' ? 'bg-gray-600 border-2 border-gray-400 shadow-inner' : 'bg-gray-300 border-2 border-gray-400 shadow-inner')}"
                   >
+                    <!-- ON state indicator (green checkmark when on) -->
+                    {#if isPastEntryMode}
+                      <span class="absolute left-1.5 text-sm font-extrabold leading-none z-10 {currentTheme === 'dark' ? 'text-green-200' : 'text-green-800'}">✓</span>
+                    {/if}
+                    <!-- OFF state indicator (gray X when off) -->
+                    {#if !isPastEntryMode}
+                      <span class="absolute right-1.5 text-sm font-extrabold leading-none z-10 {currentTheme === 'dark' ? 'text-gray-300' : 'text-gray-700'}">✕</span>
+                    {/if}
+                    <!-- Toggle circle -->
                     <span
-                      class="inline-block h-4 w-4 transform rounded-full bg-white transition-transform {isPastEntryMode ? 'translate-x-6' : 'translate-x-1'}"
+                      class="inline-block h-5 w-5 transform rounded-full bg-white shadow-lg border border-gray-200 transition-transform duration-200 {isPastEntryMode ? 'translate-x-8' : 'translate-x-0.5'}"
                     ></span>
                   </button>
                 </div>

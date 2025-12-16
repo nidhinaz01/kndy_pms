@@ -210,14 +210,17 @@ export async function checkAlternativeSkillCombinations(
     return { hasConflict: false, details: '' };
   }
 
-  const derivedSwCode = work.std_work_type_details?.derived_sw_code || work.sw_code;
+  const woDetailsId = work.wo_details_id || work.prdn_wo_details_id;
+  const isNonStandardWork = work.is_added_work === true || !work.std_work_type_details?.derived_sw_code;
+  const derivedSwCode = isNonStandardWork ? null : (work.std_work_type_details?.derived_sw_code || null);
+  const otherWorkCode = isNonStandardWork ? (work.sw_code || null) : null;
   
-  if (!derivedSwCode) {
+  if (!woDetailsId || (!derivedSwCode && !otherWorkCode)) {
     return { hasConflict: false, details: '' };
   }
 
   try {
-    const { data: existingPlans, error } = await supabase
+    let planningQuery = supabase
       .from('prdn_work_planning')
       .select(`
         *,
@@ -226,10 +229,21 @@ export async function checkAlternativeSkillCombinations(
           is_deleted
         )
       `)
-      .eq('derived_sw_code', derivedSwCode)
+      .eq('wo_details_id', woDetailsId)
       .eq('stage_code', stageCode)
       .eq('is_active', true)
       .eq('is_deleted', false);
+
+    // Filter by work code (either derived_sw_code or other_work_code)
+    if (derivedSwCode && otherWorkCode) {
+      planningQuery = planningQuery.or(`derived_sw_code.eq.${derivedSwCode},other_work_code.eq.${otherWorkCode}`);
+    } else if (derivedSwCode) {
+      planningQuery = planningQuery.eq('derived_sw_code', derivedSwCode);
+    } else if (otherWorkCode) {
+      planningQuery = planningQuery.eq('other_work_code', otherWorkCode);
+    }
+
+    const { data: existingPlans, error } = await planningQuery;
 
     if (error) {
       console.error('Error checking alternative combinations:', error);

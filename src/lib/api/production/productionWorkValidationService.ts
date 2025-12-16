@@ -164,6 +164,11 @@ export async function canPlanWork(
       };
     }
 
+    // Filter by wo_details_id to check plans for this specific work order
+    if (woDetailsId) {
+      planningQuery = planningQuery.eq('wo_details_id', woDetailsId);
+    }
+
     const { data, error } = await planningQuery;
 
     if (error) {
