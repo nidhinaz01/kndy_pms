@@ -3,6 +3,7 @@
  */
 
 import { supabase } from '$lib/supabaseClient';
+import { calculateBreakTimeInMinutes } from '$lib/utils/breakTimeUtils';
 
 export interface ValidationResult {
   isValid: boolean;
@@ -100,6 +101,20 @@ function calculateTotalCovered(slots: TimeSlot[]): number {
 }
 
 /**
+ * Calculate total minutes covered by time slots, deducting break time
+ */
+function calculateTotalCoveredWithBreaks(
+  slots: TimeSlot[], 
+  breakTimes: Array<{ start_time: string; end_time: string }>
+): number {
+  return slots.reduce((total, slot) => {
+    const rawDuration = calculateDuration(slot.from, slot.to);
+    const breakMinutes = calculateBreakTimeInMinutes(slot.from, slot.to, breakTimes);
+    return total + (rawDuration - breakMinutes);
+  }, 0);
+}
+
+/**
  * Validate that all employees have their full shift planned
  */
 export async function validateEmployeeShiftPlanning(
@@ -150,8 +165,9 @@ export async function validateEmployeeShiftPlanning(
       return total + calculateDuration(breakTime.start_time, breakTime.end_time);
     }, 0);
 
-    // Total shift minutes minus break time
-    const totalShiftMinutes = calculateDuration(shiftStartTime, shiftEndTime) - totalBreakMinutes;
+    // Total shift minutes (full duration, no break deduction)
+    // Break time should only be deducted from work planned, not from shift time
+    const totalShiftMinutes = calculateDuration(shiftStartTime, shiftEndTime);
 
     // 2. Get all employees assigned to this stage and shift who are marked as present
     const { data: employees, error: employeesError } = await supabase
@@ -359,8 +375,20 @@ export async function validateEmployeeShiftPlanning(
       if (isOriginallyAssigned) {
         // For employees originally assigned to this stage:
         // Their full shift must be covered by either work at this stage OR reassignment away
-        const allCoveredSlots = mergeTimeSlots([...workSlots, ...awaySlots]);
-        const totalCoveredMinutes = calculateTotalCovered(allCoveredSlots);
+        
+        // Merge work slots to avoid double-counting overlapping work plans
+        const mergedWorkSlots = mergeTimeSlots(workSlots);
+        const mergedAwaySlots = mergeTimeSlots(awaySlots);
+
+        // Calculate work planned hours (raw time for coverage check, effective time for display)
+        const workPlannedRawMinutes = calculateTotalCovered(mergedWorkSlots); // Raw time for coverage validation
+        const workPlannedEffectiveMinutes = calculateTotalCoveredWithBreaks(mergedWorkSlots, shiftBreaks || []); // Effective time for display
+        const reassignedAwayMinutes = calculateTotalCovered(mergedAwaySlots); // Reassignments don't need break deduction
+        
+        // Total covered = work planned (raw time) + reassigned away (raw time)
+        // Compare against full shift duration (no break deduction)
+        // Break time should NOT be deducted from coverage check - only from display
+        const totalCoveredMinutes = workPlannedRawMinutes + reassignedAwayMinutes;
 
         // Check if full shift is covered
         if (totalCoveredMinutes < totalShiftMinutes) {
@@ -369,8 +397,8 @@ export async function validateEmployeeShiftPlanning(
           const missingMins = missingMinutes % 60;
           errors.push(
             `${empName} (${empId}): ${missingHours}h ${missingMins}m of shift time is not planned. ` +
-            `Work planned: ${Math.round(calculateTotalCovered(workSlots) / 60 * 10) / 10}h, ` +
-            `Reassigned away: ${Math.round(calculateTotalCovered(awaySlots) / 60 * 10) / 10}h`
+            `Work planned: ${Math.round(workPlannedEffectiveMinutes / 60 * 10) / 10}h, ` +
+            `Reassigned away: ${Math.round(reassignedAwayMinutes / 60 * 10) / 10}h`
           );
         }
       }

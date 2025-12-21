@@ -14,7 +14,8 @@
 
   // Calculate total hours planned (hours_planned + to_other_stage_hours + from_other_stage_hours)
   $: totalHours = (employee.hours_planned || 0) + (employee.to_other_stage_hours || 0) + (employee.from_other_stage_hours || 0);
-  $: hasLessThan8Hours = totalHours < 8;
+  // Only highlight if employee is not absent and has less than 8 hours planned
+  $: hasLessThan8Hours = employee.attendance_status !== 'absent' && totalHours < 8;
 </script>
 
 <tr class="hover:theme-bg-secondary transition-colors {hasLessThan8Hours ? 'bg-yellow-50 dark:bg-yellow-900/30 border-l-4 border-yellow-500 dark:text-yellow-100' : ''}">

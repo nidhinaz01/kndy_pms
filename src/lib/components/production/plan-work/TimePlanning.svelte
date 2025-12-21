@@ -3,13 +3,22 @@
   import type { ShiftInfo, TimeSlot } from '$lib/types/planWork';
   import { generateTimeSlots, formatTime } from '$lib/utils/planWorkUtils';
 
+  export let fromDate: string = '';
+  export let toDate: string = '';
   export let fromTime: string = '';
   export let toTime: string = '';
+  
+  // Make fromTime bindable
+  $: if (fromTime !== undefined) {
+    // This ensures the prop is reactive
+  }
   export let plannedHours: number = 0;
   export let shiftInfo: ShiftInfo | null = null;
   export let work: any = null;
   export let onFromTimeChange: (value: string) => void = () => {};
   export let onAutoCalculate: () => void = () => {};
+  export let onFromDateChange: ((value: string) => void) | null = null;
+  export let onToDateChange: ((value: string) => void) | null = null;
 </script>
 
 <div class="space-y-4">
@@ -26,6 +35,45 @@
     {/if}
   </div>
   
+  <!-- Date Selection -->
+  <div class="grid grid-cols-2 gap-4">
+    <div>
+      <label for="from-date-input" class="block text-sm font-medium theme-text-primary mb-2">
+        From Date
+      </label>
+      <input
+        id="from-date-input"
+        type="date"
+        value={fromDate}
+        on:change={(e) => {
+          const value = e.currentTarget.value;
+          if (onFromDateChange) {
+            onFromDateChange(value);
+          }
+        }}
+        class="w-full px-3 py-2 border theme-border rounded-lg theme-bg-primary theme-text-primary focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+      />
+    </div>
+    <div>
+      <label for="to-date-input" class="block text-sm font-medium theme-text-primary mb-2">
+        To Date
+      </label>
+      <input
+        id="to-date-input"
+        type="date"
+        value={toDate}
+        on:change={(e) => {
+          const value = e.currentTarget.value;
+          if (onToDateChange) {
+            onToDateChange(value);
+          }
+        }}
+        class="w-full px-3 py-2 border theme-border rounded-lg theme-bg-primary theme-text-primary focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+      />
+    </div>
+  </div>
+  
+  <!-- Time Selection -->
   <div class="grid grid-cols-2 gap-4">
     <div>
       <label for="from-time-select" class="block text-sm font-medium theme-text-primary mb-2">

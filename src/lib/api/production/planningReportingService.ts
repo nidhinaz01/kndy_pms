@@ -99,6 +99,8 @@ export async function getDraftWorkPlans(
   planningDate: string
 ): Promise<any[]> {
   try {
+    console.log(`🔍 getDraftWorkPlans: Fetching for stage: ${stageCode}, date: ${planningDate}`);
+    
     // Fetch plans with status 'draft', 'pending_approval', or 'approved'
     // 'rejected' plans are not included here as they should be editable (treated as draft)
     const { data, error } = await supabase
@@ -117,7 +119,12 @@ export async function getDraftWorkPlans(
       .eq('is_deleted', false)
       .order('from_time', { ascending: true });
 
-    if (error) throw error;
+    if (error) {
+      console.error('❌ Error fetching draft work plans:', error);
+      throw error;
+    }
+    
+    console.log(`📊 getDraftWorkPlans: Raw query returned ${(data || []).length} records`);
     
     // Warn about missing related records (but still include the plan)
     (data || []).forEach(plannedWork => {
@@ -127,15 +134,20 @@ export async function getDraftWorkPlans(
       if (!plannedWork.prdn_wo_details) {
         console.warn(`⚠️ Draft plan ID ${plannedWork.id} has missing prdn_wo_details record (wo_details_id: ${plannedWork.wo_details_id})`);
       }
+      if (!plannedWork.std_work_type_details) {
+        console.warn(`⚠️ Draft plan ID ${plannedWork.id} has missing std_work_type_details record (derived_sw_code: ${plannedWork.derived_sw_code})`);
+      }
     });
     
     // Enrich with skill-specific time standards and vehicle work flow using batch queries
     const { batchEnrichItems } = await import('$lib/utils/workEnrichmentService');
     const enrichedPlannedWorks = await batchEnrichItems(data || [], stageCode);
 
+    console.log(`✅ getDraftWorkPlans: Enriched ${enrichedPlannedWorks.length} planned works`);
+
     return enrichedPlannedWorks;
   } catch (error) {
-    console.error('Error fetching draft work plans:', error);
+    console.error('❌ Error fetching draft work plans:', error);
     return [];
   }
 }

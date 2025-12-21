@@ -163,34 +163,32 @@
 </script>
 
 {#if showAddModal}
-  <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-    <div class="theme-bg-primary rounded-lg shadow-xl max-w-md w-full mx-4 max-h-[90vh] overflow-y-auto">
-      <div class="p-6">
-        <div class="flex items-center justify-between mb-6">
-          <h2 class="text-xl font-semibold theme-text-primary">Add Vehicle Work Flow</h2>
-          <button
-            on:click={handleClose}
-            class="theme-text-secondary hover:theme-text-primary transition-colors"
-            aria-label="Close modal"
-          >
-            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
+  <div class="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
+    <div class="theme-bg-primary rounded-2xl shadow-2xl p-8 w-[32rem] max-h-[90vh] overflow-y-auto animate-fade-in">
+      <div class="flex items-center justify-between mb-6">
+        <div class="font-bold text-lg theme-text-accent flex items-center gap-2">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 theme-text-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+          </svg>
+          Add Vehicle Work Flow
         </div>
+        <button class="theme-text-secondary hover:theme-text-accent transition-colors" on:click={handleClose} aria-label="Close modal">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
 
-        {#if errorMsg}
-          <div class="mb-4 p-3 bg-red-100 dark:bg-red-900 border border-red-400 dark:border-red-700 text-red-700 dark:text-red-200 rounded">
-            {errorMsg}
-          </div>
-        {/if}
+      {#if errorMsg}
+        <div class="theme-text-danger mb-2">{errorMsg}</div>
+      {/if}
 
-        <form on:submit|preventDefault={handleSubmit} class="space-y-6">
-          <!-- Vehicle Type Selection -->
-          <div>
-            <label for="vehicleType" class="block text-sm font-medium theme-text-primary mb-2">
-              Vehicle Type *
-            </label>
+      <form on:submit|preventDefault={handleSubmit} class="space-y-4">
+        <!-- Vehicle Type Selection -->
+        <div>
+          <label for="vehicleType" class="block text-sm font-medium theme-text-primary mb-1">
+            Vehicle Type *
+          </label>
             <select
               id="vehicleType"
               bind:value={selectedVehicleType}
@@ -209,11 +207,11 @@
             </p>
           </div>
 
-          <!-- Derivative Work Selection -->
-          <div>
-            <label for="derivedWork" class="block text-sm font-medium theme-text-primary mb-2">
-              Derivative Work *
-            </label>
+        <!-- Derivative Work Selection -->
+        <div>
+          <label for="derivedWork" class="block text-sm font-medium theme-text-primary mb-1">
+            Derivative Work *
+          </label>
             <select
               id="derivedWork"
               bind:value={selectedDerivedWork}
@@ -239,11 +237,11 @@
             </p>
           </div>
 
-          <!-- Sequence Order -->
-          <div>
-            <label for="sequenceOrder" class="block text-sm font-medium theme-text-primary mb-2">
-              Sequence Order *
-            </label>
+        <!-- Sequence Order -->
+        <div>
+          <label for="sequenceOrder" class="block text-sm font-medium theme-text-primary mb-1">
+            Sequence Order *
+          </label>
             <input
               id="sequenceOrder"
               type="number"
@@ -258,11 +256,11 @@
             </p>
           </div>
 
-          <!-- Dependency Selection -->
-          <div>
-            <label for="dependency" class="block text-sm font-medium theme-text-primary mb-2">
-              Dependency (Optional)
-            </label>
+        <!-- Dependency Selection -->
+        <div>
+          <label for="dependency" class="block text-sm font-medium theme-text-primary mb-1">
+            Dependency (Optional)
+          </label>
             <select
               id="dependency"
               bind:value={selectedDependency}
@@ -280,11 +278,11 @@
             </p>
           </div>
 
-          <!-- Estimated Duration -->
-          <div>
-            <label for="estimatedDuration" class="block text-sm font-medium theme-text-primary mb-2">
-              Estimated Duration (minutes) *
-            </label>
+        <!-- Estimated Duration -->
+        <div>
+          <label for="estimatedDuration" class="block text-sm font-medium theme-text-primary mb-1">
+            Estimated Duration (minutes) *
+          </label>
             <input
               id="estimatedDuration"
               type="number"
@@ -299,7 +297,7 @@
               {#if selectedDerivedWork && estimatedDurationMinutes > 0}
                 Auto-calculated from time standards for {selectedDerivedWork} ({formatTimeBreakdown(timeBreakdown.breakdown, timeBreakdown.isUniform, estimatedDurationMinutes)})
               {:else if selectedDerivedWork && estimatedDurationMinutes === 0}
-                <span class="text-orange-600 dark:text-orange-400">
+                <span class="theme-text-danger">
                   No time standards found for {selectedDerivedWork}. Please add time standards first.
                 </span>
               {:else}
@@ -308,15 +306,24 @@
             </p>
           </div>
 
-          <!-- Action Buttons -->
-          <div class="flex justify-between gap-3 pt-4">
-            <Button variant="primary" size="md" disabled={submitting || !selectedVehicleType || !selectedDerivedWork || sequenceOrder <= 0 || estimatedDurationMinutes <= 0}>
-              {submitting ? 'Creating...' : 'Create Work Flow'}
-            </Button>
-            <Button variant="secondary" size="md" on:click={handleClose}>Cancel</Button>
-          </div>
-        </form>
-      </div>
+        <!-- Action Buttons -->
+        <div class="flex justify-between gap-3 pt-4">
+          <Button variant="primary" size="md" type="submit" disabled={submitting || !selectedVehicleType || !selectedDerivedWork || sequenceOrder <= 0 || estimatedDurationMinutes <= 0}>
+            {submitting ? 'Creating...' : 'Create Work Flow'}
+          </Button>
+          <Button variant="secondary" size="md" on:click={handleClose}>Cancel</Button>
+        </div>
+      </form>
     </div>
   </div>
-{/if} 
+{/if}
+
+<style>
+  @keyframes fade-in {
+    from { opacity: 0; transform: translateY(20px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .animate-fade-in {
+    animation: fade-in 0.2s ease;
+  }
+</style> 

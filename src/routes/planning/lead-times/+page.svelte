@@ -91,6 +91,7 @@
   }
 
   function handleAdd() {
+    console.log('handleAdd called');
     isEditMode = true;
     selectedWorkOrderType = '';
     selectedPlantStage = '';
@@ -296,7 +297,11 @@
             {#if !isEditMode}
               <Button
                 variant="primary"
-                on:click={handleAdd}
+                type="button"
+                on:click={(e) => {
+                  console.log('Button click event received', e);
+                  handleAdd();
+                }}
               >
                 <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
@@ -306,7 +311,7 @@
             {/if}
           </div>
 
-          {#if Object.keys(stageOrders).length > 0}
+          {#if stageOrders.length > 0}
             <div class="space-y-6">
               {#each Object.entries(stageOrders.reduce((acc, order) => {
                 if (!acc[order.wo_type_name]) acc[order.wo_type_name] = [];

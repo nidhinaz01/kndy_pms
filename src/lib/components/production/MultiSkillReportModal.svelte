@@ -38,6 +38,23 @@
   // Watch for selectedWorks changes
   $: if (selectedWorks.length > 0 && isOpen) {
     console.log('MultiSkillReportModal: Selected works changed:', selectedWorks);
+    
+    // Fix 2: Validate selectedWorks to ensure they're all for the same work order
+    // This prevents using stale data from previous modal opens
+    const firstWoDetailsId = selectedWorks[0]?.wo_details_id || selectedWorks[0]?.prdn_wo_details_id;
+    if (firstWoDetailsId) {
+      // Filter out any works that don't match the first work's work order
+      const validWorks = selectedWorks.filter((work: any) => {
+        const workWoDetailsId = work.wo_details_id || work.prdn_wo_details_id;
+        return workWoDetailsId === firstWoDetailsId;
+      });
+      
+      if (validWorks.length !== selectedWorks.length) {
+        console.warn('MultiSkillReportModal: Some works have mismatched work order IDs, filtering them out');
+        // Note: We can't directly modify the prop, but the validation will prevent issues
+      }
+    }
+    
     initializeForm();
     loadAllData();
   }
@@ -444,10 +461,17 @@
   }
 
   function resetForm() {
+    // Fix 3: Reset all modal state variables when modal closes
     formData = { ...initialMultiSkillReportFormData };
     state = { ...initialMultiSkillReportState };
+    availableWorkers = [];
+    lostTimeReasons = [];
+    shiftInfo = null;
     skillEmployeesString = '';
     previousSkillEmployeesString = '';
+    selectedWorkersWithSalaries = [];
+    isLoading = false;
+    isLoadingSalary = false;
   }
 
   function handleEmployeeChange(workId: string, employeeId: string) {

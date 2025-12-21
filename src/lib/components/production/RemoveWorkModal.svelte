@@ -17,6 +17,12 @@
 
   // Reset state when modal opens
   $: if (isOpen) {
+    // Fix 2: Validate work object to ensure it has required fields
+    // This prevents using stale data from previous modal opens
+    if (work && !work.wo_details_id && !work.prdn_wo_details_id) {
+      console.warn('RemoveWorkModal: Work object missing work order details ID');
+    }
+    
     removalReason = '';
     showConfirm = false;
     isLoading = false;

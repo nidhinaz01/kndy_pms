@@ -22,7 +22,13 @@
 
   // Watch for work changes
   $: if (work && isOpen) {
-    loadWorkHistory();
+    // Fix 2: Validate work object to ensure it has required fields
+    // This prevents using stale data from previous modal opens
+    if (work.std_work_type_details?.derived_sw_code || work.sw_code) {
+      loadWorkHistory();
+    } else {
+      console.warn('ViewWorkHistoryModal: Work object missing work code');
+    }
   }
 
   async function loadWorkHistory() {

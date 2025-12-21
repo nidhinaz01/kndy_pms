@@ -25,9 +25,15 @@
   let state: ManpowerTableState = { ...initialManpowerTableState };
 
   $: filteredData = filterEmployees(data, filters);
-  $: totals = calculateTotals(filteredData);
+  // Sort by employee name in ascending order
+  $: sortedFilteredData = [...filteredData].sort((a, b) => {
+    const nameA = (a.emp_name || '').toLowerCase();
+    const nameB = (b.emp_name || '').toLowerCase();
+    return nameA.localeCompare(nameB);
+  });
+  $: totals = calculateTotals(sortedFilteredData);
   $: selectedCount = state.selectedEmployees.size;
-  $: eligibleEmployeesCount = filteredData.filter(emp => !isReportingAttendanceLocked(emp, reportingSubmissionStatus)).length;
+  $: eligibleEmployeesCount = sortedFilteredData.filter(emp => !isReportingAttendanceLocked(emp, reportingSubmissionStatus)).length;
   $: allSelected = selectedCount > 0 && selectedCount === eligibleEmployeesCount;
 
   function handleSearchChange(value: string) {
@@ -65,7 +71,7 @@
 
   function selectAllEmployees() {
     // In report tab, allow selecting all employees (no restrictions based on planning)
-    state.selectedEmployees = new Set(filteredData.map(emp => emp.emp_id));
+    state.selectedEmployees = new Set(sortedFilteredData.map(emp => emp.emp_id));
   }
 
   function clearSelection() {
@@ -90,7 +96,7 @@
 
     state.isBulkSubmitting = true;
 
-    const employeesToMark = filteredData.filter(emp => state.selectedEmployees.has(emp.emp_id));
+    const employeesToMark = sortedFilteredData.filter(emp => state.selectedEmployees.has(emp.emp_id));
     
     dispatch('bulkAttendanceMarked', {
       employees: employeesToMark.map(emp => ({
@@ -220,7 +226,7 @@
     <div class="overflow-x-auto">
       <table class="w-full">
         <ManpowerReportTableBody
-          {filteredData}
+          filteredData={sortedFilteredData}
           {data}
           selectedEmployees={state.selectedEmployees}
           {reportingSubmissionStatus}

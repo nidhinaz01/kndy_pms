@@ -9,8 +9,11 @@ export async function saveWorkPlanning(
   formData: PlanWorkFormData,
   workContinuation: WorkContinuation,
   stageCode: string,
-  selectedDate: string
+  fromDate: string,
+  toDate?: string
 ): Promise<{ success: boolean; createdPlans: number; message: string }> {
+  // Use toDate if provided, otherwise use fromDate
+  const planningToDate = toDate || fromDate;
   const requiredSkills = work?.skill_mappings || [];
   const assignedWorkers = Object.values(formData.selectedWorkers).filter(Boolean);
   
@@ -71,9 +74,9 @@ export async function saveWorkPlanning(
           other_work_code: otherWorkCode,
           sc_required: skillShort,
           worker_id: workerId,
-          from_date: selectedDate,
+          from_date: fromDate,
           from_time: formData.fromTime,
-          to_date: selectedDate,
+          to_date: planningToDate,
           to_time: formData.toTime,
           planned_hours: formData.plannedHours,
           time_worked_till_date: workContinuation.timeWorkedTillDate,
@@ -122,9 +125,9 @@ export async function saveWorkPlanning(
         other_work_code: otherWorkCode,
         sc_required: 'GEN',
         worker_id: workerId,
-        from_date: selectedDate,
+        from_date: fromDate,
         from_time: formData.fromTime,
-        to_date: selectedDate,
+        to_date: planningToDate,
         to_time: formData.toTime,
         planned_hours: formData.plannedHours,
         time_worked_till_date: workContinuation.timeWorkedTillDate,
@@ -223,7 +226,7 @@ export async function saveWorkPlanning(
   const totalPlans = updateResults.length + insertResults.length;
   
   if (totalPlans > 0) {
-    await updateWorkStatus(work, stageCode, currentUser, now, selectedDate);
+    await updateWorkStatus(work, stageCode, currentUser, now, fromDate);
   }
   
   return {

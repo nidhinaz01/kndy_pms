@@ -32,6 +32,7 @@
   $: filteredGroupedPlannedWorks = filterGroupedWorksBySearch(groupedPlannedWorks, searchTerm);
   // Count unique works (by work code), not individual skill competencies
   $: totalPlans = Object.keys(filteredGroupedPlannedWorks).length;
+  
 
   $: selectedDateDisplay = (() => {
     if (!selectedDate) return '';

@@ -17,7 +17,25 @@ export async function loadWorkers(stageCode: string): Promise<Worker[]> {
       return [];
     }
 
-    return (data || []) as Worker[];
+    const workers = (data || []) as Worker[];
+    
+    // Debug: Log workers with missing names
+    const workersWithMissingNames = workers.filter(w => !w.emp_name || w.emp_name.trim() === '');
+    if (workersWithMissingNames.length > 0) {
+      console.warn(`⚠️ loadWorkers: Found ${workersWithMissingNames.length} workers with missing names:`, 
+        workersWithMissingNames.map(w => ({ emp_id: w.emp_id, emp_name: w.emp_name, skill_short: w.skill_short }))
+      );
+    }
+    
+    // Filter out workers with missing names and log them
+    const validWorkers = workers.filter(w => w.emp_name && w.emp_name.trim() !== '');
+    if (validWorkers.length < workers.length) {
+      console.warn(`⚠️ loadWorkers: Filtered out ${workers.length - validWorkers.length} workers with missing names`);
+    }
+    
+    console.log(`✅ loadWorkers: Loaded ${validWorkers.length} workers for stage ${stageCode}`);
+    
+    return validWorkers;
   } catch (error) {
     console.error('Error loading workers:', error);
     return [];

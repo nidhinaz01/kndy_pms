@@ -45,32 +45,123 @@
   let previousSelectedSkillMappingIndex = -1;
   let lastAutoCalculatedToTime: string | null = null;
   let originalDurationMinutes: number | null = null; // Track original duration when editing
+  let savedSelectedWorkers: { [skill: string]: SelectedWorker | null } = {}; // Fix 4: Save workers when going back
+  let userHasSelectedFromTime = false; // Track if user has manually selected fromTime
 
   // Watch for work changes
+  // Use a key to track work changes and prevent unnecessary resets
+  let previousWorkId: string | null = null;
+  let previousIsOpen: boolean = false;
   $: if (work && isOpen) {
-    console.log('PlanWorkModal: Work changed:', work);
-    loadAllData();
+    const currentWorkId = `${work?.sw_id || work?.id || 'new'}-${work?.wo_details_id || 'unknown'}`;
     
-    // Check if this is edit mode (has existing draft plans)
-    const isEditMode = work?.existingDraftPlans && Array.isArray(work.existingDraftPlans) && work.existingDraftPlans.length > 0;
+    // CRITICAL: Clear selectedWorkers when modal first opens (even if same work)
+    // This prevents stale data from previous modal sessions
+    if (!previousIsOpen && isOpen) {
+      formData.selectedWorkers = {};
+      console.log('🧹 Cleared selectedWorkers on modal open');
+    }
+    previousIsOpen = isOpen;
     
-    if (isEditMode) {
-      // Pre-fill form with existing plan data (will be called again after workers load)
-      // Don't prefill workers yet - wait for availableWorkers to load
-      prefillFormFromExistingPlans(work.existingDraftPlans, false);
-    } else {
-      // Reset form and step for new planning
-    formData = { ...initialPlanWorkFormData };
-    warnings = { ...initialWarnings };
-    previousSelectedSkillMappingIndex = -1;
-    lastAutoCalculatedToTime = null;
-    currentStep = 1;
-    filteredAvailableWorkers = [];
-    
-    // Auto-select if only one skill mapping
-    if (work?.skill_mappings && work.skill_mappings.length === 1) {
-      formData.selectedSkillMappingIndex = 0;
-      previousSelectedSkillMappingIndex = 0;
+    // Only reset if this is actually a different work
+    if (currentWorkId !== previousWorkId) {
+      console.log('PlanWorkModal: Work changed:', work, 'from', previousWorkId, 'to', currentWorkId);
+      previousWorkId = currentWorkId; // Update to track this change
+      
+      // Fix: Always clear ALL state first to prevent stale data from previous modal opens
+      // Create a completely fresh object to ensure no references to old data
+      formData.selectedWorkers = {};
+      // Initialize dates from selectedDate if not already set
+      if (!formData.fromDate) {
+        formData.fromDate = selectedDate;
+      }
+      if (!formData.toDate) {
+        formData.toDate = selectedDate;
+      }
+      // Force a reactive update by creating a new object
+      formData = { ...formData, selectedWorkers: {} };
+      filteredAvailableWorkers = [];
+      savedSelectedWorkers = {};
+      hasPrefilledWorkers = false;
+      // CRITICAL: Only reset userHasSelectedFromTime when work actually changes
+      // Don't reset it if user is still working on the same work
+      userHasSelectedFromTime = false; // Reset flag when work changes
+      
+      console.log('🔍 After work change, formData.fromTime:', formData.fromTime, 'formData.fromDate:', formData.fromDate, 'userHasSelectedFromTime:', userHasSelectedFromTime);
+      
+      // Debug: Verify selectedWorkers is empty
+      const workerCount = Object.keys(formData.selectedWorkers).length;
+      if (workerCount > 0) {
+        console.warn(`⚠️ PlanWorkModal: selectedWorkers still has ${workerCount} entries after clearing!`, formData.selectedWorkers);
+      } else {
+        console.log('✅ PlanWorkModal: selectedWorkers cleared successfully');
+      }
+      
+      // Fix 2: Validate that existingDraftPlans only contains plans for the current work order
+      // This prevents using plans from a different work order
+      if (work?.existingDraftPlans && Array.isArray(work.existingDraftPlans)) {
+        const currentWoDetailsId = work.wo_details_id || work.prdn_wo_details_id;
+        if (currentWoDetailsId) {
+          // Filter out any plans that don't match the current work order
+          work.existingDraftPlans = work.existingDraftPlans.filter((plan: any) => 
+            (plan.wo_details_id || plan.prdn_wo_details_id) === currentWoDetailsId
+          );
+          // If no valid plans remain, clear existingDraftPlans
+          if (work.existingDraftPlans.length === 0) {
+            delete work.existingDraftPlans;
+          }
+        }
+      }
+      
+      loadAllData();
+      
+      // Check if this is edit mode (has existing draft plans)
+      const isEditMode = work?.existingDraftPlans && Array.isArray(work.existingDraftPlans) && work.existingDraftPlans.length > 0;
+      
+      if (isEditMode) {
+        // Pre-fill form with existing plan data (will be called again after workers load)
+        // Don't prefill workers yet - wait for availableWorkers to load
+        prefillFormFromExistingPlans(work.existingDraftPlans, false);
+      } else {
+        // Reset form and step for new planning
+        // CRITICAL: Never reset formData.fromTime if user has manually selected it
+        // This prevents clearing the fromTime value after user selection
+        const savedFromTime = userHasSelectedFromTime ? formData.fromTime : '';
+        const savedToTime = userHasSelectedFromTime ? formData.toTime : '';
+        const savedFromDate = formData.fromDate || selectedDate;
+        const savedToDate = formData.toDate || selectedDate;
+        
+        if (!userHasSelectedFromTime) {
+          // Only reset if user hasn't selected a time yet
+          formData = { 
+            ...initialPlanWorkFormData,
+            fromDate: savedFromDate,
+            toDate: savedToDate
+          };
+          console.log('🔄 Reset formData for new planning (no user selection yet)');
+        } else {
+          // User has selected a time - preserve it when resetting other fields
+          formData = { 
+            ...initialPlanWorkFormData, 
+            fromDate: savedFromDate,
+            toDate: savedToDate,
+            fromTime: savedFromTime,
+            toTime: savedToTime
+          };
+          console.log('✅ Preserved user-selected times when resetting formData:', { fromTime: savedFromTime, toTime: savedToTime });
+        }
+        
+        warnings = { ...initialWarnings };
+        previousSelectedSkillMappingIndex = -1;
+        lastAutoCalculatedToTime = null;
+        currentStep = 1;
+        filteredAvailableWorkers = [];
+        
+        // Auto-select if only one skill mapping
+        if (work?.skill_mappings && work.skill_mappings.length === 1) {
+          formData.selectedSkillMappingIndex = 0;
+          previousSelectedSkillMappingIndex = 0;
+        }
       }
     }
   }
@@ -87,6 +178,7 @@
   // Reset flag when modal closes or work changes
   $: if (!isOpen || !work) {
     hasPrefilledWorkers = false;
+    savedSelectedWorkers = {}; // Fix 4: Clear saved workers when modal closes or work changes
   }
   
   function prefillFormFromExistingPlans(existingPlans: any[], fillWorkers: boolean = true) {
@@ -181,8 +273,10 @@
       
       // For toTime, we can use the exact value since TimePicker accepts any time
       formData.toTime = latestTime;
-      lastAutoCalculatedToTime = formData.toTime;
-      console.log('✅ Pre-filled fromTime:', formData.fromTime, 'toTime:', formData.toTime);
+      // CRITICAL: Set lastAutoCalculatedToTime to null when pre-filling from saved plans
+      // This prevents the reactive statement from auto-calculating and overwriting the saved value
+      lastAutoCalculatedToTime = null;
+      console.log('✅ Pre-filled fromTime:', formData.fromTime, 'toTime:', formData.toTime, '(saved values, not auto-calculated)');
     }
     
     // First, try to determine the selected skill mapping index
@@ -360,10 +454,14 @@
 
   // Watch for fromTime changes to auto-calculate end time FIRST
   // Only auto-calculate if toTime is empty or was previously auto-calculated
+  // CRITICAL: Don't auto-calculate when pre-filling from existing plans (lastAutoCalculatedToTime will be null)
   $: if (formData.fromTime && (workContinuation.remainingTime > 0 || work?.std_vehicle_work_flow?.estimated_duration_minutes)) {
     // Auto-calculate end time when fromTime changes
-    // Only if toTime is empty or matches the last auto-calculated value (user hasn't manually changed it)
-    if (!formData.toTime || formData.toTime === lastAutoCalculatedToTime) {
+    // Only if:
+    // 1. toTime is empty, OR
+    // 2. (toTime matches the last auto-calculated value AND lastAutoCalculatedToTime is not null)
+    // This ensures we don't overwrite saved values when editing
+    if (!formData.toTime || (formData.toTime === lastAutoCalculatedToTime && lastAutoCalculatedToTime !== null)) {
       const calculatedToTime = autoCalculateEndTime(
         formData.fromTime,
         workContinuation.remainingTime,
@@ -374,6 +472,34 @@
         formData.toTime = calculatedToTime;
         lastAutoCalculatedToTime = calculatedToTime;
         console.log('🔄 Auto-calculated toTime:', calculatedToTime, 'from fromTime:', formData.fromTime);
+      }
+    }
+  }
+
+  // Watch for fromDate and fromTime changes to auto-calculate toDate
+  // If toTime is less than fromTime, it means the work spans overnight, so toDate should be the next day
+  $: if (formData.fromDate && formData.fromTime && formData.toTime) {
+    const [fromHour, fromMin] = formData.fromTime.split(':').map(Number);
+    const [toHour, toMin] = formData.toTime.split(':').map(Number);
+    const fromMinutes = fromHour * 60 + fromMin;
+    const toMinutes = toHour * 60 + toMin;
+    
+    // If toTime is less than fromTime, it means overnight work
+    if (toMinutes < fromMinutes) {
+      // Work spans overnight, so toDate should be the next day
+      const fromDateObj = new Date(formData.fromDate);
+      fromDateObj.setDate(fromDateObj.getDate() + 1);
+      const nextDay = fromDateObj.toISOString().split('T')[0];
+      
+      if (formData.toDate !== nextDay) {
+        formData.toDate = nextDay;
+        console.log('🔄 Auto-calculated toDate (overnight work):', nextDay, 'from fromDate:', formData.fromDate);
+      }
+    } else {
+      // Work is on the same day, so toDate should match fromDate
+      if (formData.toDate !== formData.fromDate) {
+        formData.toDate = formData.fromDate;
+        console.log('🔄 Auto-calculated toDate (same day):', formData.fromDate);
       }
     }
   }
@@ -434,8 +560,14 @@
   }
 
   async function loadWorkersData() {
-    availableWorkers = await loadWorkers(stageCode);
-    console.log(`👥 Loaded ${availableWorkers.length} workers for stage ${stageCode}`);
+    const workers = await loadWorkers(stageCode);
+    // Sort workers alphabetically by name
+    availableWorkers = workers.sort((a, b) => {
+      const nameA = (a.emp_name || '').toLowerCase();
+      const nameB = (b.emp_name || '').toLowerCase();
+      return nameA.localeCompare(nameB);
+    });
+    console.log(`👥 Loaded ${availableWorkers.length} workers for stage ${stageCode} (sorted alphabetically)`);
   }
 
   async function loadWorkContinuationData() {
@@ -499,9 +631,12 @@
         shiftBreakTimes = [];
       }
       
-      // After shift info loads, update fromTime to match closest time slot (for edit mode)
+      // After shift info loads, update fromTime to match closest time slot (for edit mode only, and only if fromTime was pre-filled)
+      // Only do this once when shift info first loads, not on every reactive update
+      // Don't update if user has manually selected a time
       if (work?.existingDraftPlans && Array.isArray(work.existingDraftPlans) && work.existingDraftPlans.length > 0 
-          && formData.fromTime && shiftInfo?.hr_shift_master?.start_time && shiftInfo?.hr_shift_master?.end_time) {
+          && formData.fromTime && shiftInfo?.hr_shift_master?.start_time && shiftInfo?.hr_shift_master?.end_time
+          && hasPrefilledWorkers && !userHasSelectedFromTime) { // Only update if we're in edit mode, workers were pre-filled, and user hasn't manually selected
         const { generateTimeSlots } = await import('$lib/utils/planWorkUtils');
         const timeSlots = generateTimeSlots(shiftInfo.hr_shift_master.start_time, shiftInfo.hr_shift_master.end_time);
         
@@ -524,8 +659,11 @@
             }
           }
           
-          formData.fromTime = closestSlot.value;
-          console.log('✅ Updated fromTime to closest slot:', formData.fromTime);
+          // Only update if the value is different (to avoid unnecessary updates)
+          if (formData.fromTime !== closestSlot.value) {
+            formData.fromTime = closestSlot.value;
+            console.log('✅ Updated fromTime to closest slot:', formData.fromTime);
+          }
         }
     }
   }
@@ -610,7 +748,43 @@
   }
 
   function handleFromTimeChange(value: string) {
+    console.log('🔍 handleFromTimeChange called with value:', value);
+    console.log('🔍 Current formData.fromTime before update:', formData.fromTime);
     formData.fromTime = value;
+    userHasSelectedFromTime = true; // Mark that user has manually selected a time
+    
+    // When user manually changes fromTime, allow auto-calculation of toTime
+    // Set lastAutoCalculatedToTime to current toTime so reactive statement can detect if it should recalculate
+    if (formData.toTime) {
+      lastAutoCalculatedToTime = formData.toTime;
+    }
+    
+    console.log('✅ User selected fromTime:', value, 'formData.fromTime after update:', formData.fromTime);
+    
+    // Force a reactive update to ensure the value persists
+    formData = { ...formData };
+  }
+
+  function handleFromDateChange(value: string) {
+    console.log('🔍 handleFromDateChange called with value:', value);
+    formData.fromDate = value;
+    // The reactive statement will handle setting toDate based on whether work spans overnight
+    // But if toDate is not set or is before fromDate, update it immediately
+    if (!formData.toDate || formData.toDate < formData.fromDate) {
+      formData.toDate = formData.fromDate;
+    }
+    console.log('✅ User selected fromDate:', value);
+  }
+
+  function handleToDateChange(value: string) {
+    console.log('🔍 handleToDateChange called with value:', value);
+    formData.toDate = value;
+    // Ensure toDate is not before fromDate
+    if (formData.fromDate && formData.toDate < formData.fromDate) {
+      formData.toDate = formData.fromDate;
+      console.log('⚠️ toDate adjusted to match fromDate');
+    }
+    console.log('✅ User selected toDate:', formData.toDate);
   }
 
   // toTime is bound directly in TimePlanning component
@@ -635,28 +809,73 @@
   }
 
   async function checkWorkerConflictsValidation(): Promise<boolean> {
+    // CRITICAL: Get the CURRENT state of selectedWorkers (not a stale reference)
+    // Create a completely fresh object to ensure no stale data
+    const currentSelectedWorkers = { ...formData.selectedWorkers };
+    
+    // CRITICAL: Validate that selected workers match the current work's skill mappings
+    // This prevents checking conflicts for workers from a previous work
+    const currentWorkSkillKeys = new Set<string>();
+    if (work?.skill_mappings && Array.isArray(work.skill_mappings) && work.skill_mappings.length > 0) {
+      work.skill_mappings.forEach((mapping: any, index: number) => {
+        const skillShort = mapping.sc_name || mapping.skill_short || mapping.sc_required;
+        if (skillShort) {
+          // Use the same key format as used in WorkerSelection component
+          const skillKey = `${index}_${skillShort}`;
+          currentWorkSkillKeys.add(skillKey);
+          // Also add just the skill short as a key (for fallback)
+          currentWorkSkillKeys.add(skillShort);
+        }
+      });
+    } else if (work?.is_added_work) {
+      // For non-standard works, use 'GEN' as the key
+      currentWorkSkillKeys.add('GEN');
+    }
+    
     // Only check conflicts for workers that are explicitly selected (not null/undefined)
-    // Filter out any invalid entries before checking conflicts
+    // AND that match the current work's skill mappings
     const validSelectedWorkers: { [key: string]: any } = {};
-    Object.entries(formData.selectedWorkers).forEach(([key, worker]) => {
-      if (worker && worker.emp_id) {
-        validSelectedWorkers[key] = worker;
+    Object.entries(currentSelectedWorkers).forEach(([key, worker]) => {
+      if (worker && worker.emp_id && typeof worker === 'object') {
+        // Verify this worker is selected for a skill that belongs to the current work
+        const isCurrentWorkSkill = currentWorkSkillKeys.has(key) || 
+                                   currentWorkSkillKeys.has(key.split('_')[1]) || // Check skill part after index
+                                   (currentWorkSkillKeys.size === 0 && key === 'GEN'); // Fallback for non-standard works
+        
+        if (isCurrentWorkSkill) {
+          // Create a fresh copy of the worker object to avoid any reference issues
+          validSelectedWorkers[key] = { ...worker };
+        } else {
+          console.warn(`⚠️ checkWorkerConflictsValidation: Skipping worker ${worker.emp_name || worker.emp_id} with key "${key}" - not a valid skill for current work`);
+        }
       }
     });
     
+    // Debug: Log what workers are being checked
+    const workerIds = Object.values(validSelectedWorkers).map((w: any) => w.emp_id).filter(Boolean);
+    const workerNames = Object.values(validSelectedWorkers).map((w: any) => w.emp_name || w.emp_id).filter(Boolean);
+    console.log(`🔍 checkWorkerConflictsValidation: Checking ${workerIds.length} worker(s) for work ${work?.sw_code || work?.derived_sw_code || 'unknown'}:`, workerNames);
+    console.log(`🔍 checkWorkerConflictsValidation: Current formData.selectedWorkers keys:`, Object.keys(formData.selectedWorkers));
+    console.log(`🔍 checkWorkerConflictsValidation: Current work skill keys:`, Array.from(currentWorkSkillKeys));
+    
     // If no valid workers are selected, skip conflict check
     if (Object.keys(validSelectedWorkers).length === 0) {
+      console.log('✅ checkWorkerConflictsValidation: No workers selected, skipping conflict check');
       return false; // No workers selected, no conflicts to check
     }
     
     // Get plan IDs to exclude (for edit mode)
     const excludePlanIds = work?.existingDraftPlans?.map((p: any) => p.id).filter(Boolean) || [];
     
+    // Use dates from formData if available, otherwise fall back to selectedDate
+    const fromDate = formData.fromDate || selectedDate;
+    const toDate = formData.toDate || selectedDate;
+    
     const result = await checkWorkerConflicts(
       validSelectedWorkers,
-      selectedDate,
+      fromDate,
       formData.fromTime,
-      selectedDate,
+      toDate,
       formData.toTime,
       excludePlanIds.length > 0 ? excludePlanIds : undefined
     );
@@ -670,13 +889,27 @@
   }
 
   async function handleSave() {
+    // Use dates from formData if available, otherwise fall back to selectedDate
+    const fromDate = formData.fromDate || selectedDate;
+    const toDate = formData.toDate || selectedDate;
+    
     // First check if planning is blocked due to approved submission
-    if (shiftCode && selectedDate) {
+    // Check both fromDate and toDate to ensure planning is allowed for the date range
+    if (shiftCode && fromDate) {
       const { isPlanningBlockedForStageShiftDate } = await import('$lib/api/production/productionWorkValidationService');
-      const blockCheck = await isPlanningBlockedForStageShiftDate(stageCode, shiftCode, selectedDate);
+      const blockCheck = await isPlanningBlockedForStageShiftDate(stageCode, shiftCode, fromDate);
       if (blockCheck.isBlocked) {
         alert(blockCheck.reason || 'Planning is blocked for this stage-shift-date combination.');
         return;
+      }
+      
+      // Also check toDate if it's different from fromDate
+      if (toDate && toDate !== fromDate) {
+        const toDateBlockCheck = await isPlanningBlockedForStageShiftDate(stageCode, shiftCode, toDate);
+        if (toDateBlockCheck.isBlocked) {
+          alert(toDateBlockCheck.reason || 'Planning is blocked for the end date of this work.');
+          return;
+        }
       }
     }
 
@@ -706,12 +939,19 @@
     }
 
     try {
+      // Use dates from formData if available, otherwise fall back to selectedDate
+      const fromDate = formData.fromDate || selectedDate;
+      const toDate = formData.toDate || selectedDate;
+      
+      console.log('💾 Saving plan with dates:', { fromDate, toDate, fromTime: formData.fromTime, toTime: formData.toTime });
+      
       const result = await saveWorkPlanning(
         work,
         formData,
         workContinuation,
         stageCode,
-        selectedDate
+        fromDate,
+        toDate
       );
       
       dispatch('save', result);
@@ -728,23 +968,38 @@
   }
 
   function resetForm() {
+    // Fix 3: Reset all modal state variables when modal closes
     formData = { ...initialPlanWorkFormData };
     warnings = { ...initialWarnings };
     previousSelectedSkillMappingIndex = -1;
+    lastAutoCalculatedToTime = null;
+    originalDurationMinutes = null;
     currentStep = 1;
+    availableWorkers = [];
     filteredAvailableWorkers = [];
+    existingPlans = [];
+    shiftInfo = null;
+    shiftBreakTimes = [];
     workContinuation = {
       hasPreviousWork: false,
       timeWorkedTillDate: 0,
       remainingTime: 0,
       previousReports: []
     };
+    savedSelectedWorkers = {}; // Also clear saved workers
+    hasPrefilledWorkers = false; // Reset prefilled flag
+    userHasSelectedFromTime = false; // Reset user selection flag
   }
 
   // Filter workers based on time availability when moving to step 2
   async function filterWorkersByTimeAvailability() {
     if (!selectedDate || !formData.fromTime || !formData.toTime) {
-      filteredAvailableWorkers = availableWorkers;
+      // Sort workers alphabetically
+      filteredAvailableWorkers = [...availableWorkers].sort((a, b) => {
+        const nameA = (a.emp_name || '').toLowerCase();
+        const nameB = (b.emp_name || '').toLowerCase();
+        return nameA.localeCompare(nameB);
+      });
       // Ensure selected workers are included
       ensureSelectedWorkersInAvailable();
       return;
@@ -882,7 +1137,14 @@
       });
 
       // Filter out unavailable workers
-      filteredAvailableWorkers = allWorkers.filter(w => !unavailableWorkerIds.has(w.emp_id));
+      const filtered = allWorkers.filter(w => !unavailableWorkerIds.has(w.emp_id));
+      
+      // Sort workers alphabetically by name
+      filteredAvailableWorkers = filtered.sort((a, b) => {
+        const nameA = (a.emp_name || '').toLowerCase();
+        const nameB = (b.emp_name || '').toLowerCase();
+        return nameA.localeCompare(nameB);
+      });
       
       // Ensure selected workers are always included (for edit mode - they're already assigned to this work)
       ensureSelectedWorkersInAvailable();
@@ -890,7 +1152,12 @@
       console.log(`✅ Filtered workers: ${filteredAvailableWorkers.length} available out of ${allWorkers.length} total (${reassignedWorkers.length} reassigned to stage)`);
     } catch (error) {
       console.error('Error filtering workers by time availability:', error);
-      filteredAvailableWorkers = availableWorkers;
+      // Sort workers alphabetically even on error
+      filteredAvailableWorkers = [...availableWorkers].sort((a, b) => {
+        const nameA = (a.emp_name || '').toLowerCase();
+        const nameB = (b.emp_name || '').toLowerCase();
+        return nameA.localeCompare(nameB);
+      });
       ensureSelectedWorkersInAvailable();
     }
   }
@@ -954,6 +1221,12 @@
     // Filter workers based on time availability
     await filterWorkersByTimeAvailability();
     
+    // Fix 4: Restore saved workers if they exist (user went back and forward)
+    if (Object.keys(savedSelectedWorkers).length > 0) {
+      formData.selectedWorkers = { ...savedSelectedWorkers };
+      savedSelectedWorkers = {}; // Clear saved workers after restoring
+    }
+    
     // Ensure selected workers are in the available list (in case they were filtered out)
     ensureSelectedWorkersInAvailable();
     
@@ -963,6 +1236,8 @@
 
   // Go back to step 1 (time selection)
   function goBackToTimeSelection() {
+    // Fix 4: Save current worker selections before clearing them
+    savedSelectedWorkers = { ...formData.selectedWorkers };
     currentStep = 1;
     // Clear worker selections when going back
     formData.selectedWorkers = {};
@@ -1047,15 +1322,21 @@
               <div class="space-y-4">
                 <h4 class="font-medium theme-text-primary text-lg">Step 1: Select Time</h4>
                 
-          <TimePlanning
-            fromTime={formData.fromTime}
-            bind:toTime={formData.toTime}
-            plannedHours={formData.plannedHours}
-            {shiftInfo}
-            {work}
-            onFromTimeChange={handleFromTimeChange}
-            onAutoCalculate={handleAutoCalculate}
-          />
+          {#key `${work?.sw_id || work?.id || 'new'}-${work?.wo_details_id || 'unknown'}-${userHasSelectedFromTime}`}
+            <TimePlanning
+              bind:fromDate={formData.fromDate}
+              bind:toDate={formData.toDate}
+              bind:fromTime={formData.fromTime}
+              bind:toTime={formData.toTime}
+              plannedHours={formData.plannedHours}
+              {shiftInfo}
+              {work}
+              onFromTimeChange={handleFromTimeChange}
+              onFromDateChange={handleFromDateChange}
+              onToDateChange={handleToDateChange}
+              onAutoCalculate={handleAutoCalculate}
+            />
+          {/key}
               </div>
             {:else if currentStep === 2}
               <!-- Step 2: Worker Selection -->
@@ -1065,18 +1346,20 @@
                   Only workers available during {formData.fromTime} - {formData.toTime} are shown.
                 </p>
                 
-                <WorkerSelection
-                  {work}
-                  availableWorkers={filteredAvailableWorkers}
-                  selectedWorkers={formData.selectedWorkers}
-                  selectedSkillMappingIndex={formData.selectedSkillMappingIndex}
-                  {selectedDate}
-                  fromTime={formData.fromTime}
-                  toTime={formData.toTime}
-                  excludePlanIds={work?.existingDraftPlans?.map((p: any) => p.id).filter(Boolean) || []}
-                  onWorkerChange={handleWorkerChange}
-                  onSkillMappingChange={handleSkillMappingChange}
-                />
+                {#key `${work?.sw_id || work?.id || 'new'}-${work?.wo_details_id || 'unknown'}`}
+                  <WorkerSelection
+                    {work}
+                    availableWorkers={filteredAvailableWorkers}
+                    selectedWorkers={formData.selectedWorkers}
+                    selectedSkillMappingIndex={formData.selectedSkillMappingIndex}
+                    {selectedDate}
+                    fromTime={formData.fromTime}
+                    toTime={formData.toTime}
+                    excludePlanIds={work?.existingDraftPlans?.map((p: any) => p.id).filter(Boolean) || []}
+                    onWorkerChange={handleWorkerChange}
+                    onSkillMappingChange={handleSkillMappingChange}
+                  />
+                {/key}
               </div>
             {/if}
           {/if}

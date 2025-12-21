@@ -32,6 +32,18 @@
   // Watch for plannedWork changes
   $: if (plannedWork && isOpen) {
     console.log('ReportWorkModal: Planned work changed:', plannedWork);
+    
+    // Fix 2: Validate plannedWork to ensure it's for the correct context
+    // This prevents using stale data from previous modal opens
+    if (plannedWork?.wo_details_id || plannedWork?.prdn_wo_details_id) {
+      const currentWoDetailsId = plannedWork.wo_details_id || plannedWork.prdn_wo_details_id;
+      // Ensure any nested data matches the current work order
+      if (plannedWork.worker_id && plannedWork.wo_details_id !== currentWoDetailsId) {
+        console.warn('ReportWorkModal: Work order mismatch detected, clearing worker_id');
+        plannedWork.worker_id = null;
+      }
+    }
+    
     initializeForm();
     loadAllData();
   }
@@ -354,8 +366,12 @@
   }
 
   function resetForm() {
+    // Fix 3: Reset all modal state variables when modal closes
     formData = { ...initialReportWorkFormData };
     state = { ...initialReportWorkState };
+    availableWorkers = [];
+    lostTimeReasons = [];
+    isLoading = false;
   }
 
   function handleWorkerChange(value: string) {

@@ -140,7 +140,7 @@
           <input id="workCode" type="text" value={workCode} class="w-full border theme-border rounded px-3 py-2 theme-bg-tertiary theme-text-secondary" readonly />
         </div>
         <div class="flex justify-between gap-3 pt-4">
-          <Button variant="primary" size="md" disabled={submitting}>
+          <Button variant="primary" size="md" type="submit" disabled={submitting}>
             {submitting ? 'Adding...' : 'Add Work'}
           </Button>
           <Button variant="secondary" size="md" on:click={handleClose}>Cancel</Button>

@@ -3,6 +3,7 @@
   import Button from '$lib/components/common/Button.svelte';
   import { fetchAvailableStages, fetchShiftDetails } from '$lib/api/production';
   import type { ProductionEmployee } from '$lib/api/production';
+  import { supabase } from '$lib/supabaseClient';
 
   export let showModal: boolean = false;
   export let employee: ProductionEmployee | null = null;
@@ -23,6 +24,7 @@
   // Validation state
   let fromTimeError: string = '';
   let toTimeError: string = '';
+  let workPlanConflictError: string = '';
 
   // Shift information
   let shiftDetails: {
@@ -70,6 +72,8 @@
   // Watch for time changes and validate
   $: if (fromTime || toTime) {
     validateTimes();
+    // Call async function without await (it will update workPlanConflictError when done)
+    checkWorkPlanConflicts();
   }
 
 
@@ -102,6 +106,54 @@
     }
   }
 
+  async function checkWorkPlanConflicts() {
+    workPlanConflictError = '';
+    
+    if (!employee || !fromTime || !toTime || !selectedDate) return;
+    
+    try {
+      // Check if worker has existing work plans that overlap with the reassignment time
+      const { data: existingPlans, error } = await supabase
+        .from('prdn_work_planning')
+        .select('id, from_date, from_time, to_date, to_time, stage_code, std_work_type_details(derived_sw_code, std_work_details(sw_name))')
+        .eq('worker_id', employee.emp_id)
+        .eq('from_date', selectedDate)
+        .in('status', ['draft', 'pending_approval', 'approved'])
+        .eq('is_active', true)
+        .eq('is_deleted', false);
+      
+      if (error) {
+        console.error('Error checking work plan conflicts:', error);
+        return;
+      }
+      
+      if (!existingPlans || existingPlans.length === 0) return;
+      
+      // Check for time overlaps
+      const fromDateTime = new Date(`${selectedDate}T${fromTime}`);
+      const toDateTime = new Date(`${selectedDate}T${toTime}`);
+      
+      const conflictingPlans = existingPlans.filter((plan: any) => {
+        if (!plan.from_time || !plan.to_time) return false;
+        const planFromDateTime = new Date(`${plan.from_date}T${plan.from_time}`);
+        const planToDateTime = new Date(`${plan.to_date}T${plan.to_time}`);
+        return (fromDateTime < planToDateTime && toDateTime > planFromDateTime);
+      });
+      
+      if (conflictingPlans.length > 0) {
+        const conflictDetails = conflictingPlans.map((plan: any) => {
+          const workName = plan.std_work_type_details?.std_work_details?.sw_name || 'Unknown Work';
+          const workCode = plan.std_work_type_details?.derived_sw_code || 'Unknown';
+          return `${workName} (${workCode}) in ${plan.stage_code} from ${formatTime(plan.from_time)} to ${formatTime(plan.to_time)}`;
+        }).join(', ');
+        
+        workPlanConflictError = `Worker has existing work plans during this time: ${conflictDetails}`;
+      }
+    } catch (error) {
+      console.error('Error checking work plan conflicts:', error);
+    }
+  }
+
   function validateTimes() {
     fromTimeError = '';
     toTimeError = '';
@@ -110,10 +162,14 @@
 
     const shiftStart = shiftDetails.shift.start_time;
     const shiftEnd = shiftDetails.shift.end_time;
+    
+    // Calculate earliest allowed time (3 hours before shift start)
+    const earliestAllowedTime = subtractHours(shiftStart, 3);
 
     if (fromTime) {
-      if (fromTime < shiftStart) {
-        fromTimeError = `Start time cannot be before shift start (${formatTime(shiftStart)})`;
+      // Allow start time up to 3 hours before shift start
+      if (fromTime < earliestAllowedTime) {
+        fromTimeError = `Start time cannot be more than 3 hours before shift start (${formatTime(earliestAllowedTime)})`;
       }
     }
 
@@ -133,8 +189,10 @@
         const lastAssignment = employee.stage_journey[employee.stage_journey.length - 1];
         if (lastAssignment.to_stage === employee.current_stage) {
           // Worker was reassigned to current stage, check time constraints
-          if (fromTime < lastAssignment.from_time) {
-            fromTimeError = `Start time cannot be before ${formatTime(lastAssignment.from_time)} (original assignment start)`;
+          // Calculate earliest allowed time for original assignment (3 hours before original assignment start)
+          const originalEarliestAllowed = subtractHours(lastAssignment.from_time, 3);
+          if (fromTime < originalEarliestAllowed) {
+            fromTimeError = `Start time cannot be more than 3 hours before original assignment start (${formatTime(originalEarliestAllowed)})`;
           }
           if (toTime > lastAssignment.to_time) {
             toTimeError = `End time cannot be after ${formatTime(lastAssignment.to_time)} (original assignment end)`;
@@ -144,7 +202,7 @@
     }
   }
 
-  function handleSubmit() {
+  async function handleSubmit() {
     if (!employee) {
       console.error('No employee selected for stage reassignment');
       return;
@@ -162,8 +220,10 @@
 
     // Validate times before submitting
     validateTimes();
-    if (fromTimeError || toTimeError) {
-      console.error('Time validation failed');
+    // Check work plan conflicts (async, but we'll wait for it)
+    await checkWorkPlanConflicts();
+    if (fromTimeError || toTimeError || workPlanConflictError) {
+      console.error('Validation failed:', { fromTimeError, toTimeError, workPlanConflictError });
       return;
     }
 
@@ -197,6 +257,21 @@
 
   function formatTime(timeStr: string): string {
     return timeStr.substring(0, 5); // Show only HH:MM
+  }
+
+  function subtractHours(timeStr: string, hours: number): string {
+    // Convert time string (HH:MM or HH:MM:SS) to minutes, subtract hours, then convert back
+    const [hoursPart, minutesPart] = timeStr.split(':').map(Number);
+    const totalMinutes = hoursPart * 60 + minutesPart;
+    const subtractedMinutes = totalMinutes - (hours * 60);
+    
+    // Handle negative values (wrap around to previous day)
+    const adjustedMinutes = subtractedMinutes < 0 ? subtractedMinutes + (24 * 60) : subtractedMinutes;
+    
+    const newHours = Math.floor(adjustedMinutes / 60) % 24;
+    const newMinutes = adjustedMinutes % 60;
+    
+    return `${newHours.toString().padStart(2, '0')}:${newMinutes.toString().padStart(2, '0')}`;
   }
 
   function getAvailableTimeRange() {
@@ -318,14 +393,14 @@
             <!-- Available Time Range Info -->
             {#if shiftDetails.shift}
               {@const timeRange = getAvailableTimeRange()}
-              <div class="mb-3 p-2 bg-blue-50 dark:bg-blue-900/20 rounded text-xs">
-                <p class="theme-text-primary">
+              <div class="mb-3 p-2 rounded text-xs" style="background-color: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.3);">
+                <p class="text-gray-900 dark:text-gray-100">
                   <strong>Available Time Range:</strong> {formatTime(timeRange.start)} - {formatTime(timeRange.end)}
                 </p>
                 {#if employee.stage_journey && employee.stage_journey.length > 0}
                   {@const lastAssignment = employee.stage_journey[employee.stage_journey.length - 1]}
                   {#if lastAssignment.to_stage === employee.current_stage}
-                    <p class="theme-text-secondary mt-1">
+                    <p class="text-gray-700 dark:text-gray-300 mt-1">
                       <em>Constrained by original assignment from {formatTime(lastAssignment.from_time)} to {formatTime(lastAssignment.to_time)}</em>
                     </p>
                   {/if}
@@ -362,7 +437,7 @@
               </div>
             </div>
             
-            {#if fromTime && toTime && !fromTimeError && !toTimeError}
+            {#if fromTime && toTime && !fromTimeError && !toTimeError && !workPlanConflictError}
               <div class="mt-3 p-3 bg-green-50 dark:bg-green-900/20 rounded-lg">
                 <p class="theme-text-primary text-sm">
                   <strong>Reassignment Period:</strong> {formatTime(fromTime)} - {formatTime(toTime)}
@@ -401,7 +476,7 @@
             variant="primary" 
             size="md"
             on:click={handleSubmit}
-            disabled={isSubmitting || !selectedStage || !fromTime || !toTime || selectedStage === employee.current_stage || !!fromTimeError || !!toTimeError}
+            disabled={isSubmitting || !selectedStage || !fromTime || !toTime || selectedStage === employee.current_stage || !!fromTimeError || !!toTimeError || !!workPlanConflictError}
           >
             {isSubmitting ? 'Reassigning...' : 'Reassign Employee'}
           </Button>

@@ -5,6 +5,7 @@ export interface WorkerConflict {
   worker: any;
   reportConflicts: any[];
   planConflicts: any[];
+  reassignmentConflicts: any[];
 }
 
 export async function checkWorkerConflicts(
@@ -39,8 +40,28 @@ export async function checkWorkerConflicts(
       // Double-check that we have a valid worker ID
       if (!workerId) {
         console.warn('Skipping conflict check for worker without emp_id:', worker);
-        return { workerId: '', worker, reportConflicts: [], planConflicts: [] };
+        return { workerId: '', worker, reportConflicts: [], planConflicts: [], reassignmentConflicts: [] };
       }
+      
+      // Check for stage reassignments that overlap with planned work time
+      const { data: stageReassignments, error: reassignmentsError } = await supabase
+        .from('prdn_planning_stage_reassignment')
+        .select('emp_id, from_stage_code, to_stage_code, from_time, to_time, planning_date, status')
+        .eq('emp_id', workerId)
+        .eq('planning_date', fromDate)
+        .in('status', ['draft', 'pending_approval', 'approved'])
+        .eq('is_deleted', false);
+
+      if (reassignmentsError) {
+        console.error('Error checking stage reassignments:', reassignmentsError);
+      }
+
+      const reassignmentConflicts = (stageReassignments || []).filter((reassignment: any) => {
+        if (!reassignment.from_time || !reassignment.to_time) return false;
+        const reassignFromDateTime = new Date(`${reassignment.planning_date}T${reassignment.from_time}`);
+        const reassignToDateTime = new Date(`${reassignment.planning_date}T${reassignment.to_time}`);
+        return (fromDateTime < reassignToDateTime && toDateTime > reassignFromDateTime);
+      });
       
       const { data: existingReports, error: reportsError } = await supabase
         .from('prdn_work_reporting')
@@ -96,17 +117,17 @@ export async function checkWorkerConflicts(
         return (fromDateTime < planToDateTime && toDateTime > planFromDateTime);
       });
 
-      return { workerId, worker, reportConflicts, planConflicts };
+      return { workerId, worker, reportConflicts, planConflicts, reassignmentConflicts };
     });
 
     const conflictResults = await Promise.all(conflictPromises);
     // Filter out any results without valid worker IDs and only include those with actual conflicts
     const workersWithConflicts = conflictResults.filter(result => 
-      result.workerId && (result.reportConflicts.length > 0 || result.planConflicts.length > 0)
+      result.workerId && (result.reportConflicts.length > 0 || result.planConflicts.length > 0 || result.reassignmentConflicts.length > 0)
     );
 
     if (workersWithConflicts.length > 0) {
-      const conflictDetails = workersWithConflicts.map(({ workerId, worker, reportConflicts, planConflicts }) => {
+      const conflictDetails = workersWithConflicts.map(({ workerId, worker, reportConflicts, planConflicts, reassignmentConflicts }) => {
         const workerName = (worker as any).emp_name || 'Unknown Worker';
         const allConflicts = [...reportConflicts, ...planConflicts];
         
@@ -128,7 +149,20 @@ export async function checkWorkerConflicts(
           return `  • ${workName} (${workCode}) [${status}]\n    ${conflictFromTime} - ${conflictToTime}`;
         }).join('\n');
         
-        return `${workerName}:\n${workerConflicts}`;
+        // Add stage reassignment conflicts
+        const reassignmentConflictDetails = reassignmentConflicts.map((reassignment: any) => {
+          const reassignFromTime = new Date(`${reassignment.planning_date}T${reassignment.from_time}`).toLocaleString('en-GB', { 
+            day: '2-digit', month: 'short', year: '2-digit', hour: '2-digit', minute: '2-digit' 
+          });
+          const reassignToTime = new Date(`${reassignment.planning_date}T${reassignment.to_time}`).toLocaleString('en-GB', { 
+            day: '2-digit', month: 'short', year: '2-digit', hour: '2-digit', minute: '2-digit' 
+          });
+          return `  • Stage Reassignment [${reassignment.from_stage_code} → ${reassignment.to_stage_code}]\n    ${reassignFromTime} - ${reassignToTime}`;
+        }).join('\n');
+        
+        const allConflictDetails = workerConflicts + (reassignmentConflictDetails ? (workerConflicts ? '\n' : '') + reassignmentConflictDetails : '');
+        
+        return `${workerName}:\n${allConflictDetails}`;
       }).join('\n\n');
 
       const currentFromTime = fromDateTime.toLocaleString('en-GB', { 

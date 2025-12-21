@@ -44,6 +44,16 @@ export async function getAvailableStandardWorks(
 
     const removedCodes = new Set((removedWorks || []).map(r => r.derived_sw_code));
 
+    // Get works already added to this work order
+    const { data: addedWorks, error: addedError } = await supabase
+      .from('prdn_work_additions')
+      .select('derived_sw_code')
+      .eq('wo_details_id', woDetailsId)
+      .eq('stage_code', stageCode)
+      .not('derived_sw_code', 'is', null);
+
+    const addedCodes = new Set((addedWorks || []).map(a => a.derived_sw_code));
+
     const { data: allWorkTypeDetails, error: allError } = await supabase
       .from('std_work_type_details')
       .select(`
@@ -62,13 +72,15 @@ export async function getAvailableStandardWorks(
     const available = (allWorkTypeDetails || [])
       .filter(wtd => {
         const code = wtd.derived_sw_code;
-        return !linkedCodes.has(code) && !removedCodes.has(code);
+        // Show works that ARE in the vehicle work flow, but NOT already added and NOT removed
+        return linkedCodes.has(code) && !addedCodes.has(code) && !removedCodes.has(code);
       })
       .map(wtd => ({
         derived_sw_code: wtd.derived_sw_code,
         type_description: wtd.type_description || '',
         sw_name: (wtd.std_work_details as any)?.sw_name || ''
-      }));
+      }))
+      .sort((a, b) => a.derived_sw_code.localeCompare(b.derived_sw_code));
 
     return available;
   } catch (error) {

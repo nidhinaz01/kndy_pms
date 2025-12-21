@@ -114,6 +114,7 @@ export interface EventHandlerContext {
  * Handle add work action
  */
 export function handleAddWork(context: EventHandlerContext) {
+  // Fix 1 & 4: Create fresh copies of work order objects to prevent cache buildup
   const availableWorkOrders = context.workOrdersData.map(wo => ({
     id: wo.prdn_wo_details?.id || 0,
     wo_no: wo.prdn_wo_details?.wo_no || null,
@@ -144,7 +145,11 @@ export async function handleWorkAdded(context: EventHandlerContext) {
  * Handle view work
  */
 export function handleViewWork(context: EventHandlerContext, event: CustomEvent) {
-  context.setSelectedWorkForHistory(event.detail.work);
+  // Fix 1 & 4: Create a fresh copy of the work object to prevent cache buildup
+  const originalWork = event.detail.work;
+  const freshWork = { ...originalWork };
+  
+  context.setSelectedWorkForHistory(freshWork);
   context.setShowViewWorkHistoryModal(true);
 }
 
@@ -160,7 +165,11 @@ export function handleViewWorkHistoryClose(context: EventHandlerContext) {
  * Handle remove work
  */
 export function handleRemoveWork(context: EventHandlerContext, event: CustomEvent) {
-  context.setSelectedWorkForRemoval(event.detail.work);
+  // Fix 1 & 4: Create a fresh copy of the work object to prevent cache buildup
+  const originalWork = event.detail.work;
+  const freshWork = { ...originalWork };
+  
+  context.setSelectedWorkForRemoval(freshWork);
   context.setShowRemoveWorkModal(true);
 }
 
@@ -193,7 +202,22 @@ export async function handleRemoveSelected(context: EventHandlerContext, event: 
  * Handle plan work
  */
 export function handlePlanWork(context: EventHandlerContext, event: CustomEvent) {
-  context.setSelectedWorkForPlanning(event.detail.work);
+  // Fix 1 & 4: Create a fresh copy of the work object to prevent cache buildup
+  // This ensures we don't reuse object references that might have stale data
+  const originalWork = event.detail.work;
+  const freshWork = {
+    ...originalWork,
+    // Explicitly clear existingDraftPlans for new planning (Fix 2)
+    // Only set it if we're actually editing (which would be set elsewhere)
+    existingDraftPlans: originalWork.existingDraftPlans || undefined
+  };
+  
+  // Remove existingDraftPlans if it's empty or shouldn't be there for new planning
+  if (!freshWork.existingDraftPlans || (Array.isArray(freshWork.existingDraftPlans) && freshWork.existingDraftPlans.length === 0)) {
+    delete freshWork.existingDraftPlans;
+  }
+  
+  context.setSelectedWorkForPlanning(freshWork);
   context.setShowPlanModal(true);
 }
 
@@ -257,8 +281,11 @@ export async function handleReportWork(context: EventHandlerContext, event: Cust
   }
 
 
+  // Fix 1 & 4: Create fresh copies of work objects to prevent cache buildup
+  const freshWorks = works.map(work => ({ ...work }));
+  
   // Sort works by skill name (like handleMultiReport does)
-  const sortedWorks = [...works].sort((a, b) => {
+  const sortedWorks = freshWorks.sort((a, b) => {
     const scNameA = a.std_work_skill_mapping?.sc_name || a.sc_required || '';
     const scNameB = b.std_work_skill_mapping?.sc_name || b.sc_required || '';
     return scNameA.localeCompare(scNameB);
@@ -373,6 +400,19 @@ export async function handleCancelWorkConfirm(context: EventHandlerContext, even
   } finally {
     context.setIsPlannedWorksLoading(false);
   }
+}
+
+/**
+ * Handle report work (for single work reporting - if ReportWorkModal is used)
+ * Note: Currently most reporting goes through MultiSkillReportModal
+ */
+export function handleReportWorkSingle(context: EventHandlerContext, event: CustomEvent) {
+  // Fix 1 & 4: Create a fresh copy of the work object to prevent cache buildup
+  const originalWork = event.detail.work || event.detail;
+  const freshWork = { ...originalWork };
+  
+  context.setSelectedWorkForReporting(freshWork);
+  context.setShowReportModal(true);
 }
 
 /**
@@ -672,6 +712,13 @@ export function handleEditPlan(context: EventHandlerContext, event: CustomEvent)
   
   // Get the first item to construct work object
   const firstItem = group.items[0];
+  const currentWoDetailsId = firstItem.wo_details_id || firstItem.prdn_wo_details_id;
+  
+  // Fix 1 & 4: Create a fresh copy of the work object to prevent cache buildup
+  // Fix 2: Filter existingDraftPlans to only include plans for the current work order
+  const validExistingPlans = group.items.filter((item: any) => 
+    (item.wo_details_id || item.prdn_wo_details_id) === currentWoDetailsId
+  );
   
   // Construct work object from the draft plan data
   // The work object needs to have the structure expected by PlanWorkModal
@@ -693,8 +740,8 @@ export function handleEditPlan(context: EventHandlerContext, event: CustomEvent)
         standard_time_minutes: firstItem.skillTimeStandard.standard_time_minutes || 0
       }]
     } : undefined,
-    // Include existing plans data so modal can show them
-    existingDraftPlans: group.items
+    // Include existing plans data so modal can show them (only for current work order)
+    existingDraftPlans: validExistingPlans.length > 0 ? validExistingPlans : undefined
   };
   
   context.setSelectedWorkForPlanning(work);

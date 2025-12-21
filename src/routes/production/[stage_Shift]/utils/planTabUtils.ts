@@ -43,7 +43,7 @@ function getSkillOrderMap(skillMapping: any): Map<string, number> {
     const scName = skillMapping.sc_name.trim();
     if (scName.includes(' + ')) {
       const individualSkills = scName.split(' + ').map((s: string) => s.trim()).filter(Boolean);
-      individualSkills.forEach((skill, index) => {
+      individualSkills.forEach((skill: string, index: number) => {
         skillOrderMap.set(skill, index);
       });
     } else {
@@ -59,10 +59,21 @@ function getSkillOrderMap(skillMapping: any): Map<string, number> {
  * Group planned works by work code and sort items by skill order
  */
 export function groupPlannedWorks(plannedWorks: any[]): Record<string, any> {
+  
   const groups = (plannedWorks || []).reduce((groups, work) => {
     if (!work) return groups;
     
-    const workCode = work.other_work_code || work.std_work_type_details?.derived_sw_code || work.std_work_type_details?.sw_code || 'unknown';
+    // Check work code from multiple sources (handle cases where joins might fail)
+    const workCode = work.other_work_code || 
+                     work.derived_sw_code ||  // Direct field on planning record
+                     work.std_work_type_details?.derived_sw_code || 
+                     work.std_work_type_details?.sw_code || 
+                     'unknown';
+    
+        // Log if work code is 'unknown' (for any work, not just P0141A)
+        if (workCode === 'unknown') {
+          console.warn(`⚠️ groupPlannedWorks: Record ID ${work.id} has workCode 'unknown' - derived_sw_code: ${work.derived_sw_code}, std_work_type_details: ${!!work.std_work_type_details}`);
+        }
     
     let workName = '';
     if (work.other_work_code) {
@@ -78,18 +89,29 @@ export function groupPlannedWorks(plannedWorks: any[]): Record<string, any> {
     const typeDescription = work.std_work_type_details?.type_description || '';
     const fullWorkName = workName + (typeDescription ? (workName ? ' - ' : '') + typeDescription : '');
     
-    if (!groups[workCode]) {
-      groups[workCode] = {
+    // Get work order details - handle multiple work orders with same work code
+    const woDetailsId = work.wo_details_id || work.prdn_wo_details?.id;
+    const woNo = work.prdn_wo_details?.wo_no || (woDetailsId ? `WO-${woDetailsId}` : 'N/A');
+    const pwoNo = work.prdn_wo_details?.pwo_no || 'N/A';
+    
+    // Create unique key for work code + work order combination
+    // This ensures different work orders with same work code are grouped separately
+    const groupKey = `${workCode}_${woDetailsId || 'unknown'}`;
+    
+    if (!groups[groupKey]) {
+      groups[groupKey] = {
         workCode,
         workName: fullWorkName,
-        woNo: work.prdn_wo_details?.wo_no || 'N/A',
-        pwoNo: work.prdn_wo_details?.pwo_no || 'N/A',
+        woNo: woNo,
+        pwoNo: pwoNo,
+        woDetailsId: woDetailsId,  // Store for reference
         items: []
       };
     }
-    groups[workCode].items.push(work);
+    groups[groupKey].items.push(work);
     return groups;
   }, {});
+  
   
   // Sort items within each group by skill order
   Object.values(groups).forEach((group: any) => {

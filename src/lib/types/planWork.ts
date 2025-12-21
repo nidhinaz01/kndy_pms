@@ -36,6 +36,8 @@ export interface TimeSlot {
 
 export interface PlanWorkFormData {
   selectedWorkers: { [skill: string]: SelectedWorker | null };
+  fromDate: string;
+  toDate: string;
   fromTime: string;
   toTime: string;
   plannedHours: number;
@@ -55,6 +57,8 @@ export interface PlanWorkWarnings {
 
 export const initialPlanWorkFormData: PlanWorkFormData = {
   selectedWorkers: {},
+  fromDate: '',
+  toDate: '',
   fromTime: '',
   toTime: '',
   plannedHours: 0,

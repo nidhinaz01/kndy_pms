@@ -64,6 +64,27 @@ export async function fetchProductionEmployees(
     if (employeeError1) {
       console.error('Error fetching original employees:', employeeError1);
     }
+    
+    // Debug: Check for employees in stage but without shift assignment
+    const { data: allEmployeesInStage, error: debugError } = await supabase
+      .from('hr_emp')
+      .select('emp_id, emp_name, skill_short, shift_code, stage')
+      .eq('stage', stage)
+      .eq('is_active', true)
+      .eq('is_deleted', false);
+    
+    if (!debugError && allEmployeesInStage) {
+      const employeesWithoutShift = allEmployeesInStage.filter(emp => 
+        !employeesOriginal?.some(e => e.emp_id === emp.emp_id) &&
+        !reassignedEmployeeIds.includes(emp.emp_id)
+      );
+      
+      if (employeesWithoutShift.length > 0) {
+        console.warn(`⚠️ fetchProductionEmployees: Found ${employeesWithoutShift.length} employees in stage ${stage} but not included (missing shift or shift not in active schedules):`, 
+          employeesWithoutShift.map(e => ({ emp_id: e.emp_id, emp_name: e.emp_name, shift_code: e.shift_code }))
+        );
+      }
+    }
 
     // Query 2b: Employees reassigned TO this stage for the selected date
     let reassignedEmployeeIds: string[] = [];
