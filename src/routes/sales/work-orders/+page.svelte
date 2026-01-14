@@ -13,6 +13,8 @@
     fetchWorkOrderSummaries, 
     getWorkOrderStatistics, 
     deleteWorkOrder,
+    fetchWorkOrderDetails,
+    fetchAdditionalRequirements,
     type WorkOrderSummary 
   } from '$lib/api/workOrders';
   
@@ -21,6 +23,7 @@
   let showPeriodModal = false;
   let showSidebar = false;
   let showCreateWorkOrderModal = false;
+  let duplicateWorkOrderData: any = null; // Data to pre-fill when duplicating
   let menus: any[] = [];
   let expandTable = false;
   let tableData: WorkOrderSummary[] = [];
@@ -31,6 +34,14 @@
   let flatpickrInstance: any = null;
   let isLoading = true;
   let isTableLoading = false;
+
+  // Pagination state
+  let currentPage = 1;
+  let pageSize = 50;
+  let totalRecords = 0;
+  let totalPages = 1;
+  let searchQuery = '';
+  let searchTimeout: ReturnType<typeof setTimeout> | null = null;
 
   // Statistics data
   let typeStats: Array<{
@@ -45,14 +56,49 @@
   async function handlePeriodSelect(selectedPeriod: string) {
     period = selectedPeriod;
     showPeriodModal = false;
-    await loadStatistics(); // Reload statistics with new period
+    currentPage = 1; // Reset to first page when period changes
+    await Promise.all([
+      loadStatistics(), // Reload statistics with new period
+      loadWorkOrders() // Reload table data with new period
+    ]);
   }
 
   function handleCreateWorkOrder() {
     console.log('handleCreateWorkOrder called');
-    console.log('showCreateWorkOrderModal before:', showCreateWorkOrderModal);
+    duplicateWorkOrderData = null; // Clear any duplicate data
     showCreateWorkOrderModal = true;
     console.log('showCreateWorkOrderModal after:', showCreateWorkOrderModal);
+  }
+
+  async function handleDuplicateWorkOrder(workOrder: WorkOrderSummary) {
+    try {
+      // Fetch full work order details
+      const workOrderDetails = await fetchWorkOrderDetails(workOrder.id);
+      if (!workOrderDetails) {
+        alert('Failed to load work order details for duplication.');
+        return;
+      }
+
+      // Fetch additional requirements
+      const additionalRequirements = await fetchAdditionalRequirements(workOrder.id);
+
+      // Prepare duplicate data
+      duplicateWorkOrderData = {
+        ...workOrderDetails,
+        additional_requirements: additionalRequirements.map(req => ({
+          work_details: req.work_details,
+          work_qty: req.work_qty,
+          work_rate: req.work_rate,
+          amount: req.work_qty * req.work_rate
+        }))
+      };
+
+      // Open the modal with duplicate data
+      showCreateWorkOrderModal = true;
+    } catch (error) {
+      console.error('Error duplicating work order:', error);
+      alert('Failed to load work order for duplication. Please try again.');
+    }
   }
 
   function handleAmendWorkOrder() {
@@ -79,7 +125,11 @@
       showPeriodModal = false;
       showCustomCalendar = false;
       if (flatpickrInstance) flatpickrInstance.destroy();
-      await loadStatistics(); // Reload statistics with new period
+      currentPage = 1; // Reset to first page when period changes
+      await Promise.all([
+        loadStatistics(), // Reload statistics with new period
+        loadWorkOrders() // Reload table data with new period
+      ]);
     }
   }
 
@@ -98,7 +148,6 @@
 
   async function handleRefresh() {
     console.log('🔄 Refresh button clicked - reloading all data...');
-    isLoading = true;
     isTableLoading = true;
     
     try {
@@ -111,7 +160,6 @@
     } catch (error) {
       console.error('❌ Error refreshing data:', error);
     } finally {
-      isLoading = false;
       isTableLoading = false;
     }
   }
@@ -119,13 +167,54 @@
   async function loadWorkOrders() {
     isTableLoading = true;
     try {
-      tableData = await fetchWorkOrderSummaries();
+      const dateRange = getDateRangeFromPeriod(period);
+      const response = await fetchWorkOrderSummaries({
+        search: searchQuery,
+        dateRange: dateRange || undefined,
+        page: currentPage,
+        pageSize: pageSize
+      });
+      
+      tableData = response.data;
+      totalRecords = response.total;
+      totalPages = response.totalPages;
     } catch (error) {
       console.error('Error loading work orders:', error);
       tableData = [];
+      totalRecords = 0;
+      totalPages = 1;
     } finally {
       isTableLoading = false;
     }
+  }
+
+  // Handle search with debouncing
+  function handleSearchChange(search: string) {
+    searchQuery = search;
+    
+    // Clear existing timeout
+    if (searchTimeout) {
+      clearTimeout(searchTimeout);
+    }
+    
+    // Debounce search - wait 500ms after user stops typing
+    searchTimeout = setTimeout(() => {
+      currentPage = 1; // Reset to first page on new search
+      loadWorkOrders();
+    }, 500);
+  }
+
+  // Handle page change
+  function handlePageChange(page: number) {
+    currentPage = page;
+    loadWorkOrders();
+  }
+
+  // Handle page size change
+  function handlePageSizeChange(size: number) {
+    pageSize = size;
+    currentPage = 1; // Reset to first page when page size changes
+    loadWorkOrders();
   }
 
   // Helper function to convert period string to date range
@@ -196,7 +285,12 @@
     if (confirm('Are you sure you want to delete this work order?')) {
       try {
         await deleteWorkOrder(rowId);
-        await loadWorkOrders(); // Reload the data
+        // Reload data - if current page becomes empty, go to previous page
+        await loadWorkOrders();
+        if (tableData.length === 0 && currentPage > 1) {
+          currentPage = currentPage - 1;
+          await loadWorkOrders();
+        }
         await loadStatistics(); // Reload statistics
       } catch (error) {
         console.error('Error deleting work order:', error);
@@ -286,11 +380,19 @@
     <WorkOrderTable 
       {expandTable}
       {tableData}
+      {currentPage}
+      {pageSize}
+      {totalRecords}
+      {totalPages}
       onExpandToggle={() => expandTable = !expandTable}
       onRowSelect={handleRowSelect}
       onDeleteRow={handleDeleteRow}
+      onDuplicateWorkOrder={handleDuplicateWorkOrder}
       onCreateWorkOrder={handleCreateWorkOrder}
       onAmendWorkOrder={handleAmendWorkOrder}
+      onSearchChange={handleSearchChange}
+      onPageChange={handlePageChange}
+      onPageSizeChange={handlePageSizeChange}
     />
 
     <!-- Work Order Details Modal -->
@@ -304,12 +406,15 @@
 <!-- Create Work Order Modal -->
 <CreateWorkOrderModal 
   bind:showModal={showCreateWorkOrderModal}
+  initialData={duplicateWorkOrderData}
   on:close={() => {
     console.log('Modal close event received');
     showCreateWorkOrderModal = false;
+    duplicateWorkOrderData = null; // Clear duplicate data when modal closes
   }}
   on:workOrderCreated={async () => {
     console.log('Work order created, refreshing data...');
+    duplicateWorkOrderData = null; // Clear duplicate data after creation
     // Refresh work orders list and statistics
     await Promise.all([
       loadWorkOrders(),

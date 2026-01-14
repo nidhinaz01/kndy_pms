@@ -36,6 +36,8 @@ export interface TimeSlot {
 
 export interface PlanWorkFormData {
   selectedWorkers: { [skill: string]: SelectedWorker | null };
+  selectedTrainees: SelectedWorker[];
+  traineeDeviationReason: string;
   fromDate: string;
   toDate: string;
   fromTime: string;
@@ -57,6 +59,8 @@ export interface PlanWorkWarnings {
 
 export const initialPlanWorkFormData: PlanWorkFormData = {
   selectedWorkers: {},
+  selectedTrainees: [],
+  traineeDeviationReason: '',
   fromDate: '',
   toDate: '',
   fromTime: '',

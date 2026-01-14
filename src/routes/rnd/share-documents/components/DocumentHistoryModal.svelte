@@ -7,7 +7,7 @@
   import { theme } from '$lib/stores/theme';
 
   export let showModal = false;
-  export let stageCode = '';
+  export let documentType = '';
   export let workOrderNo = '';
   export let documentHistory: DocumentSubmission[] = [];
 
@@ -41,7 +41,7 @@
             Document History
           </h2>
           <p class="text-sm {textSecondary} mt-1">
-            {workOrderNo} - {stageCode}
+            {workOrderNo} - {documentType}
           </p>
         </div>
         <button

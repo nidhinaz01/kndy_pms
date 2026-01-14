@@ -76,6 +76,13 @@ export function validateStage1(
     errors.toTime = 'To time is required';
   }
 
+  // Validate trainees if any are selected
+  if (formData.selectedTrainees && formData.selectedTrainees.length > 0) {
+    if (!formData.traineeDeviationReason || !formData.traineeDeviationReason.trim()) {
+      errors.trainees = 'Please provide a reason for adding trainees';
+    }
+  }
+
   return {
     isValid: Object.keys(errors).length === 0,
     errors

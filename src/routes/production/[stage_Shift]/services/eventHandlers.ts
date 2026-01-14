@@ -74,6 +74,11 @@ export interface EventHandlerContext {
   setExitModalLoading: (value: boolean) => void;
   setExitProgressMessage: (value: string) => void;
   setExitDate: (value: string) => void;
+  setShowAddTraineesModal: (value: boolean) => void;
+  setSelectedWorkGroupForTrainees: (value: any) => void;
+  setShowReportUnplannedWorkModal: (value: boolean) => void;
+  setShowUnplannedWorkReportModal: (value: boolean) => void;
+  setSelectedWorkForUnplannedReporting: (value: any) => void;
   setExpandedGroups: (value: string[] | ((prev: string[]) => string[])) => void;
   setSelectedRows: (value: Set<string> | ((prev: Set<string>) => Set<string>)) => void;
   setExpandedReportGroups: (value: string[] | ((prev: string[]) => string[])) => void;
@@ -318,6 +323,45 @@ export async function handleCancelWork(context: EventHandlerContext, event: Cust
   console.log('🔴 Setting works for cancellation:', worksToCancel);
   context.setSelectedWorksForCancellation(worksToCancel);
   context.setShowCancelWorkModal(true);
+}
+
+/**
+ * Handle add trainees to existing planned work
+ */
+export function handleAddTrainees(context: EventHandlerContext, event: CustomEvent) {
+  const { group } = event.detail;
+  
+  if (!group || !group.items || group.items.length === 0) {
+    alert('No planned work found');
+    return;
+  }
+
+  // Count existing trainees
+  const existingTraineesCount = group.items.filter((item: any) => item.sc_required === 'T').length;
+  
+  if (existingTraineesCount >= 2) {
+    alert('Maximum of 2 trainees already planned for this work');
+    return;
+  }
+
+  context.setSelectedWorkGroupForTrainees(group);
+  context.setShowAddTraineesModal(true);
+}
+
+/**
+ * Handle add trainees modal close
+ */
+export function handleAddTraineesModalClose(context: EventHandlerContext) {
+  context.setShowAddTraineesModal(false);
+  context.setSelectedWorkGroupForTrainees(null);
+}
+
+/**
+ * Handle add trainees save
+ */
+export async function handleAddTraineesSave(context: EventHandlerContext) {
+  await context.loadPlannedWorksData();
+  handleAddTraineesModalClose(context);
 }
 
 /**
@@ -1137,6 +1181,40 @@ export async function handleReportOvertime(context: EventHandlerContext, event: 
   } finally {
     context.setDraftReportLoading(false);
   }
+}
+
+/**
+ * Handle report unplanned work
+ */
+export function handleReportUnplannedWork(context: EventHandlerContext) {
+  console.log('handleReportUnplannedWork called');
+  context.setShowReportUnplannedWorkModal(true);
+  console.log('showReportUnplannedWorkModal set to true');
+}
+
+/**
+ * Handle report unplanned work modal close
+ */
+export function handleReportUnplannedWorkModalClose(context: EventHandlerContext) {
+  context.setShowReportUnplannedWorkModal(false);
+}
+
+/**
+ * Handle report unplanned work selected
+ */
+export function handleReportUnplannedWorkSelected(context: EventHandlerContext, event: CustomEvent) {
+  const { work } = event.detail;
+  
+  if (!work) {
+    alert('No work selected');
+    return;
+  }
+
+  // Open UnplannedWorkReportModal with the selected work
+  // Don't create planning records here - the modal will handle that on save
+  context.setSelectedWorkForUnplannedReporting(work);
+  context.setShowUnplannedWorkReportModal(true);
+  context.setShowReportUnplannedWorkModal(false);
 }
 
 /**

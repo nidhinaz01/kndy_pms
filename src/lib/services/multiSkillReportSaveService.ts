@@ -205,6 +205,100 @@ export async function saveMultiSkillReports(
       }
     }
 
+    // Handle trainee planning and deviations (if trainees were added during reporting)
+    if (formData.selectedTrainees && formData.selectedTrainees.length > 0) {
+      if (!formData.traineeDeviationReason || !formData.traineeDeviationReason.trim()) {
+        return { success: false, error: 'Deviation reason is required for adding trainees.' };
+      }
+
+      const { createWorkPlanning } = await import('$lib/api/production');
+      const firstWork = selectedWorks[0];
+      const stageCode = firstWork.stage_code || firstWork.prdn_work_planning?.stage_code;
+      const woDetailsId = firstWork.wo_details_id || firstWork.prdn_wo_details_id || firstWork.prdn_work_planning?.wo_details_id;
+      const derivedSwCode = firstWork.derived_sw_code || firstWork.prdn_work_planning?.derived_sw_code;
+      const otherWorkCode = firstWork.other_work_code || firstWork.prdn_work_planning?.other_work_code;
+      
+      if (!stageCode || !woDetailsId) {
+        return { success: false, error: 'Missing required work information for trainee planning.' };
+      }
+      
+      // Create planning records for each trainee
+      for (const trainee of formData.selectedTrainees) {
+        const traineePlanData = {
+          stage_code: stageCode,
+          wo_details_id: woDetailsId,
+          derived_sw_code: derivedSwCode,
+          other_work_code: otherWorkCode,
+          sc_required: 'T',
+          worker_id: trainee.emp_id,
+          from_date: formData.fromDate,
+          from_time: formData.fromTime,
+          to_date: formData.toDate,
+          to_time: formData.toTime,
+          planned_hours: hoursWorkedToday,
+          time_worked_till_date: 0,
+          remaining_time: hoursWorkedToday,
+          status: 'approved' as const,
+          notes: `Trainee: ${trainee.emp_name} - Added during reporting`,
+          wsm_id: null
+        };
+
+        const traineePlan = await createWorkPlanning(traineePlanData, currentUser);
+
+        // Create reporting record for the trainee
+        const traineeReportData = {
+          planning_id: traineePlan.id,
+          worker_id: trainee.emp_id,
+          from_date: formData.fromDate,
+          from_time: formData.fromTime,
+          to_date: formData.toDate,
+          to_time: formData.toTime,
+          hours_worked_till_date: 0,
+          hours_worked_today: hoursWorkedToday,
+          completion_status: formData.completionStatus,
+          lt_minutes_total: 0,
+          lt_details: null,
+          lt_comments: '',
+          status: 'draft',
+          created_by: currentUser,
+          created_dt: now,
+          modified_by: currentUser,
+          modified_dt: now
+        };
+
+        const { data: traineeReport, error: traineeReportError } = await supabase
+          .from('prdn_work_reporting')
+          .insert(traineeReportData)
+          .select()
+          .single();
+
+        if (traineeReportError) {
+          console.error(`Error creating report for trainee ${trainee.emp_name}:`, traineeReportError);
+          return { success: false, error: `Failed to create report for trainee ${trainee.emp_name}` };
+        }
+
+        // Create deviation record for trainee addition
+        const { error: deviationError } = await supabase
+          .from('prdn_work_planning_deviations')
+          .insert({
+            planning_id: traineePlan.id,
+            deviation_type: 'trainee_addition',
+            reason: formData.traineeDeviationReason,
+            is_active: true,
+            is_deleted: false,
+            created_by: currentUser,
+            created_dt: now
+          });
+
+        if (deviationError) {
+          console.error(`Error creating deviation for trainee ${trainee.emp_name}:`, deviationError);
+          return { success: false, error: `Failed to create deviation for trainee ${trainee.emp_name}` };
+        }
+
+        console.log(`➕ Created planning, report, and deviation for trainee ${trainee.emp_name}`);
+      }
+    }
+
     return { success: true, data: savedReports };
   } catch (error) {
     return { success: false, error: (error as Error)?.message || 'Unknown error' };

@@ -41,26 +41,54 @@ export async function loadReportData(stageCode: string, selectedDate: string) {
 
 /**
  * Calculate planned works status
+ * Optimized: Batch fetch all reporting statuses in one query instead of N queries
  */
 export async function calculatePlannedWorksStatus(plannedWorksData: any[]) {
   if (!plannedWorksData || plannedWorksData.length === 0) {
     return [];
   }
   
-  const worksWithStatus = await Promise.all(
-    plannedWorksData.map(async (plannedWork) => {
-      const { data: reportData } = await supabase
-        .from('prdn_work_reporting')
-        .select('id, completion_status')
-        .eq('planning_id', plannedWork.id)
-        .eq('is_deleted', false)
-        .maybeSingle();
-      
-      if (!reportData) return { ...plannedWork, workLifecycleStatus: 'Planned' };
-      if (reportData.completion_status === 'NC') return { ...plannedWork, workLifecycleStatus: 'In progress' };
-      return { ...plannedWork, workLifecycleStatus: 'Completed' };
-    })
-  );
+  // Extract all planning IDs
+  const planningIds = plannedWorksData.map(work => work.id).filter(Boolean);
+  
+  if (planningIds.length === 0) {
+    // No valid planning IDs, return all as 'Planned'
+    return plannedWorksData.map(plannedWork => ({ ...plannedWork, workLifecycleStatus: 'Planned' }));
+  }
+  
+  // Batch fetch all reporting data in one query
+  const { data: allReportData, error } = await supabase
+    .from('prdn_work_reporting')
+    .select('planning_id, completion_status')
+    .in('planning_id', planningIds)
+    .eq('is_deleted', false);
+  
+  if (error) {
+    console.error('Error batch fetching reporting statuses:', error);
+    // Fallback to original behavior - return all as 'Planned' on error
+    return plannedWorksData.map(plannedWork => ({ ...plannedWork, workLifecycleStatus: 'Planned' }));
+  }
+  
+  // Create a map: planning_id -> completion_status
+  const reportingStatusMap = new Map<number, string>();
+  (allReportData || []).forEach(report => {
+    if (report.planning_id) {
+      reportingStatusMap.set(report.planning_id, report.completion_status || '');
+    }
+  });
+  
+  // Map planned works with their status
+  const worksWithStatus = plannedWorksData.map(plannedWork => {
+    const completionStatus = reportingStatusMap.get(plannedWork.id);
+    
+    if (!completionStatus) {
+      return { ...plannedWork, workLifecycleStatus: 'Planned' };
+    }
+    if (completionStatus === 'NC') {
+      return { ...plannedWork, workLifecycleStatus: 'In progress' };
+    }
+    return { ...plannedWork, workLifecycleStatus: 'Completed' };
+  });
   
   return worksWithStatus;
 }

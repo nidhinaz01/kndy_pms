@@ -32,6 +32,12 @@ export async function loadWorkers(stageCode: string, fromDate: string, selectedW
       .eq('attendance_status', 'present')
       .eq('is_deleted', false);
 
+    if (attendanceError) {
+      console.error('❌ Error loading reporting attendance:', attendanceError);
+    } else {
+      console.log(`📋 Found ${reportingAttendance?.length || 0} workers with attendance marked for ${stageCode} on ${dateStr}`);
+    }
+
     const workersMap = new Map<string, any>();
 
     // Add workers from reporting attendance
@@ -46,6 +52,8 @@ export async function loadWorkers(stageCode: string, fromDate: string, selectedW
           });
         }
       });
+    } else {
+      console.warn(`⚠️ No workers found in prdn_reporting_manpower for ${stageCode} on ${dateStr}. Make sure attendance is marked in Manpower Report tab.`);
     }
 
     // Also include workers that are assigned in the plan (selectedWorks)

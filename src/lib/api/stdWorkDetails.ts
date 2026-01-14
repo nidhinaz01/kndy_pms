@@ -91,6 +91,7 @@ export async function fetchAllStdWorkDetails(): Promise<StdWorkDetail[]> {
   const { data, error } = await supabase
     .from('std_work_details')
     .select('*')
+    .eq('is_deleted', false)
     .order('modified_dt', { ascending: false });
   if (error) throw error;
   return data || [];

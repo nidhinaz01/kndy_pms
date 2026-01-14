@@ -1,24 +1,31 @@
 <script lang="ts">
   import Button from '$lib/components/common/Button.svelte';
   import { formatDate } from '../utils/dateUtils';
+  import type { DocumentStatus } from '../services/documentUploadService';
 
   export let releases: any[] = [];
   export let onViewDocuments: (release: any) => void;
 
   function getEarliestDate(release: any): string | null {
-    const dates = release.stages
-      .filter((s: any) => s.actual_date)
-      .map((s: any) => new Date(s.actual_date))
+    const dates = (release.documentStatuses || [])
+      .filter((s: DocumentStatus) => s.status === 'uploaded' && s.submission_date)
+      .map((s: DocumentStatus) => new Date(s.submission_date!))
       .sort((a: Date, b: Date) => a.getTime() - b.getTime());
     return dates.length > 0 ? dates[0].toISOString() : null;
   }
 
   function getLatestDate(release: any): string | null {
-    const dates = release.stages
-      .filter((s: any) => s.actual_date)
-      .map((s: any) => new Date(s.actual_date))
+    const dates = (release.documentStatuses || [])
+      .filter((s: DocumentStatus) => s.status === 'uploaded' && s.submission_date)
+      .map((s: DocumentStatus) => new Date(s.submission_date!))
       .sort((a: Date, b: Date) => b.getTime() - a.getTime());
     return dates.length > 0 ? dates[0].toISOString() : null;
+  }
+
+  function getCompletedCount(release: any): number {
+    return (release.documentStatuses || []).filter(
+      (s: DocumentStatus) => s.status === 'uploaded' || s.status === 'not_required'
+    ).length;
   }
 </script>
 
@@ -46,7 +53,7 @@
             Customer
           </th>
           <th class="px-4 py-3 text-left font-medium theme-text-primary border theme-border">
-            Stages
+            Documents
           </th>
           <th class="px-4 py-3 text-left font-medium theme-text-primary border theme-border">
             Submission Dates
@@ -60,6 +67,7 @@
         {#each releases as release}
           {@const earliestDate = getEarliestDate(release)}
           {@const latestDate = getLatestDate(release)}
+          {@const completedCount = getCompletedCount(release)}
           <tr class="hover:theme-bg-secondary transition-colors">
             <td class="px-4 py-3 font-medium theme-text-primary border theme-border">
               {release.wo_no}
@@ -75,16 +83,19 @@
             </td>
             <td class="px-4 py-3 theme-text-primary border theme-border">
               <span class="text-sm">
-                {release.stages.length} stages
+                {completedCount} / {release.documentStatuses?.length || 0} completed
               </span>
               <div class="text-xs theme-text-secondary mt-1">
-                {#each release.stages.slice(0, 3) as stage}
+                {#each (release.documentStatuses || []).slice(0, 3) as status}
                   <span class="inline-block mr-2">
-                    {stage.stage_code}✅
+                    {status.document_type}
+                    {#if status.status === 'uploaded'}✅
+                    {:else if status.status === 'not_required'}➖
+                    {/if}
                   </span>
                 {/each}
-                {#if release.stages.length > 3}
-                  <span class="theme-text-tertiary">+{release.stages.length - 3} more</span>
+                {#if (release.documentStatuses || []).length > 3}
+                  <span class="theme-text-tertiary">+{(release.documentStatuses || []).length - 3} more</span>
                 {/if}
               </div>
             </td>
@@ -114,6 +125,4 @@
       </tbody>
     </table>
   </div>
-
 </div>
-

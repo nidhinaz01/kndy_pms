@@ -1,5 +1,6 @@
 import { loadWorkOrdersData as loadWorkOrdersDataService, loadWorksData as loadWorksDataService, loadPlannedWorksData as loadPlannedWorksDataService, loadManpowerPlanData as loadManpowerPlanDataService, loadDraftPlanData as loadDraftPlanDataService, loadManpowerReportData as loadManpowerReportDataService, loadDraftReportData as loadDraftReportDataService, loadShiftBreakTimesData } from './pageDataService';
 import { loadReportData as loadReportDataService, calculatePlannedWorksStatus } from './reportDataService';
+import { requestDeduplicator } from './requestDeduplication';
 
 export interface DataLoadingContext {
   // State setters
@@ -34,34 +35,62 @@ export interface DataLoadingContext {
 
 /**
  * Load work orders data
+ * Optimized: Uses request deduplication to prevent duplicate concurrent requests
  */
 export async function loadWorkOrdersData(context: DataLoadingContext) {
+  const requestKey = `work-orders:${context.stageCode}:${context.selectedDate}`;
+  
   context.setIsWorkOrdersLoading(true);
-  const data = await loadWorkOrdersDataService(context.stageCode, context.selectedDate);
-  context.setWorkOrdersData(data);
-  context.setIsWorkOrdersLoading(false);
+  try {
+    const data = await requestDeduplicator.getOrCreate(requestKey, () =>
+      loadWorkOrdersDataService(context.stageCode, context.selectedDate)
+    );
+    context.setWorkOrdersData(data);
+  } finally {
+    context.setIsWorkOrdersLoading(false);
+  }
 }
 
 /**
  * Load works data
+ * Optimized: Uses request deduplication to prevent duplicate concurrent requests
  */
 export async function loadWorksData(context: DataLoadingContext) {
+  const requestKey = `works:${context.stageCode}:${context.selectedDate}`;
+  
   context.setIsWorksLoading(true);
-  const data = await loadWorksDataService(context.stageCode, context.selectedDate);
-  context.setWorksData(data);
-  context.setIsWorksLoading(false);
+  try {
+    const data = await requestDeduplicator.getOrCreate(requestKey, () =>
+      loadWorksDataService(context.stageCode, context.selectedDate)
+    );
+    context.setWorksData(data);
+  } finally {
+    context.setIsWorksLoading(false);
+  }
 }
 
 /**
  * Load planned works data
+ * Optimized: Uses request deduplication to prevent duplicate concurrent requests
  */
 export async function loadPlannedWorksData(context: DataLoadingContext) {
+  const requestKey = `planned-works:${context.stageCode}:${context.selectedDate}`;
+  
   context.setIsPlannedWorksLoading(true);
-  const plannedWorks = await loadPlannedWorksDataService(context.stageCode, context.selectedDate);
-  context.setPlannedWorksData(plannedWorks);
-  const worksWithStatus = await calculatePlannedWorksStatus(plannedWorks);
-  context.setPlannedWorksWithStatus(worksWithStatus);
-  context.setIsPlannedWorksLoading(false);
+  try {
+    const plannedWorks = await requestDeduplicator.getOrCreate(requestKey, () =>
+      loadPlannedWorksDataService(context.stageCode, context.selectedDate)
+    );
+    context.setPlannedWorksData(plannedWorks);
+    
+    const statusKey = `planned-works-status:${context.stageCode}:${context.selectedDate}`;
+    const worksWithStatus = await requestDeduplicator.getOrCreate(statusKey, () =>
+      calculatePlannedWorksStatus(plannedWorks)
+    );
+    context.setPlannedWorksWithStatus(worksWithStatus);
+  } finally {
+    context.setIsPlannedWorksLoading(false);
+  }
 }
 
 /**

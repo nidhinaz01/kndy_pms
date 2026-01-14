@@ -7,6 +7,8 @@
   export let showLogo = true;
   export let showImportButton = false;
   export let onImportClick: () => void = () => {};
+  export let showBulkUpdateButton = false;
+  export let onBulkUpdateClick: () => void = () => {};
   export let showSearch = false;
   export let searchValue = '';
   export let onSearchInput: ((value: string) => void) | null = null;
@@ -43,6 +45,15 @@
           </svg>
         </div>
       </div>
+    {/if}
+    {#if showBulkUpdateButton}
+      <Button
+        variant="secondary"
+        size="md"
+        on:click={onBulkUpdateClick}
+      >
+        Bulk Update
+      </Button>
     {/if}
     {#if showImportButton}
       <Button

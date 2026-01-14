@@ -79,7 +79,7 @@
         formData.toDate = selectedDate;
       }
       // Force a reactive update by creating a new object
-      formData = { ...formData, selectedWorkers: {} };
+      formData = { ...formData, selectedWorkers: {}, selectedTrainees: [], traineeDeviationReason: '' };
       filteredAvailableWorkers = [];
       savedSelectedWorkers = {};
       hasPrefilledWorkers = false;
@@ -136,7 +136,9 @@
           formData = { 
             ...initialPlanWorkFormData,
             fromDate: savedFromDate,
-            toDate: savedToDate
+            toDate: savedToDate,
+            selectedTrainees: [],
+            traineeDeviationReason: ''
           };
           console.log('🔄 Reset formData for new planning (no user selection yet)');
         } else {
@@ -146,7 +148,9 @@
             fromDate: savedFromDate,
             toDate: savedToDate,
             fromTime: savedFromTime,
-            toTime: savedToTime
+            toTime: savedToTime,
+            selectedTrainees: [],
+            traineeDeviationReason: ''
           };
           console.log('✅ Preserved user-selected times when resetting formData:', { fromTime: savedFromTime, toTime: savedToTime });
         }
@@ -747,6 +751,24 @@
     formData.selectedWorkers = {};
   }
 
+  function handleTraineeAdd(trainee: SelectedWorker) {
+    if (formData.selectedTrainees.length < 2) {
+      formData.selectedTrainees = [...formData.selectedTrainees, trainee];
+    }
+  }
+
+  function handleTraineeRemove(index: number) {
+    formData.selectedTrainees = formData.selectedTrainees.filter((_, i) => i !== index);
+    // Clear reason if no trainees left
+    if (formData.selectedTrainees.length === 0) {
+      formData.traineeDeviationReason = '';
+    }
+  }
+
+  function handleTraineeReasonChange(reason: string) {
+    formData.traineeDeviationReason = reason;
+  }
+
   function handleFromTimeChange(value: string) {
     console.log('🔍 handleFromTimeChange called with value:', value);
     console.log('🔍 Current formData.fromTime before update:', formData.fromTime);
@@ -893,6 +915,14 @@
     const fromDate = formData.fromDate || selectedDate;
     const toDate = formData.toDate || selectedDate;
     
+    // Validate trainee reason if trainees are selected
+    if (formData.selectedTrainees && formData.selectedTrainees.length > 0) {
+      if (!formData.traineeDeviationReason || !formData.traineeDeviationReason.trim()) {
+        alert('Please provide a reason for adding trainees.');
+        return;
+      }
+    }
+    
     // First check if planning is blocked due to approved submission
     // Check both fromDate and toDate to ensure planning is allowed for the date range
     if (shiftCode && fromDate) {
@@ -969,7 +999,7 @@
 
   function resetForm() {
     // Fix 3: Reset all modal state variables when modal closes
-    formData = { ...initialPlanWorkFormData };
+    formData = { ...initialPlanWorkFormData, selectedTrainees: [], traineeDeviationReason: '' };
     warnings = { ...initialWarnings };
     previousSelectedSkillMappingIndex = -1;
     lastAutoCalculatedToTime = null;
@@ -1351,12 +1381,17 @@
                     {work}
                     availableWorkers={filteredAvailableWorkers}
                     selectedWorkers={formData.selectedWorkers}
+                    selectedTrainees={formData.selectedTrainees}
+                    traineeDeviationReason={formData.traineeDeviationReason}
                     selectedSkillMappingIndex={formData.selectedSkillMappingIndex}
                     {selectedDate}
                     fromTime={formData.fromTime}
                     toTime={formData.toTime}
                     excludePlanIds={work?.existingDraftPlans?.map((p: any) => p.id).filter(Boolean) || []}
                     onWorkerChange={handleWorkerChange}
+                    onTraineeAdd={handleTraineeAdd}
+                    onTraineeRemove={handleTraineeRemove}
+                    onTraineeReasonChange={handleTraineeReasonChange}
                     onSkillMappingChange={handleSkillMappingChange}
                   />
                 {/key}
@@ -1390,7 +1425,10 @@
         <Button 
           variant="primary" 
           on:click={handleSave} 
-                disabled={Object.values(formData.selectedWorkers).filter(Boolean).length === 0}
+          disabled={
+            Object.values(formData.selectedWorkers).filter(Boolean).length === 0 ||
+            (formData.selectedTrainees.length > 0 && !formData.traineeDeviationReason.trim())
+          }
         >
             Save Plan
           </Button>

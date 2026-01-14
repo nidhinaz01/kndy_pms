@@ -174,7 +174,7 @@
         }
       ];
 
-      // Add stage entry/exit dates and rnd_documents rows - combining date and time into timestamp
+      // Add stage entry/exit dates - combining date and time into timestamp
       // Note: This loop handles ALL stages including the first one, so we don't need a separate first stage entry
       console.log('Stage dates to save:', stageDates);
       stageDates.forEach(stage => {
@@ -201,18 +201,19 @@
           modified_by: username,
           modified_dt: now
         });
-        // Add rnd_documents row for each stage - using same time as production entry
-        datesToSave.push({
-          sales_order_id: workOrder.id,
-          date_type: 'rnd_documents',
-          planned_date: `${calculatedDates.documentReleaseDate}T${entryTime}:00`,
-          stage_code: stage.stage,
-          created_by: username,
-          created_dt: now,
-          // modified_by and modified_dt should equal created_by and created_dt on insert
-          modified_by: username,
-          modified_dt: now
-        });
+      });
+
+      // Add single rnd_documents row (no stage_code) - using same time as production entry
+      datesToSave.push({
+        sales_order_id: workOrder.id,
+        date_type: 'rnd_documents',
+        planned_date: `${calculatedDates.documentReleaseDate}T${entryTime}:00`,
+        stage_code: null,
+        created_by: username,
+        created_dt: now,
+        // modified_by and modified_dt should equal created_by and created_dt on insert
+        modified_by: username,
+        modified_dt: now
       });
 
       // Add final inspection date (using configurable lead time after last stage exit)

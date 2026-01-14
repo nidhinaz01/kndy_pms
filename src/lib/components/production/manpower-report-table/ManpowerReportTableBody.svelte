@@ -1,10 +1,14 @@
 <script lang="ts">
   import ManpowerReportTableRow from './ManpowerReportTableRow.svelte';
+  import SortableHeader from '$lib/components/common/SortableHeader.svelte';
   import type { ProductionEmployee } from '$lib/api/production';
+  import type { SortConfig } from '$lib/utils/tableSorting';
 
   export let filteredData: ProductionEmployee[] = [];
   export let data: ProductionEmployee[] = [];
   export let selectedEmployees: Set<string>;
+  export let sortConfig: SortConfig = { column: null, direction: null };
+  export let onSort: (column: string) => void = () => {};
   export let reportingSubmissionStatus: any = null;
   export let onToggleSelection: (employee: ProductionEmployee) => void = () => {};
   export let onAttendanceToggle: (employee: ProductionEmployee) => void = () => {};
@@ -27,17 +31,17 @@
         disabled={eligibleCount === 0}
       />
     </th>
-    <th class="px-6 py-3 text-left text-xs font-medium theme-text-primary uppercase tracking-wider">Employee</th>
-    <th class="px-6 py-3 text-left text-xs font-medium theme-text-primary uppercase tracking-wider">Skill</th>
-    <th class="px-6 py-3 text-left text-xs font-medium theme-text-primary uppercase tracking-wider">Status</th>
-    <th class="px-6 py-3 text-left text-xs font-medium theme-text-primary uppercase tracking-wider">Current Stage</th>
-    <th class="px-6 py-3 text-left text-xs font-medium theme-text-primary uppercase tracking-wider">Shift</th>
-    <th class="px-6 py-3 text-left text-xs font-medium theme-text-primary uppercase tracking-wider">Hours Planned</th>
-    <th class="px-6 py-3 text-left text-xs font-medium theme-text-primary uppercase tracking-wider">Hours Reported</th>
-    <th class="px-6 py-3 text-left text-xs font-medium theme-text-primary uppercase tracking-wider">OT Hours</th>
-    <th class="px-6 py-3 text-left text-xs font-medium theme-text-primary uppercase tracking-wider">LT Hours</th>
-    <th class="px-6 py-3 text-left text-xs font-medium theme-text-primary uppercase tracking-wider">LTP Hours</th>
-    <th class="px-6 py-3 text-left text-xs font-medium theme-text-primary uppercase tracking-wider">LTNP Hours</th>
+    <SortableHeader column="emp_name" {sortConfig} {onSort} label="Employee" />
+    <SortableHeader column="skill_short" {sortConfig} {onSort} label="Skill" />
+    <SortableHeader column="attendance_status" {sortConfig} {onSort} label="Status" />
+    <SortableHeader column="stage" {sortConfig} {onSort} label="Current Stage" />
+    <SortableHeader column="shift_code" {sortConfig} {onSort} label="Shift" />
+    <SortableHeader column="planned_hours" {sortConfig} {onSort} label="Hours Planned" />
+    <SortableHeader column="reported_hours" {sortConfig} {onSort} label="Hours Reported" />
+    <SortableHeader column="overtime_hours" {sortConfig} {onSort} label="OT Hours" />
+    <SortableHeader column="lt_hours" {sortConfig} {onSort} label="LT Hours" />
+    <SortableHeader column="ltp_hours" {sortConfig} {onSort} label="LTP Hours" />
+    <SortableHeader column="ltnp_hours" {sortConfig} {onSort} label="LTNP Hours" />
     <th class="px-6 py-3 text-left text-xs font-medium theme-text-primary uppercase tracking-wider">To Other Stage</th>
     <th class="px-6 py-3 text-left text-xs font-medium theme-text-primary uppercase tracking-wider">From Other Stage</th>
     <th class="px-6 py-3 text-left text-xs font-medium theme-text-primary uppercase tracking-wider">Actions</th>

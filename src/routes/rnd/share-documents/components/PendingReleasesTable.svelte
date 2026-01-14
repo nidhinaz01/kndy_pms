@@ -1,14 +1,17 @@
 <script lang="ts">
   import Button from '$lib/components/common/Button.svelte';
-  import { formatDate } from '../utils/dateUtils';
+  import { ALL_DOCUMENT_TYPES } from '../constants/documentTypes';
+  import type { DocumentStatus } from '../services/documentUploadService';
 
   export let releases: any[] = [];
   export let onUploadDocuments: (release: any) => void;
 
-  function getStagesStatus(release: any): { uploaded: number; total: number } {
-    const uploaded = release.stages.filter((s: any) => s.hasDocument).length;
-    const total = release.stages.length;
-    return { uploaded, total };
+  function getDocumentStatusSummary(release: any): { uploaded: number; notRequired: number; pending: number; total: number } {
+    const statuses = release.documentStatuses || [];
+    const uploaded = statuses.filter((s: DocumentStatus) => s.status === 'uploaded').length;
+    const notRequired = statuses.filter((s: DocumentStatus) => s.status === 'not_required').length;
+    const pending = statuses.filter((s: DocumentStatus) => s.status === 'pending').length;
+    return { uploaded, notRequired, pending, total: ALL_DOCUMENT_TYPES.length };
   }
 </script>
 
@@ -36,7 +39,7 @@
             Customer
           </th>
           <th class="px-4 py-3 text-left font-medium theme-text-primary border theme-border">
-            Stages Status
+            Document Status
           </th>
           <th class="px-4 py-3 text-center font-medium theme-text-primary border theme-border">
             Actions
@@ -45,7 +48,7 @@
       </thead>
       <tbody>
         {#each releases as release}
-          {@const status = getStagesStatus(release)}
+          {@const summary = getDocumentStatusSummary(release)}
           <tr class="hover:theme-bg-secondary transition-colors">
             <td class="px-4 py-3 font-medium theme-text-primary border theme-border">
               {release.wo_no}
@@ -61,16 +64,20 @@
             </td>
             <td class="px-4 py-3 theme-text-primary border theme-border">
               <span class="text-sm">
-                {status.uploaded} / {status.total} stages uploaded
+                {summary.uploaded} uploaded, {summary.notRequired} not required, {summary.pending} pending
               </span>
               <div class="text-xs theme-text-secondary mt-1">
-                {#each release.stages.slice(0, 3) as stage}
+                {#each (release.documentStatuses || []).slice(0, 4) as status}
                   <span class="inline-block mr-2">
-                    {stage.stage_code}: {stage.hasDocument ? '✅' : '❌'}
+                    {status.document_type}: 
+                    {#if status.status === 'uploaded'}✅
+                    {:else if status.status === 'not_required'}➖
+                    {:else}⏳
+                    {/if}
                   </span>
                 {/each}
-                {#if release.stages.length > 3}
-                  <span class="theme-text-tertiary">+{release.stages.length - 3} more</span>
+                {#if (release.documentStatuses || []).length > 4}
+                  <span class="theme-text-tertiary">+{(release.documentStatuses || []).length - 4} more</span>
                 {/if}
               </div>
             </td>
@@ -89,4 +96,3 @@
     </table>
   </div>
 </div>
-

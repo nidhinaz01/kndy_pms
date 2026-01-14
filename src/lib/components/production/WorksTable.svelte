@@ -4,6 +4,7 @@
   import { applyFilters, enrichWorkData, getWorkId } from '$lib/utils/worksTableUtils';
   import type { WorksTableFilters, WorksTableState } from '$lib/types/worksTable';
   import { initialWorksTableFilters, initialWorksTableState } from '$lib/types/worksTable';
+  import { sortTableData, handleSortClick, type SortConfig } from '$lib/utils/tableSorting';
   import WorksTableHeader from './works-table/WorksTableHeader.svelte';
   import WorksTableFiltersComponent from './works-table/WorksTableFilters.svelte';
   import WorksTableBody from './works-table/WorksTableBody.svelte';
@@ -21,12 +22,25 @@
   // State
   let filters: WorksTableFilters = { ...initialWorksTableFilters };
   let state: WorksTableState = { ...initialWorksTableState };
+  let sortConfig: SortConfig = { column: null, direction: null };
   let filteredData: any[] = [];
+  let sortedData: any[] = [];
 
   // Watch for data changes and apply filters
   $: {
     const filtered = applyFilters(data, filters);
     filteredData = filtered.map(enrichWorkData);
+  }
+
+  // Apply sorting to filtered data
+  $: {
+    sortedData = sortConfig.column && sortConfig.direction 
+      ? sortTableData(filteredData, sortConfig)
+      : filteredData;
+  }
+
+  function handleSort(column: string) {
+    sortConfig = handleSortClick(column, sortConfig);
   }
 
   // Check planning status and work status when data, stageCode, or selectedDate changes
@@ -125,7 +139,7 @@
   }
 
   function selectAllRemovable() {
-    const removableWorks = filteredData.filter(work => canRemoveWork(work));
+    const removableWorks = sortedData.filter(work => canRemoveWork(work));
     state.selectedRows = new Set(removableWorks.map(work => getWorkId(work)));
   }
 
@@ -205,10 +219,10 @@
     return state.workPlanningStatus[workKey] || { canPlan: false };
   }
 
-  $: selectedWorks = filteredData.filter(work => state.selectedRows.has(getWorkId(work)));
+  $: selectedWorks = sortedData.filter(work => state.selectedRows.has(getWorkId(work)));
   $: removableWorks = selectedWorks.filter(work => canRemoveWork(work));
-  $: allRemovableSelected = filteredData.filter(work => canRemoveWork(work)).length > 0 && 
-    filteredData.filter(work => canRemoveWork(work)).every(work => state.selectedRows.has(getWorkId(work)));
+  $: allRemovableSelected = sortedData.filter(work => canRemoveWork(work)).length > 0 && 
+    sortedData.filter(work => canRemoveWork(work)).every(work => state.selectedRows.has(getWorkId(work)));
 </script>
 
 <div class="theme-bg-primary rounded-lg shadow border theme-border">
@@ -257,13 +271,15 @@
     <div class="overflow-x-auto pb-0" id="table-scroll-container">
       <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
         <WorksTableBody
-          {filteredData}
+          filteredData={sortedData}
           {isLoading}
           selectedRows={state.selectedRows}
           workPlanningStatus={state.workPlanningStatus}
           workStatus={state.workStatus}
           {filters}
           {stageCode}
+          {sortConfig}
+          onSort={handleSort}
           onToggleSelection={toggleRowSelection}
           onPlanWork={handlePlanWork}
           onViewWork={handleViewWork}
@@ -279,9 +295,9 @@
     </div>
   </div>
 
-  {#if filteredData.length > 0}
+  {#if sortedData.length > 0}
     <div class="px-6 py-4 theme-bg-secondary border-t theme-border">
-      <WorksTableSummary {filteredData} workStatus={state.workStatus} {stageCode} />
+      <WorksTableSummary filteredData={sortedData} workStatus={state.workStatus} {stageCode} />
     </div>
   {/if}
 </div>

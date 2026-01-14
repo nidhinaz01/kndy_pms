@@ -6,20 +6,34 @@
 
   // Tooltip state
   let hoveredHoliday: Holiday | null = null;
+  let hoveredDate: { year: number; month: number; day: number } | null = null;
   let tooltipX = 0;
   let tooltipY = 0;
 
-  // Create a map of holidays by date for quick lookup
-  $: holidayMap = new Map<string, Holiday>();
+  // Create a map of holidays by date for quick lookup (supports multiple holidays per date)
+  // Always use dt_day, dt_month, dt_year to construct the date (more reliable than dt_value)
+  $: holidayMap = new Map<string, Holiday[]>();
   $: {
     holidayMap.clear();
-    console.log('Loading holidays:', holidays);
     holidays.forEach(holiday => {
-      const dateKey = `${holiday.dt_year}-${holiday.dt_month}-${holiday.dt_day}`;
-      holidayMap.set(dateKey, holiday);
-      console.log(`Added holiday to map: ${dateKey}`, holiday);
+      // Always construct date from dt_day, dt_month, dt_year for accurate matching
+      // This ensures the calendar shows holidays on the correct day regardless of dt_value
+      const monthIndex = monthNames.indexOf(holiday.dt_month);
+      if (monthIndex !== -1) {
+        // Use local date construction to avoid timezone issues
+        const dateObj = new Date(holiday.dt_year, monthIndex, holiday.dt_day);
+        // Format as YYYY-MM-DD manually to avoid timezone conversion
+        const year = dateObj.getFullYear();
+        const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+        const day = String(dateObj.getDate()).padStart(2, '0');
+        const dateKey = `${year}-${month}-${day}`;
+        
+        if (!holidayMap.has(dateKey)) {
+          holidayMap.set(dateKey, []);
+        }
+        holidayMap.get(dateKey)!.push(holiday);
+      }
     });
-    console.log('Holiday map keys:', Array.from(holidayMap.keys()));
   }
 
   const monthNames = [
@@ -37,18 +51,18 @@
     return new Date(year, month, 1).getDay();
   }
 
-  function isHoliday(year: number, month: number, day: number): Holiday | null {
-    const monthName = monthNames[month];
-    // Create date key using the month name as stored in the database
-    const dateKey = `${year}-${monthName}-${day}`;
-    const holiday = holidayMap.get(dateKey);
+  function isHoliday(year: number, month: number, day: number): Holiday[] {
+    // Create date string (YYYY-MM-DD) using local date methods to avoid timezone issues
+    // Must match the same format used in holidayMap construction
+    const dateObj = new Date(year, month, day);
+    // Use local date methods (not toISOString which converts to UTC)
+    const dateYear = dateObj.getFullYear();
+    const dateMonth = String(dateObj.getMonth() + 1).padStart(2, '0');
+    const dateDay = String(dateObj.getDate()).padStart(2, '0');
+    const dateKey = `${dateYear}-${dateMonth}-${dateDay}`;
     
-    // Debug: Log when holidays are found
-    if (holiday) {
-      console.log(`Found holiday: ${dateKey}`, holiday);
-    }
-    
-    return holiday || null;
+    // Get holidays for this exact date
+    return holidayMap.get(dateKey) || [];
   }
 
   function getCalendarDays(year: number, month: number): (number | null)[] {
@@ -93,14 +107,19 @@
             {#if day === null}
               <div class="h-6"></div>
             {:else}
-              {@const holiday = isHoliday(selectedYear, monthIndex, day)}
+              {@const holidaysForDay = isHoliday(selectedYear, monthIndex, day)}
+              {@const hasHolidays = holidaysForDay.length > 0}
+              {@const activeHolidays = holidaysForDay.filter(h => h.is_active)}
+              {@const hasActiveHolidays = activeHolidays.length > 0}
+              {@const hasInactiveHolidays = holidaysForDay.some(h => !h.is_active)}
               <button 
                 type="button"
-                class="calendar-day {holiday ? 'holiday' : ''} {holiday && holiday.is_active ? 'active-holiday' : ''} {holiday && !holiday.is_active ? 'inactive-holiday' : ''}"
-                aria-label={holiday ? `${holiday.description} - ${holiday.is_active ? 'Active' : 'Inactive'} holiday` : `${monthName} ${day}, ${selectedYear}`}
+                class="calendar-day {hasHolidays ? 'holiday' : ''} {hasActiveHolidays ? 'active-holiday' : ''} {hasInactiveHolidays && !hasActiveHolidays ? 'inactive-holiday' : ''} {hasActiveHolidays && hasInactiveHolidays ? 'mixed-holiday' : ''}"
+                aria-label={hasHolidays ? `${holidaysForDay.map(h => h.description).join(', ')} - ${holidaysForDay.length} holiday(s)` : `${monthName} ${day}, ${selectedYear}`}
                 on:mouseenter={(e) => {
-                  if (holiday) {
-                    hoveredHoliday = holiday;
+                  if (hasHolidays) {
+                    hoveredHoliday = holidaysForDay[0];
+                    hoveredDate = { year: selectedYear, month: monthIndex, day };
                     const rect = e.currentTarget.getBoundingClientRect();
                     tooltipX = rect.left + rect.width / 2;
                     tooltipY = rect.top - 10;
@@ -108,11 +127,16 @@
                 }}
                 on:mouseleave={() => {
                   hoveredHoliday = null;
+                  hoveredDate = null;
                 }}
                 on:click={(e) => {
-                  if (holiday) {
-                    hoveredHoliday = hoveredHoliday === holiday ? null : holiday;
-                    if (hoveredHoliday) {
+                  if (hasHolidays) {
+                    if (hoveredHoliday && hoveredDate && hoveredDate.day === day) {
+                      hoveredHoliday = null;
+                      hoveredDate = null;
+                    } else {
+                      hoveredHoliday = holidaysForDay[0];
+                      hoveredDate = { year: selectedYear, month: monthIndex, day };
                       const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
                       tooltipX = rect.left + rect.width / 2;
                       tooltipY = rect.top - 10;
@@ -120,10 +144,14 @@
                   }
                 }}
                 on:keydown={(e) => {
-                  if (holiday && (e.key === 'Enter' || e.key === ' ')) {
+                  if (hasHolidays && (e.key === 'Enter' || e.key === ' ')) {
                     e.preventDefault();
-                    hoveredHoliday = hoveredHoliday === holiday ? null : holiday;
-                    if (hoveredHoliday) {
+                    if (hoveredHoliday && hoveredDate && hoveredDate.day === day) {
+                      hoveredHoliday = null;
+                      hoveredDate = null;
+                    } else {
+                      hoveredHoliday = holidaysForDay[0];
+                      hoveredDate = { year: selectedYear, month: monthIndex, day };
                       const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
                       tooltipX = rect.left + rect.width / 2;
                       tooltipY = rect.top - 10;
@@ -156,7 +184,8 @@
 </div>
 
 <!-- Tooltip -->
-{#if hoveredHoliday}
+{#if hoveredHoliday && hoveredDate}
+  {@const dayHolidays = isHoliday(hoveredDate.year, hoveredDate.month, hoveredDate.day)}
   <div 
     class="
       fixed z-50 px-3 py-2 rounded-lg shadow-lg text-sm
@@ -165,15 +194,31 @@
     "
     style="left: {tooltipX}px; top: {tooltipY}px; transform: translateX(-50%);"
   >
-    <div class="font-semibold theme-text-primary mb-1">
-      {hoveredHoliday.description}
-    </div>
-    <div class="theme-text-secondary text-xs">
-      {hoveredHoliday.dt_month} {hoveredHoliday.dt_day}, {hoveredHoliday.dt_year}
-    </div>
-    <div class="theme-text-secondary text-xs">
-      Status: {hoveredHoliday.is_active ? 'Active' : 'Inactive'}
-    </div>
+    {#if dayHolidays.length > 1}
+      <div class="font-semibold theme-text-primary mb-2">
+        {dayHolidays.length} Holidays
+      </div>
+      {#each dayHolidays as holiday}
+        <div class="mb-2 pb-2 border-b theme-border last:border-0 last:mb-0 last:pb-0">
+          <div class="font-semibold theme-text-primary">
+            {holiday.description}
+          </div>
+          <div class="theme-text-secondary text-xs">
+            Status: {holiday.is_active ? 'Active' : 'Inactive'}
+          </div>
+        </div>
+      {/each}
+    {:else}
+      <div class="font-semibold theme-text-primary mb-1">
+        {hoveredHoliday.description}
+      </div>
+      <div class="theme-text-secondary text-xs">
+        {hoveredHoliday.dt_month} {hoveredHoliday.dt_day}, {hoveredHoliday.dt_year}
+      </div>
+      <div class="theme-text-secondary text-xs">
+        Status: {hoveredHoliday.is_active ? 'Active' : 'Inactive'}
+      </div>
+    {/if}
   </div>
 {/if}
 
@@ -221,6 +266,15 @@
 
   .calendar-day.inactive-holiday:hover {
     background-color: #b91c1c !important;
+  }
+
+  .calendar-day.mixed-holiday {
+    background: linear-gradient(135deg, #16a34a 50%, #dc2626 50%) !important;
+    color: white !important;
+  }
+
+  .calendar-day {
+    position: relative;
   }
 
   .legend-active {

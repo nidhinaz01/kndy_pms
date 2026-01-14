@@ -139,23 +139,42 @@
 
   async function handleImportSundays() {
     try {
-      await addSundaysForYear();
+      const result = await addSundaysForYear();
       await loadData();
-      alert('Sundays added successfully!');
+      if (result.added > 0) {
+        alert(`Successfully added ${result.added} Sunday(s). ${result.skipped > 0 ? `${result.skipped} Sunday(s) already existed and were skipped.` : ''}`);
+      } else {
+        alert(`All Sundays already exist. ${result.skipped} Sunday(s) were skipped.`);
+      }
     } catch (err) {
       console.error('Error adding Sundays:', err);
-      alert('Failed to add Sundays. Please try again.');
+      const errorMessage = err instanceof Error ? err.message : 'Failed to add Sundays. Please try again.';
+      alert(`Error: ${errorMessage}`);
     }
   }
 
   async function handleImportCSV(holidaysData: HolidayFormData[]) {
     try {
-      await importHolidays(holidaysData);
+      const result = await importHolidays(holidaysData);
       await loadData();
-      alert('Holidays imported successfully!');
+      let message = '';
+      if (result.added > 0) {
+        message = `Successfully imported ${result.added} holiday(s).`;
+      }
+      if (result.skipped > 0) {
+        message += ` ${result.skipped} holiday(s) already existed and were skipped.`;
+      }
+      if (result.errors > 0) {
+        message += ` ${result.errors} holiday(s) had errors and were skipped.`;
+      }
+      if (result.added === 0 && result.skipped === 0 && result.errors === 0) {
+        message = 'No holidays to import.';
+      }
+      alert(message || 'Import completed.');
     } catch (err) {
       console.error('Error importing holidays:', err);
-      alert('Failed to import holidays. Please try again.');
+      const errorMessage = err instanceof Error ? err.message : 'Failed to import holidays. Please try again.';
+      alert(`Error: ${errorMessage}`);
     }
   }
 

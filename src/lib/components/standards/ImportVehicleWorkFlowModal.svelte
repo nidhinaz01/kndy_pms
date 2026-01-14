@@ -15,13 +15,43 @@
   let isImporting = false;
   let importResults = { success: 0, errors: [] as string[] };
   let showResults = false;
+  let vehicleTypes: any[] = [];
+  let showAllConfirmation = false;
+  let allConfirmationData: { derivedWorkCodes: string[]; vehicleTypeCount: number } | null = null;
+  let pendingImportData: any[] = [];
 
-  function downloadTemplate() {
-    const headers = ['Vehicle Type ID', 'Derived Work Code', 'Sequence Order', 'Dependency Derived Work Code'];
+  // Load vehicle types for template and validation
+  async function loadVehicleTypes() {
+    try {
+      const { data, error } = await supabase
+        .from('mstr_wo_type')
+        .select('id, wo_type_name')
+        .eq('is_deleted', false)
+        .eq('is_active', true)
+        .order('wo_type_name');
+      
+      if (error) throw error;
+      vehicleTypes = data || [];
+    } catch (error) {
+      console.error('Error loading vehicle types:', error);
+      vehicleTypes = [];
+    }
+  }
+
+  async function downloadTemplate() {
+    // Ensure vehicle types are loaded
+    if (vehicleTypes.length === 0) {
+      await loadVehicleTypes();
+    }
+
+    // Use actual vehicle type names in the template
+    const exampleVehicleType = vehicleTypes.length > 0 ? vehicleTypes[0].wo_type_name : 'GEN';
+    
+    const headers = ['Vehicle Type', 'Derived Work Code', 'Sequence Order', 'Dependency Derived Work Code'];
     const csvContent = headers.join(',') + '\n' +
-      '1,P001A,1,\n' +
-      '1,P002A,2,P001A\n' +
-      '1,P003A,3,P002A';
+      `${exampleVehicleType},P001A,1,\n` +
+      `${exampleVehicleType},P002A,2,P001A\n` +
+      `${exampleVehicleType},P003A,3,P002A`;
     
     const blob = new Blob([csvContent], { type: 'text/csv' });
     const url = window.URL.createObjectURL(blob);
@@ -36,6 +66,81 @@
     const target = event.target as HTMLInputElement;
     if (target.files && target.files[0]) {
       selectedFile = target.files[0];
+    }
+  }
+
+  // Check if a value is "All" (case-insensitive)
+  function isAllVehicleType(value: string): boolean {
+    return value.toLowerCase() === 'all';
+  }
+
+  async function processImportData(importData: any[]) {
+    let successCount = 0;
+    const errors: string[] = [];
+
+    // Load vehicle types if not already loaded
+    if (vehicleTypes.length === 0) {
+      await loadVehicleTypes();
+    }
+
+    for (const item of importData) {
+      const { rowIndex, vehicleTypeName, derivedWorkCode, sequenceOrder, dependencyCode, isAll } = item;
+
+      // If "All", process for each vehicle type
+      const targetVehicleTypes = isAll ? vehicleTypes : [vehicleTypes.find(vt => vt.wo_type_name === vehicleTypeName)].filter(Boolean);
+
+      for (const vehicleType of targetVehicleTypes) {
+        if (!vehicleType) {
+          if (!isAll) {
+            errors.push(`Row ${rowIndex}: Vehicle type "${vehicleTypeName}" not found. Please use the exact vehicle type name as shown in the table.`);
+          }
+          continue;
+        }
+
+        const woTypeId = vehicleType.id;
+        const displayName = isAll ? vehicleType.wo_type_name : vehicleTypeName;
+
+        // Check for duplicate sequence order
+        const { data: existing, error: checkError } = await supabase
+          .from('std_vehicle_work_flow')
+          .select('vwf_id')
+          .eq('wo_type_id', woTypeId)
+          .eq('sequence_order', sequenceOrder)
+          .eq('is_deleted', false)
+          .maybeSingle();
+
+        if (checkError) {
+          errors.push(`Row ${rowIndex}${isAll ? ` (${displayName})` : ''}: Error checking for duplicates`);
+          continue;
+        }
+
+        if (existing) {
+          errors.push(`Row ${rowIndex}${isAll ? ` (${displayName})` : ''}: Sequence order ${sequenceOrder} already exists for vehicle type "${displayName}"`);
+          continue; // Skip this vehicle type, continue with others
+        }
+
+        // Save the work flow
+        try {
+          await saveVehicleWorkFlow({
+            wo_type_id: woTypeId,
+            derived_sw_code: derivedWorkCode,
+            sequence_order: sequenceOrder,
+            dependency_derived_sw_code: dependencyCode || undefined,
+            estimated_duration_minutes: item.durationMinutes
+          });
+          successCount++;
+        } catch (error: any) {
+          errors.push(`Row ${rowIndex}${isAll ? ` (${displayName})` : ''}: ${error.message || 'Error saving work flow'}`);
+        }
+      }
+    }
+
+    importResults.success = successCount;
+    importResults.errors = errors;
+    showResults = true;
+
+    if (successCount > 0) {
+      onImportSuccess();
     }
   }
 
@@ -59,8 +164,8 @@
         return;
       }
 
-      const headers = lines[0].split(',').map(h => h.trim());
-      const expectedHeaders = ['Vehicle Type ID', 'Derived Work Code', 'Sequence Order', 'Dependency Derived Work Code'];
+      const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
+      const expectedHeaders = ['Vehicle Type', 'Derived Work Code', 'Sequence Order', 'Dependency Derived Work Code'];
       
       if (!expectedHeaders.every(header => headers.includes(header))) {
         importResults.errors = ['Invalid CSV format. Please use the template provided.'];
@@ -68,33 +173,40 @@
         return;
       }
 
+      // Load vehicle types if not already loaded
+      if (vehicleTypes.length === 0) {
+        await loadVehicleTypes();
+      }
+
       // Parse data rows
       const dataRows = lines.slice(1);
-      let successCount = 0;
+      const parsedData: any[] = [];
       const errors: string[] = [];
+      const allDerivedWorkCodes = new Set<string>();
 
       for (let i = 0; i < dataRows.length; i++) {
-        const row = dataRows[i];
-        const values = row.split(',').map(v => v.trim());
+        const row = dataRows[i].trim();
+        if (!row) continue; // Skip empty rows
+        
+        const values = row.split(',').map(v => v.trim().replace(/"/g, ''));
         
         if (values.length !== 4) {
           errors.push(`Row ${i + 2}: Invalid number of columns`);
           continue;
         }
 
-        const [vehicleTypeId, derivedWorkCode, sequenceOrder, dependencyCode] = values;
+        const [vehicleTypeName, derivedWorkCode, sequenceOrder, dependencyCode] = values;
 
         // Validate data
-        if (!vehicleTypeId || !derivedWorkCode || !sequenceOrder) {
+        if (!vehicleTypeName || !derivedWorkCode || !sequenceOrder) {
           errors.push(`Row ${i + 2}: Missing required fields`);
           continue;
         }
 
-        const woTypeId = parseInt(vehicleTypeId);
         const seqOrder = parseInt(sequenceOrder);
 
-        if (isNaN(woTypeId) || isNaN(seqOrder)) {
-          errors.push(`Row ${i + 2}: Invalid numeric values`);
+        if (isNaN(seqOrder)) {
+          errors.push(`Row ${i + 2}: Sequence order must be a valid number`);
           continue;
         }
 
@@ -103,18 +215,15 @@
           continue;
         }
 
-        // Validate vehicle type exists
-        const { data: vehicleType, error: vehicleError } = await supabase
-          .from('mstr_wo_type')
-          .select('id')
-          .eq('id', woTypeId)
-          .eq('is_deleted', false)
-          .eq('is_active', true)
-          .maybeSingle();
+        const isAll = isAllVehicleType(vehicleTypeName);
 
-        if (vehicleError || !vehicleType) {
-          errors.push(`Row ${i + 2}: Vehicle type ID ${woTypeId} not found`);
-          continue;
+        // Validate vehicle type exists by name (unless "All")
+        if (!isAll) {
+          const vehicleType = vehicleTypes.find(vt => vt.wo_type_name === vehicleTypeName);
+          if (!vehicleType) {
+            errors.push(`Row ${i + 2}: Vehicle type "${vehicleTypeName}" not found. Please use the exact vehicle type name as shown in the table.`);
+            continue;
+          }
         }
 
         // Validate derived work exists
@@ -128,6 +237,11 @@
         if (workError || !derivedWork) {
           errors.push(`Row ${i + 2}: Derived work code ${derivedWorkCode} not found`);
           continue;
+        }
+
+        // Track "All" derived work codes
+        if (isAll) {
+          allDerivedWorkCodes.add(derivedWorkCode);
         }
 
         // Validate dependency if provided
@@ -145,25 +259,6 @@
           }
         }
 
-        // Check for duplicate sequence order
-        const { data: existing, error: checkError } = await supabase
-          .from('std_vehicle_work_flow')
-          .select('vwf_id')
-          .eq('wo_type_id', woTypeId)
-          .eq('sequence_order', seqOrder)
-          .eq('is_deleted', false)
-          .maybeSingle();
-
-        if (checkError) {
-          errors.push(`Row ${i + 2}: Error checking for duplicates`);
-          continue;
-        }
-
-        if (existing) {
-          errors.push(`Row ${i + 2}: Sequence order ${seqOrder} already exists for vehicle type ${woTypeId}`);
-          continue;
-        }
-
         // Auto-calculate duration from time standards
         let durationMinutes = 0;
         try {
@@ -179,28 +274,40 @@
           continue;
         }
 
-        // Save the work flow
-        try {
-          await saveVehicleWorkFlow({
-            wo_type_id: woTypeId,
-            derived_sw_code: derivedWorkCode,
-            sequence_order: seqOrder,
-            dependency_derived_sw_code: dependencyCode || undefined,
-            estimated_duration_minutes: durationMinutes
-          });
-          successCount++;
-        } catch (error: any) {
-          errors.push(`Row ${i + 2}: ${error.message || 'Error saving work flow'}`);
-        }
+        // Add to parsed data
+        parsedData.push({
+          rowIndex: i + 2,
+          vehicleTypeName,
+          derivedWorkCode,
+          sequenceOrder: seqOrder,
+          dependencyCode: dependencyCode || undefined,
+          durationMinutes,
+          isAll
+        });
       }
 
-      importResults.success = successCount;
-      importResults.errors = errors;
-      showResults = true;
-
-      if (successCount > 0) {
-        onImportSuccess();
+      // If there are errors in parsing, show them and stop
+      if (errors.length > 0) {
+        importResults.errors = errors;
+        showResults = true;
+        isImporting = false;
+        return;
       }
+
+      // Check if "All" is used and show confirmation
+      if (allDerivedWorkCodes.size > 0) {
+        pendingImportData = parsedData;
+        allConfirmationData = {
+          derivedWorkCodes: Array.from(allDerivedWorkCodes),
+          vehicleTypeCount: vehicleTypes.length
+        };
+        showAllConfirmation = true;
+        isImporting = false;
+        return;
+      }
+
+      // No "All" detected, proceed with import
+      await processImportData(parsedData);
     } catch (error: any) {
       importResults.errors = [`Import failed: ${error.message || 'Unknown error'}`];
       showResults = true;
@@ -209,12 +316,35 @@
     }
   }
 
+  async function confirmAllImport() {
+    showAllConfirmation = false;
+    isImporting = true;
+    await processImportData(pendingImportData);
+    pendingImportData = [];
+    allConfirmationData = null;
+  }
+
+  function cancelAllImport() {
+    showAllConfirmation = false;
+    pendingImportData = [];
+    allConfirmationData = null;
+    isImporting = false;
+  }
+
   function handleClose() {
     selectedFile = null;
     isImporting = false;
     importResults = { success: 0, errors: [] };
     showResults = false;
+    showAllConfirmation = false;
+    pendingImportData = [];
+    allConfirmationData = null;
     onClose();
+  }
+
+  // Load vehicle types when modal opens
+  $: if (showImportModal) {
+    loadVehicleTypes();
   }
 </script>
 
@@ -268,8 +398,9 @@
           <div>
             <h3 class="text-lg font-medium theme-text-primary mb-2">Import Instructions</h3>
             <div class="text-sm theme-text-secondary space-y-2">
-              <p>• CSV must contain columns: <strong>Vehicle Type ID, Derived Work Code, Sequence Order, Dependency Derived Work Code</strong></p>
-              <p>• Vehicle Type ID must exist in the system</p>
+              <p>• CSV must contain columns: <strong>Vehicle Type, Derived Work Code, Sequence Order, Dependency Derived Work Code</strong></p>
+              <p>• Vehicle Type must match exactly as shown in the table (e.g., "Astrix", "Calista")</p>
+              <p>• Use <strong>"All"</strong> (case-insensitive) as Vehicle Type to apply the work flow to all vehicle types</p>
               <p>• Derived Work Code must exist in the system</p>
               <p>• Sequence Order must be greater than 0</p>
               <p>• Dependency Derived Work Code is optional</p>
@@ -313,6 +444,54 @@
               {isImporting ? 'Importing...' : 'Import'}
             </Button>
           </div>
+        </div>
+      </div>
+    </div>
+  </div>
+{/if}
+
+<!-- "All" Confirmation Modal -->
+{#if showAllConfirmation && allConfirmationData}
+  <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60]">
+    <div class="theme-bg-primary rounded-lg shadow-xl max-w-lg w-full mx-4">
+      <div class="p-6">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-xl font-semibold theme-text-primary">Confirm "All" Vehicle Types</h2>
+          <button
+            on:click={cancelAllImport}
+            class="theme-text-secondary hover:theme-text-primary transition-colors"
+            aria-label="Close modal"
+          >
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        <div class="mb-4">
+          <p class="text-sm theme-text-secondary mb-3">
+            The following derived work codes have been marked as applicable to all vehicle types:
+          </p>
+          <div class="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-3 mb-3">
+            <ul class="list-disc list-inside space-y-1">
+              {#each allConfirmationData.derivedWorkCodes as code}
+                <li class="text-sm theme-text-primary font-medium">{code}</li>
+              {/each}
+            </ul>
+          </div>
+          <p class="text-sm theme-text-secondary">
+            This will create work flow entries for <strong>{allConfirmationData.vehicleTypeCount} vehicle type(s)</strong>.
+          </p>
+          <p class="text-sm font-medium theme-text-primary mt-3">
+            Do you want to proceed?
+          </p>
+        </div>
+
+        <div class="flex justify-end gap-3 pt-4">
+          <Button variant="secondary" size="md" on:click={cancelAllImport}>Cancel</Button>
+          <Button variant="primary" size="md" on:click={confirmAllImport}>
+            Yes, Proceed
+          </Button>
         </div>
       </div>
     </div>

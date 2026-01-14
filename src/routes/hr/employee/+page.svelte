@@ -10,8 +10,10 @@
   import { loadEmployeesWithUsernames } from './services/employeeService';
   import { formatDateForInput } from './utils/employeeValidation';
   import { handleSaveEmployee as saveEmployeeHandler, handleDeleteEmployee as deleteEmployeeHandler, handleImport as importHandler } from './services/employeeHandlers';
+  import { exportBulkUpdateTemplate, processBulkUpdate } from './services/bulkUpdateService';
   import EmployeeForm from './components/EmployeeForm.svelte';
   import ImportModal from './components/ImportModal.svelte';
+  import BulkUpdateModal from './components/BulkUpdateModal.svelte';
 
   // State management
   let employeeCategories: string[] = [];
@@ -41,6 +43,9 @@
   let showImportModal = false;
   let importFile: File | null = null;
   let importResults: { success: number; errors: string[] } | null = null;
+  let showBulkUpdateModal = false;
+  let updateFile: File | null = null;
+  let updateResults: { success: number; errors: string[]; skipped: number } | null = null;
 
   // Load existing data elements
   async function loadDataElements() {
@@ -199,6 +204,65 @@
     }
   }
 
+  async function handleExportBulkUpdateTemplate() {
+    try {
+      await exportBulkUpdateTemplate();
+    } catch (error) {
+      console.error('Error exporting bulk update template:', error);
+      showMessage('Error exporting bulk update template', 'error');
+    }
+  }
+
+  function handleBulkUpdateFileSelect(event: Event) {
+    const target = event.target as HTMLInputElement;
+    if (target.files && target.files[0]) {
+      updateFile = target.files[0];
+    }
+  }
+
+  async function handleBulkUpdate() {
+    if (!updateFile) {
+      showMessage('Please select a file to update', 'error');
+      return;
+    }
+
+    isLoading = true;
+    try {
+      const text = await updateFile.text();
+      const username = localStorage.getItem('username');
+      
+      if (!username) {
+        showMessage('User session not found', 'error');
+        return;
+      }
+
+      const results = await processBulkUpdate(text, username);
+      updateResults = results;
+      
+      if (results.success > 0) {
+        showMessage(`Successfully updated ${results.success} employees!`, 'success');
+        await loadEmployees();
+      }
+      if (results.errors.length > 0) {
+        showMessage(`Update completed with ${results.errors.length} errors. Check modal for details.`, 'error');
+        console.log('Bulk update errors:', results.errors);
+      }
+      if (results.success === 0 && results.errors.length > 0) {
+        showMessage('No employees were updated. Please check the errors and try again.', 'error');
+      }
+      
+      updateFile = null;
+      const fileInput = document.getElementById('updateFile') as HTMLInputElement;
+      if (fileInput) fileInput.value = '';
+    } catch (error) {
+      console.error('Error in bulk update:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Error updating employees';
+      showMessage(errorMessage, 'error');
+    } finally {
+      isLoading = false;
+    }
+  }
+
   onMount(async () => {
     // Check if user is logged in
     const username = localStorage.getItem('username');
@@ -246,6 +310,8 @@
   <AppHeader 
     title="Employee Management"
     onSidebarToggle={handleSidebarToggle}
+    showBulkUpdateButton={true}
+    onBulkUpdateClick={() => showBulkUpdateModal = true}
     showImportButton={true}
     onImportClick={() => showImportModal = true}
   />
@@ -332,4 +398,20 @@
   onFileSelect={handleFileSelect}
   onImport={handleImport}
   onClose={() => showImportModal = false}
+/>
+
+<!-- Bulk Update Modal -->
+<BulkUpdateModal
+  bind:showModal={showBulkUpdateModal}
+  bind:updateFile
+  bind:updateResults
+  {isLoading}
+  onExportTemplate={handleExportBulkUpdateTemplate}
+  onFileSelect={handleBulkUpdateFileSelect}
+  onBulkUpdate={handleBulkUpdate}
+  onClose={() => {
+    showBulkUpdateModal = false;
+    updateResults = null;
+    updateFile = null;
+  }}
 /> 

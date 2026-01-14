@@ -37,7 +37,17 @@
       return;
     }
 
+    // Validate date
     const date = new Date(formData.dt_year, monthIndex, formData.dt_day);
+    
+    // Check if date is valid (e.g., Feb 30 would be invalid)
+    if (date.getDate() !== formData.dt_day || 
+        date.getMonth() !== monthIndex || 
+        date.getFullYear() !== formData.dt_year) {
+      alert(`Invalid date: ${formData.dt_day} ${formData.dt_month} ${formData.dt_year} does not exist.`);
+      return;
+    }
+
     formData.dt_value = date.toISOString().split('T')[0];
     formData.is_active = isActive;
 

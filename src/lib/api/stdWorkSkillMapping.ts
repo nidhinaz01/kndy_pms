@@ -20,8 +20,6 @@ export interface StdWorkSkillMappingFormData {
 // Fetch all work-skill mappings (not deleted)
 export async function fetchAllWorkSkillMappings(): Promise<StdWorkSkillMapping[]> {
   try {
-    console.log('Fetching work-skill mappings...');
-    
     const { data, error } = await supabase
       .from('std_work_skill_mapping')
       .select(`
@@ -55,65 +53,13 @@ export async function fetchAllWorkSkillMappings(): Promise<StdWorkSkillMapping[]
       .order('created_dt', { ascending: false });
 
     if (error) {
-      console.error('Supabase error:', error);
+      console.error('Error fetching work-skill mappings:', error);
       throw error;
     }
     
-    console.log('Raw data from Supabase:', data);
-    
     // Ensure we always return an array
-    let result = data || [];
-    if (!Array.isArray(result)) {
-      console.log('Data is not an array, converting to array');
-      result = [result];
-    }
-    
-    console.log('Final result type:', typeof result);
-    console.log('Final result isArray:', Array.isArray(result));
-    console.log('Final result length:', result.length);
-    
-    // Debug: Check each mapping's skill combination data
-    if (result.length > 0) {
-      result.forEach((mapping, index) => {
-        const skillCombinations = mapping.std_skill_combinations as any;
-        console.log(`Mapping ${index}:`, {
-          wsm_id: mapping.wsm_id,
-          derived_sw_code: mapping.derived_sw_code,
-          sc_name: mapping.sc_name,
-          skill_combinations: skillCombinations,
-          skill_combination_data: Array.isArray(skillCombinations) ? skillCombinations[0]?.skill_combination : skillCombinations?.skill_combination,
-          skill_combination_type: typeof (Array.isArray(skillCombinations) ? skillCombinations[0]?.skill_combination : skillCombinations?.skill_combination)
-        });
-        
-        // Additional detailed debugging
-        if (skillCombinations) {
-          console.log(`Detailed skill combinations for mapping ${index}:`);
-          if (Array.isArray(skillCombinations)) {
-            skillCombinations.forEach((sc, scIndex) => {
-              console.log(`  Skill combination ${scIndex}:`, {
-                sc_id: sc.sc_id,
-                sc_name: sc.sc_name,
-                skill_combination: sc.skill_combination,
-                skill_combination_type: typeof sc.skill_combination,
-                skill_combination_length: Array.isArray(sc.skill_combination) ? sc.skill_combination.length : 'N/A'
-              });
-            });
-          } else {
-            console.log(`  Single skill combination:`, {
-              sc_id: skillCombinations.sc_id,
-              sc_name: skillCombinations.sc_name,
-              skill_combination: skillCombinations.skill_combination,
-              skill_combination_type: typeof skillCombinations.skill_combination,
-              skill_combination_length: Array.isArray(skillCombinations.skill_combination) ? skillCombinations.skill_combination.length : 'N/A'
-            });
-          }
-        }
-      });
-    } else {
-      console.log('No data returned from Supabase');
-    }
-    
-    return result;
+    const result = data || [];
+    return Array.isArray(result) ? result : [result];
   } catch (error) {
     console.error('Error fetching work-skill mappings:', error);
     throw error;

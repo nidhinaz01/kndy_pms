@@ -1,15 +1,5 @@
 import { supabase } from '$lib/supabaseClient';
-import { getWorkOrderDocuments } from './documentUploadService';
-
-export interface DocumentReleaseStage {
-  stage_code: string;
-  planned_date: string;
-  actual_date: string | null;
-  hasDocument: boolean;
-  documentName?: string;
-  submissionDate?: string;
-  revisionNumber?: number;
-}
+import { getBatchDocumentStatuses, type DocumentStatus } from './documentUploadService';
 
 export interface DocumentRelease {
   id: string;
@@ -19,132 +9,74 @@ export interface DocumentRelease {
   wo_model: string;
   customer_name: string | null;
   wo_date: string;
-  stages: DocumentReleaseStage[];
-  allStagesCompleted: boolean;
+  documentStatuses: DocumentStatus[];
+  allDocumentsCompleted: boolean;
   hasAnyDocument: boolean;
+  hasPendingDocuments: boolean;
 }
 
 /**
- * Load document releases with stage-specific information
+ * Load document releases for all work orders
+ * Shows work orders with their document statuses
+ * 
+ * OPTIMIZED: Uses batch queries instead of N+1 queries
+ * - 1 query for work orders
+ * - 1 query for all documents
+ * - 1 query for all requirements
+ * Total: 3 queries regardless of work order count
  */
 export async function loadDocumentReleases(): Promise<DocumentRelease[]> {
   try {
-    // Load all rnd_documents entries (stage-specific)
-    const { data: datesData, error: datesError } = await supabase
-      .from('prdn_dates')
-      .select(`
-        *,
-        prdn_wo_details!inner(
-          id,
-          wo_no,
-          pwo_no,
-          wo_model,
-          customer_name,
-          wo_date
-        )
-      `)
-      .eq('date_type', 'rnd_documents')
-      .not('planned_date', 'is', null)
-      .not('stage_code', 'is', null)
-      .order('planned_date', { ascending: true });
-
-    if (datesError) {
-      console.error('Database error loading document releases:', datesError);
+    // Get all work orders that might need documents
+    const { data: workOrders, error: woError } = await supabase
+      .from('prdn_wo_details')
+      .select('id, wo_no, pwo_no, wo_model, customer_name, wo_date')
+      .order('wo_no', { ascending: true });
+    
+    if (woError) {
+      console.error('Database error loading work orders:', woError);
       return [];
     }
-
-    // Group by work order
-    const workOrderMap = new Map<number, DocumentRelease>();
-    const woTypeMap = new Map<string, string[]>(); // Cache stage orders by WO type
     
-    for (const dateEntry of datesData || []) {
-      const woId = dateEntry.sales_order_id;
-      const woDetails = dateEntry.prdn_wo_details;
-      
-      if (!workOrderMap.has(woId)) {
-        // Get stages for this work order type (with caching)
-        let stageCodes: string[] = [];
-        if (woTypeMap.has(woDetails.wo_model)) {
-          stageCodes = woTypeMap.get(woDetails.wo_model)!;
-        } else {
-          const { data: stageOrders } = await supabase
-            .from('plan_wo_stage_order')
-            .select('plant_stage')
-            .eq('wo_type_name', woDetails.wo_model)
-            .order('order_no', { ascending: true });
-          
-          stageCodes = (stageOrders || []).map(stage => stage.plant_stage);
-          woTypeMap.set(woDetails.wo_model, stageCodes);
-        }
-        
-        const stages: DocumentReleaseStage[] = stageCodes.map(stageCode => ({
-          stage_code: stageCode,
-          planned_date: '',
-          actual_date: null,
-          hasDocument: false
-        }));
-        
-        workOrderMap.set(woId, {
-          id: woId.toString(),
-          sales_order_id: woId,
-          wo_no: woDetails.wo_no,
-          pwo_no: woDetails.pwo_no,
-          wo_model: woDetails.wo_model,
-          customer_name: woDetails.customer_name,
-          wo_date: woDetails.wo_date,
-          stages: stages,
-          allStagesCompleted: false,
-          hasAnyDocument: false
-        });
-      }
-      
-      const workOrder = workOrderMap.get(woId)!;
-      const stageIndex = workOrder.stages.findIndex(s => s.stage_code === dateEntry.stage_code);
-      
-      if (stageIndex >= 0) {
-        workOrder.stages[stageIndex].planned_date = dateEntry.planned_date;
-        workOrder.stages[stageIndex].actual_date = dateEntry.actual_date;
-      }
+    if (!workOrders || workOrders.length === 0) {
+      return [];
     }
     
-    // Load document submissions for all work orders (batch)
-    const workOrderIds = Array.from(workOrderMap.keys());
+    // Extract work order IDs
+    const workOrderIds = workOrders.map(wo => wo.id);
     
-    // Load all documents in parallel
-    const documentPromises = workOrderIds.map(async (woId) => {
-      try {
-        const { stageDocuments } = await getWorkOrderDocuments(woId);
-        return { woId, stageDocuments };
-      } catch (error) {
-        console.error(`Error loading documents for work order ${woId}:`, error);
-        return { woId, stageDocuments: new Map<string, DocumentSubmission>() };
-      }
-    });
+    // Batch fetch all document statuses in one go
+    // This replaces N individual queries with 2 batch queries (documents + requirements)
+    const statusMap = await getBatchDocumentStatuses(workOrderIds);
     
-    const documentResults = await Promise.all(documentPromises);
-    
-    // Update work orders with document data
-    for (const { woId, stageDocuments } of documentResults) {
-      const workOrder = workOrderMap.get(woId);
-      if (!workOrder) continue;
-      
-      // Update stage information with document data
-      workOrder.stages.forEach(stage => {
-        const doc = stageDocuments.get(stage.stage_code);
-        if (doc) {
-          stage.hasDocument = true;
-          stage.documentName = doc.document_name;
-          stage.submissionDate = doc.submission_date;
-          stage.revisionNumber = doc.revision_number;
-        }
-      });
+    // Build document releases
+    const releases: DocumentRelease[] = workOrders.map(wo => {
+      const statuses = statusMap.get(wo.id) || [];
       
       // Calculate completion status
-      workOrder.hasAnyDocument = stageDocuments.size > 0;
-      workOrder.allStagesCompleted = workOrder.stages.every(s => s.hasDocument && s.actual_date !== null);
-    }
+      const allCompleted = statuses.every(s => 
+        s.status === 'uploaded' || s.status === 'not_required'
+      );
+      
+      const hasAny = statuses.some(s => s.status === 'uploaded');
+      const hasPending = statuses.some(s => s.status === 'pending');
+      
+      return {
+        id: wo.id.toString(),
+        sales_order_id: wo.id,
+        wo_no: wo.wo_no,
+        pwo_no: wo.pwo_no,
+        wo_model: wo.wo_model,
+        customer_name: wo.customer_name,
+        wo_date: wo.wo_date,
+        documentStatuses: statuses,
+        allDocumentsCompleted: allCompleted,
+        hasAnyDocument: hasAny,
+        hasPendingDocuments: hasPending
+      };
+    });
     
-    return Array.from(workOrderMap.values());
+    return releases;
   } catch (error) {
     console.error('Error loading document releases:', error);
     return [];
@@ -152,28 +84,13 @@ export async function loadDocumentReleases(): Promise<DocumentRelease[]> {
 }
 
 /**
- * @deprecated Use documentUploadService.uploadStageDocument instead
- * This function is kept for backward compatibility but should not be used
+ * @deprecated This function is no longer used with document types
  */
 export async function saveDocumentSubmission(
   salesOrderId: string,
   submissionDate: string,
   username: string | null
 ): Promise<void> {
-  console.warn('saveDocumentSubmission is deprecated. Use documentUploadService.uploadStageDocument instead.');
-  const now = new Date().toISOString();
-
-  const { error } = await supabase
-    .from('prdn_dates')
-    .update({
-      actual_date: submissionDate,
-      modified_by: username,
-      modified_dt: now
-    })
-    .eq('sales_order_id', salesOrderId)
-    .eq('date_type', 'rnd_documents')
-    .not('stage_code', 'is', null);
-
-  if (error) throw error;
+  console.warn('saveDocumentSubmission is deprecated. This function is no longer used with document types.');
+  // No-op - this was for prdn_dates which we're not using anymore
 }
-

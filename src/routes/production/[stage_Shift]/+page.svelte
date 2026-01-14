@@ -26,6 +26,13 @@
   import EntryModal from './components/EntryModal.svelte';
   import ExitModal from './components/ExitModal.svelte';
   import CancelWorkModal from './components/CancelWorkModal.svelte';
+  import AddTraineesModal from './components/AddTraineesModal.svelte';
+  import { browser } from '$app/environment';
+  
+  // Lazy load ReportUnplannedWorkModal to avoid SSR issues
+  let ReportUnplannedWorkModal: any = null;
+  // Lazy load UnplannedWorkReportModal to avoid SSR issues
+  let UnplannedWorkReportModal: any = null;
   
   // Import services
   import * as dataLoading from './services/dataLoadingService';
@@ -129,6 +136,28 @@
   let isExitModalLoading = false;
   let exitProgressMessage = '';
   let exitDate = '';
+  let showAddTraineesModal = false;
+  let selectedWorkGroupForTrainees: any = null;
+  let showReportUnplannedWorkModal = false;
+  let showUnplannedWorkReportModal = false;
+  let selectedWorkForUnplannedReporting: any = null;
+
+  // Load the component when modal needs to be shown (after variable declaration)
+  $: if (browser && showReportUnplannedWorkModal && !ReportUnplannedWorkModal) {
+    console.log('Loading ReportUnplannedWorkModal component...');
+    import('./components/ReportUnplannedWorkModal.svelte').then(module => {
+      ReportUnplannedWorkModal = module.default;
+      console.log('ReportUnplannedWorkModal loaded:', ReportUnplannedWorkModal);
+    }).catch(error => {
+      console.error('Error loading ReportUnplannedWorkModal:', error);
+    });
+  }
+  // Load UnplannedWorkReportModal when it needs to be shown
+  $: if (browser && showUnplannedWorkReportModal && !UnplannedWorkReportModal) {
+    import('./components/UnplannedWorkReportModal.svelte').then(module => {
+      UnplannedWorkReportModal = module.default;
+    });
+  }
 
   // Create data loading context
   const dataLoadingContext: dataLoading.DataLoadingContext = {
@@ -187,6 +216,11 @@
     setExitModalLoading: (v) => isExitModalLoading = v,
     setExitProgressMessage: (v) => exitProgressMessage = v,
     setExitDate: (v) => exitDate = v,
+    setShowAddTraineesModal: (v) => showAddTraineesModal = v,
+    setSelectedWorkGroupForTrainees: (v) => selectedWorkGroupForTrainees = v,
+    setShowReportUnplannedWorkModal: (v) => showReportUnplannedWorkModal = v,
+    setShowUnplannedWorkReportModal: (v) => showUnplannedWorkReportModal = v,
+    setSelectedWorkForUnplannedReporting: (v) => selectedWorkForUnplannedReporting = v,
     setExpandedGroups: (v) => expandedGroups = typeof v === 'function' ? v(expandedGroups) : v,
     setSelectedRows: (v) => selectedRows = typeof v === 'function' ? v(selectedRows) : v,
     setExpandedReportGroups: (v) => expandedReportGroups = typeof v === 'function' ? v(expandedReportGroups) : v,
@@ -262,6 +296,11 @@
     // Use a small delay to ensure the binding has updated
     await new Promise(resolve => setTimeout(resolve, 0));
     console.log(`📅 +page.svelte: Date changed handler called, selectedDate is now: ${selectedDate}`);
+    
+    // Clear submission status cache when date changes
+    const { submissionStatusCache } = await import('./services/submissionStatusCache');
+    submissionStatusCache.clearForStageDate(stageCode, selectedDate);
+    
     await dataLoading.loadShiftBreakTimes(dataLoadingContext);
     await handleTabChange(activeTab);
   }
@@ -479,6 +518,7 @@
         on:multiReport={() => eventHandlers.handleMultiReport(eventHandlerContext)}
         on:reportWork={(e) => eventHandlers.handleReportWork(eventHandlerContext, e)}
         on:cancelWork={(e) => eventHandlers.handleCancelWork(eventHandlerContext, e)}
+        on:addTrainees={(e) => eventHandlers.handleAddTrainees(eventHandlerContext, e)}
         on:toggleGroup={(e) => eventHandlers.toggleGroup(eventHandlerContext, e.detail)}
         on:toggleRowSelection={(e) => eventHandlers.toggleRowSelection(eventHandlerContext, e.detail)}
         on:selectAllInGroup={(e) => eventHandlers.selectAllInGroup(eventHandlerContext, e)}
@@ -507,6 +547,7 @@
         on:submit={() => eventHandlers.handleSubmitReporting(eventHandlerContext)}
         on:refresh={() => dataLoading.loadDraftReportData(dataLoadingContext)}
         on:reportOvertime={(e) => eventHandlers.handleReportOvertime(eventHandlerContext, e)}
+        on:reportUnplannedWork={() => eventHandlers.handleReportUnplannedWork(eventHandlerContext)}
       />
     {:else if activeTab === 'report'}
       <ReportTab 
@@ -604,6 +645,57 @@
     on:close={() => eventHandlers.handleExitModalClose(eventHandlerContext)}
     on:confirm={() => eventHandlers.handleExitConfirm(eventHandlerContext)}
   />
+
+  <AddTraineesModal 
+    isOpen={showAddTraineesModal}
+    plannedWorkGroup={selectedWorkGroupForTrainees}
+    {stageCode}
+    {selectedDate}
+    on:close={() => eventHandlers.handleAddTraineesModalClose(eventHandlerContext)}
+    on:save={() => eventHandlers.handleAddTraineesSave(eventHandlerContext)}
+  />
+
+  {#if browser && showReportUnplannedWorkModal}
+    {#if ReportUnplannedWorkModal}
+      <svelte:component 
+        this={ReportUnplannedWorkModal}
+        isOpen={showReportUnplannedWorkModal}
+        {stageCode}
+        {selectedDate}
+        on:close={() => eventHandlers.handleReportUnplannedWorkModalClose(eventHandlerContext)}
+        on:report={(e) => eventHandlers.handleReportUnplannedWorkSelected(eventHandlerContext, e)}
+      />
+    {:else}
+      <div class="fixed inset-0 z-[10000] flex items-center justify-center">
+        <div class="theme-bg-primary rounded-lg shadow-xl p-6">
+          <p class="theme-text-primary">Loading modal...</p>
+        </div>
+      </div>
+    {/if}
+  {/if}
+
+  {#if browser && UnplannedWorkReportModal}
+    <svelte:component 
+      this={UnplannedWorkReportModal}
+      isOpen={showUnplannedWorkReportModal}
+      selectedWork={selectedWorkForUnplannedReporting}
+      {stageCode}
+      reportingDate={selectedDate}
+      on:close={() => {
+        showUnplannedWorkReportModal = false;
+        selectedWorkForUnplannedReporting = null;
+      }}
+      on:save={async (e) => {
+        if (e.detail.success) {
+          showUnplannedWorkReportModal = false;
+          selectedWorkForUnplannedReporting = null;
+          // Reload data to show the new reports
+          await dataLoading.loadPlannedWorksData(dataLoadingContext);
+          await dataLoading.loadDraftReportsData(dataLoadingContext);
+        }
+      }}
+    />
+  {/if}
 </div>
 
 <!-- Sidebar Overlay -->

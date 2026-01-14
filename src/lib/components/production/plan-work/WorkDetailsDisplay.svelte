@@ -11,6 +11,18 @@
   <h4 class="font-medium theme-text-primary mb-2">Work Details</h4>
   <div class="space-y-1 text-sm">
     <div>
+      <span class="theme-text-secondary">Work Order No.:</span> 
+      <span class="theme-text-primary">
+        {work?.wo_no || work?.prdn_wo_details?.wo_no || 'N/A'}
+      </span>
+    </div>
+    <div>
+      <span class="theme-text-secondary">Pre Work Order No.:</span> 
+      <span class="theme-text-primary">
+        {work?.pwo_no || work?.prdn_wo_details?.pwo_no || 'N/A'}
+      </span>
+    </div>
+    <div>
       <span class="theme-text-secondary">Code:</span> 
       <span class="theme-text-primary">
         {work?.std_work_type_details?.derived_sw_code || work?.sw_code}

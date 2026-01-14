@@ -6,16 +6,31 @@
   export let work: any = null;
   export let availableWorkers: Worker[] = [];
   export let selectedWorkers: { [skill: string]: SelectedWorker | null } = {};
+  export let selectedTrainees: SelectedWorker[] = [];
+  export let traineeDeviationReason: string = '';
   export let selectedSkillMappingIndex: number = -1;
   export let selectedDate: string = '';
   export let fromTime: string = '';
   export let toTime: string = '';
   export let onWorkerChange: (event: Event, skillKey: string) => void = () => {};
+  export let onTraineeAdd: (trainee: SelectedWorker) => void = () => {};
+  export let onTraineeRemove: (index: number) => void = () => {};
+  export let onTraineeReasonChange: (reason: string) => void = () => {};
   export let onSkillMappingChange: (index: number) => void = () => {};
   export let excludePlanIds: number[] = []; // Plan IDs to exclude from conflict checks (for edit mode)
 
   // Track which workers are already assigned to other work plans at the same time
   let workersAssignedToOtherPlans: Set<string> = new Set();
+  
+  // Trainee selection state
+  let showTraineeSelector = false;
+  let availableTrainees: Worker[] = [];
+  
+  // Filter trainees from available workers
+  $: availableTrainees = availableWorkers.filter(w => w.skill_short === 'T');
+  
+  // Check if max trainees reached
+  $: canAddTrainee = selectedTrainees.length < 2;
 
   // Check for workers already assigned to other work plans when time is selected
   $: if (selectedDate && fromTime && toTime) {
@@ -367,3 +382,126 @@
   </div>
 {/if}
 
+<!-- Trainee Selection Section -->
+<div class="mt-6 pt-6 border-t theme-border">
+  <div class="flex items-center justify-between mb-3">
+    <h4 class="font-medium theme-text-primary">Additional Trainees (Optional)</h4>
+    {#if canAddTrainee}
+      <button
+        type="button"
+        on:click={() => showTraineeSelector = !showTraineeSelector}
+        class="px-3 py-1.5 text-sm font-medium text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800 rounded-lg hover:bg-blue-100 dark:hover:bg-blue-900/50 transition-colors"
+      >
+        + Add Trainee
+      </button>
+    {:else}
+      <span class="text-sm theme-text-secondary">Maximum 2 trainees</span>
+    {/if}
+  </div>
+  
+  {#if showTraineeSelector && canAddTrainee}
+    <div class="mb-3 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg border theme-border">
+      <label class="block text-sm font-medium theme-text-primary mb-2">
+        Select Trainee
+      </label>
+      <select
+        class="w-full px-3 py-2 border theme-border rounded-lg theme-bg-primary theme-text-primary focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+        on:change={(e) => {
+          const traineeId = (e.target as HTMLSelectElement).value;
+          if (traineeId) {
+            const trainee = availableTrainees.find(t => t.emp_id === traineeId);
+            if (trainee) {
+              // Check if trainee is already selected
+              const isAlreadySelected = selectedTrainees.some(t => t.emp_id === traineeId);
+              if (!isAlreadySelected) {
+                onTraineeAdd({
+                  emp_id: trainee.emp_id,
+                  emp_name: trainee.emp_name,
+                  skill_short: trainee.skill_short
+                });
+                showTraineeSelector = false;
+                (e.target as HTMLSelectElement).value = '';
+              } else {
+                alert('This trainee is already selected');
+              }
+            }
+          }
+        }}
+      >
+        <option value="">Choose a trainee...</option>
+        {#each availableTrainees as trainee}
+          {@const isAlreadySelected = selectedTrainees.some(t => t.emp_id === trainee.emp_id)}
+          <option value={trainee.emp_id} disabled={isAlreadySelected}>
+            {trainee.emp_name} {isAlreadySelected ? '(Already selected)' : ''}
+          </option>
+        {/each}
+      </select>
+      <button
+        type="button"
+        on:click={() => showTraineeSelector = false}
+        class="mt-2 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200"
+      >
+        Cancel
+      </button>
+    </div>
+  {/if}
+  
+  {#if selectedTrainees.length > 0}
+    <!-- Warning Indicator -->
+    <div class="mb-3 p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
+      <div class="flex items-start">
+        <svg class="w-5 h-5 text-yellow-600 dark:text-yellow-400 mt-0.5 mr-2 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+          <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd" />
+        </svg>
+        <div class="flex-1">
+          <p class="text-sm font-medium text-yellow-800 dark:text-yellow-200">
+            Trainees Selected: This will be recorded as a deviation
+          </p>
+          <p class="text-xs text-yellow-700 dark:text-yellow-300 mt-1">
+            {selectedTrainees.length} trainee{selectedTrainees.length > 1 ? 's' : ''} selected
+          </p>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Selected Trainees List -->
+    <div class="space-y-2 mb-3">
+      {#each selectedTrainees as trainee, index}
+        <div class="flex items-center justify-between p-2 bg-gray-50 dark:bg-gray-800 rounded border theme-border">
+          <div class="flex items-center">
+            <span class="text-sm font-medium theme-text-primary mr-2">
+              {trainee.emp_name}
+            </span>
+            <span class="text-xs theme-text-secondary">({trainee.skill_short})</span>
+          </div>
+          <button
+            type="button"
+            on:click={() => onTraineeRemove(index)}
+            class="text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-300 text-sm font-medium"
+          >
+            Remove
+          </button>
+        </div>
+      {/each}
+    </div>
+    
+    <!-- Deviation Reason Input -->
+    <div>
+      <label class="block text-sm font-medium theme-text-primary mb-2">
+        Deviation Reason <span class="text-red-500">*</span>
+      </label>
+      <textarea
+        class="w-full px-3 py-2 border theme-border rounded-lg theme-bg-primary theme-text-primary focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+        rows="3"
+        placeholder="Enter reason for adding trainees..."
+        value={traineeDeviationReason}
+        on:input={(e) => onTraineeReasonChange((e.target as HTMLTextAreaElement).value)}
+      ></textarea>
+      {#if selectedTrainees.length > 0 && !traineeDeviationReason.trim()}
+        <p class="mt-1 text-xs text-red-600 dark:text-red-400">
+          Please provide a reason for adding trainees
+        </p>
+      {/if}
+    </div>
+  {/if}
+</div>

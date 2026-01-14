@@ -35,14 +35,24 @@ export async function batchFetchEnrichmentData(
   const uniqueDerivedSwCodes = new Set<string>();
   const uniqueSkillRequirements = new Map<string, Set<string>>(); // derivedSwCode -> Set<scRequired>
 
+  // Track other work codes with their wo_details_id for proper matching
+  const otherWorkCodeToWoDetailsMap = new Map<string, Set<number>>();
+  
   items.forEach(item => {
     const planningRecord = item.prdn_work_planning || item;
     const derivedSwCode = planningRecord.std_work_type_details?.derived_sw_code;
     const otherWorkCode = planningRecord.other_work_code;
     const scRequired = planningRecord.sc_required;
+    const woDetailsId = planningRecord.wo_details_id || item.wo_details_id;
 
     if (otherWorkCode) {
       uniqueOtherWorkCodes.add(otherWorkCode);
+      if (woDetailsId) {
+        if (!otherWorkCodeToWoDetailsMap.has(otherWorkCode)) {
+          otherWorkCodeToWoDetailsMap.set(otherWorkCode, new Set());
+        }
+        otherWorkCodeToWoDetailsMap.get(otherWorkCode)!.add(woDetailsId);
+      }
     }
     if (derivedSwCode) {
       uniqueDerivedSwCodes.add(derivedSwCode);
@@ -58,17 +68,58 @@ export async function batchFetchEnrichmentData(
   // Batch fetch work additions (for non-standard works)
   if (uniqueOtherWorkCodes.size > 0) {
     try {
-      const { data: workAdditions } = await supabase
+      // Collect all wo_details_ids for other work codes
+      const allWoDetailsIds = new Set<number>();
+      otherWorkCodeToWoDetailsMap.forEach(woDetailsSet => {
+        woDetailsSet.forEach(id => allWoDetailsIds.add(id));
+      });
+
+
+      // Fetch work additions - prdn_work_additions table doesn't have is_deleted column
+      let { data: workAdditions, error: workAdditionsError } = await supabase
         .from('prdn_work_additions')
-        .select('other_work_code, other_work_desc, other_work_sc')
+        .select('other_work_code, other_work_desc, other_work_sc, wo_details_id')
         .in('other_work_code', Array.from(uniqueOtherWorkCodes))
-        .eq('stage_code', stageCode)
-        .eq('is_deleted', false);
+        .eq('stage_code', stageCode);
+
+      // If no results and we have wo_details_ids, try filtering by them too
+      if ((!workAdditions || workAdditions.length === 0) && allWoDetailsIds.size > 0) {
+        const { data: workAdditionsWithWo, error: errorWithWo } = await supabase
+          .from('prdn_work_additions')
+          .select('other_work_code, other_work_desc, other_work_sc, wo_details_id')
+          .in('other_work_code', Array.from(uniqueOtherWorkCodes))
+          .eq('stage_code', stageCode)
+          .in('wo_details_id', Array.from(allWoDetailsIds));
+        
+        if (workAdditionsWithWo && workAdditionsWithWo.length > 0) {
+          workAdditions = workAdditionsWithWo;
+          workAdditionsError = errorWithWo;
+        }
+      }
+
+      if (workAdditionsError) {
+        console.error('Error fetching work additions:', workAdditionsError);
+      }
 
       if (workAdditions) {
+        // Create a map keyed by other_work_code + wo_details_id for precise matching
+        const workAdditionMap = new Map<string, any>();
         workAdditions.forEach(addition => {
-          enrichmentData.workAdditionDataMap.set(addition.other_work_code, addition);
+          // Handle both null and undefined wo_details_id
+          const woId = addition.wo_details_id ?? null;
+          const key = `${addition.other_work_code}_${woId}`;
+          workAdditionMap.set(key, addition);
+          // Also set by code only as fallback (use first one found)
+          if (!enrichmentData.workAdditionDataMap.has(addition.other_work_code)) {
+            enrichmentData.workAdditionDataMap.set(addition.other_work_code, addition);
+          }
         });
+        
+        // Store the detailed map for precise matching
+        (enrichmentData as any).workAdditionDetailedMap = workAdditionMap;
+        
+      } else {
+        console.warn(`⚠️ No work additions found for codes:`, Array.from(uniqueOtherWorkCodes));
       }
     } catch (error) {
       console.error('Error batch fetching work additions:', error);
@@ -199,7 +250,31 @@ export function enrichItem(
   // Get work addition data for non-standard works
   let workAdditionData = null;
   if (otherWorkCode) {
-    workAdditionData = enrichmentData.workAdditionDataMap.get(otherWorkCode) || null;
+    const woDetailsId = planningRecord.wo_details_id ?? item.wo_details_id ?? null;
+    // Try to get precise match first (by code + wo_details_id)
+    const detailedMap = (enrichmentData as any).workAdditionDetailedMap;
+    if (detailedMap) {
+      const preciseKey = `${otherWorkCode}_${woDetailsId}`;
+      workAdditionData = detailedMap.get(preciseKey) || null;
+      if (!workAdditionData && woDetailsId !== null) {
+        // Try with null as fallback
+        const nullKey = `${otherWorkCode}_null`;
+        workAdditionData = detailedMap.get(nullKey) || null;
+      }
+      // Try all possible keys for this code
+      if (!workAdditionData) {
+        const allKeysForCode = Array.from(detailedMap.keys()).filter(k => k.startsWith(`${otherWorkCode}_`));
+        if (allKeysForCode.length > 0) {
+          // Use the first match found
+          workAdditionData = detailedMap.get(allKeysForCode[0]) || null;
+        }
+      }
+    }
+    // Fallback to code-only match
+    if (!workAdditionData) {
+      workAdditionData = enrichmentData.workAdditionDataMap.get(otherWorkCode) || null;
+    }
+    
   }
 
   // Get vehicle work flow

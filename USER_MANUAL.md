@@ -48,6 +48,14 @@ The Production Management System is a comprehensive web-based application design
 - **Sidebar Toggle**: Click the hamburger icon (☰) to collapse/expand the sidebar
 - **Theme Toggle**: Use the floating theme toggle button to switch between light and dark modes
 
+### Help Documentation
+
+1. Click the "Help Doc." button in the sidebar (located above the logout button)
+2. The interactive user manual will open in a new browser tab
+3. Use the sidebar table of contents to navigate to different sections
+4. Use the search function to find specific topics
+5. The manual includes step-by-step instructions for all workflows and features
+
 ### Logout
 
 1. Click the logout button in the sidebar footer
@@ -306,6 +314,13 @@ Let's go through each step in detail:
      - The worker will be selected and highlighted
      - You can see worker details (name, skill, availability)
    - **Multi-Skill Works**: If the work requires multiple skills, you'll need to select one worker for each skill
+   - **Adding Trainees (Optional)**:
+     - You can add up to 2 trainees per work
+     - Click "Add Trainee" button
+     - Select trainees from the available list (trainees have skill code 'T')
+     - You must provide a reason for adding trainees (deviation reason)
+     - Trainees are added to help with the work but don't replace the main worker
+     - Maximum of 2 trainees allowed per work
    - The system shows warnings if:
      - Worker has time conflicts
      - Worker doesn't have the required skill
@@ -358,6 +373,46 @@ You can also plan works directly from the Draft Plan tab, which shows all works 
 - Workers must have the required skills
 - Date must be selected
 - Shift must be configured with start/end times
+- Trainees (if adding) must be registered in HR > Employee with skill code 'T'
+
+**Adding Trainees to Planned Work**:
+
+You can add trainees to existing planned work from the Plan tab:
+
+1. **Navigate to Plan Tab**:
+   - Go to **Production** > Your Stage/Shift
+   - Click on the **"Plan"** tab
+   - Select the date
+
+2. **Find the Planned Work**:
+   - Find the work group you want to add trainees to
+   - Works are grouped by work code
+
+3. **Click "Add Trainees" Button**:
+   - Click the **"Add Trainees"** button for the work group
+   - The Add Trainees modal opens
+
+4. **Select Trainees**:
+   - The system shows available trainees (employees with skill code 'T')
+   - Select up to 2 trainees (maximum limit)
+   - The system prevents selecting more than 2 trainees
+   - If 2 trainees already exist, you'll see a message: "Maximum of 2 trainees already planned for this work"
+
+5. **Provide Deviation Reason**:
+   - Enter a reason for adding trainees (required field)
+   - This is mandatory to track why trainees were added
+
+6. **Save**:
+   - Click **"Save"** button
+   - The system creates planning records for the trainees
+   - Trainees are linked to the same work with skill requirement 'T'
+
+**Important Notes**:
+- Maximum of 2 trainees per work (enforced by the system)
+- Trainees don't replace main workers - they are additional
+- You must provide a deviation reason when adding trainees
+- Trainees are shown in the plan with skill code 'T'
+- Trainees can be added to both draft and approved plans
 
 ---
 
@@ -655,6 +710,56 @@ Before reporting work, you need to record which employees actually attended:
    - Enter overtime hours
    - Save the record
 
+**Detailed Overtime Reporting**:
+
+Overtime can be reported from the Draft Report tab:
+
+1. **Navigate to Draft Report Tab**:
+   - Go to **Production** > Your Stage/Shift
+   - Click on the **"Draft Report"** tab
+   - Select the date
+
+2. **Check for Overtime**:
+   - The system automatically calculates if there's overtime based on:
+     - Shift hours
+     - Actual hours worked by employees
+     - Time worked beyond shift end time
+   - If overtime exists, the **"Report OT"** button becomes enabled
+   - The button shows "Calculating..." while the system checks
+
+3. **Click "Report OT" Button**:
+   - Click the **"Report OT"** button at the top of the Draft Report tab
+   - **Note**: This button is disabled if:
+     - No overtime exists
+     - Overtime is already reported
+     - Report is already submitted or approved
+
+4. **Review Overtime Details**:
+   - The system shows calculated overtime for all employees
+   - Overtime is calculated per employee based on:
+     - Actual work hours
+     - Shift end time
+     - Hours worked beyond shift hours
+
+5. **Confirm Overtime Report**:
+   - Review the overtime amounts
+   - The system automatically calculates overtime minutes and amounts
+   - Click **"Save"** or **"Confirm"** to record overtime
+   - Overtime is recorded in the reporting records
+
+**Important Notes**:
+- Overtime is calculated automatically based on shift hours and actual work time
+- Overtime must be reported before submitting the daily report
+- Once the report is submitted or approved, overtime cannot be modified
+- Overtime calculations consider shift breaks and actual work duration
+- The system validates that overtime is reasonable (not exceeding maximum limits)
+
+**Prerequisites**:
+- Employees must have recorded entry/exit times
+- Work must be reported with actual times
+- Shift must be configured with start/end times
+- Report must be in draft status
+
 #### Step 7.2: Report Work Completion (Draft Report)
 
 1. **Navigate to Plan Tab**:
@@ -715,12 +820,98 @@ Before reporting work, you need to record which employees actually attended:
    - Modify any details
    - Save changes
 
-#### Step 7.4: Submit Final Report
+#### Step 7.4: Report Unplanned Work
+
+**Purpose**: Report work that was completed but was not planned in advance. This creates both planning and reporting records for work that happened outside the normal planning process.
+
+**When to Use**:
+- Work was completed but wasn't planned beforehand
+- Emergency work or urgent tasks were performed
+- Work was done that wasn't in the original plan
+- You need to report work that doesn't have a planning record
+
+**Step-by-Step Instructions**:
+
+1. **Navigate to Draft Report Tab**:
+   - Go to **Production** > Your Stage/Shift
+   - Click on the **"Draft Report"** tab
+   - Select the date
+
+2. **Click "Report Unplanned Work" Button**:
+   - Find the **"Report Unplanned Work"** button at the top of the Draft Report tab
+   - Click it to open the Report Unplanned Work modal
+   - **Note**: This button is disabled if the report is already submitted or approved
+
+3. **Select Unplanned Work**:
+   - The modal shows a list of works that exist in the system but don't have planning records
+   - These are works that were never planned but need to be reported
+   - Scroll through the list or use search to find the work
+   - Click on a work to select it
+   - The selected work will be highlighted
+
+4. **Click "Report" Button**:
+   - After selecting a work, click the **"Report"** button
+   - This opens the Unplanned Work Report modal (similar to regular reporting)
+
+5. **Fill in Report Details**:
+   - **Work Details**: Pre-filled from the selected work
+   - **From Time**: Enter actual start time
+   - **To Time**: Enter actual end time
+   - **Hours Worked Today**: System calculates from times
+   - **Select Workers**: 
+     - Assign workers for each required skill competency
+     - Workers must have the required skills
+     - You can assign multiple workers if the work requires multiple skills
+   - **Lost Time** (if applicable): Time lost due to issues
+   - **Lost Time Reason**: Select reason from dropdown
+   - **Breakdown** (if applicable): Detailed breakdown of lost time by worker and reason
+   - **Notes**: Any additional comments
+
+6. **Review and Save**:
+   - Review all entered information
+   - Check for any warnings
+   - Click **"Save Report"** or **"Report"** button
+   - The system will:
+     - Create planning records for the unplanned work (marked as `report_unplanned_work = true`)
+     - Create reporting records for the work
+     - Link workers to the work
+     - Set appropriate statuses
+
+7. **Verify Report Created**:
+   - Go back to **"Draft Report"** tab
+   - Refresh the page
+   - You should see the unplanned work now listed in the draft reports
+   - The work will also appear in the **"Plan"** tab (since planning records were created)
+
+**Important Notes**:
+- Unplanned work reporting creates both planning and reporting records
+- The planning records are marked with `report_unplanned_work = true` to distinguish them from regular planned work
+- You can only report unplanned work before submitting the daily report
+- Once the report is submitted or approved, the "Report Unplanned Work" button is disabled
+- Unplanned work appears in both Plan and Report tabs after reporting
+- All validation rules apply (worker skills, time slots, etc.)
+
+**What Happens Behind the Scenes**:
+- Creates records in `prdn_work_planning` table with `report_unplanned_work = true`
+- Creates records in `prdn_work_reporting` table
+- Links workers via `prdn_planning_manpower` and `prdn_reporting_manpower` tables
+- Updates work status appropriately
+
+**Prerequisites**:
+- Work must exist in the Works tab (but not have planning records)
+- Workers must be registered in HR > Employee
+- Workers must have the required skills
+- Date must be selected
+- Report must not be submitted or approved yet
+
+---
+
+#### Step 7.5: Submit Final Report
 
 1. **Navigate to Draft Report Tab**:
    - Go to **"Draft Report"** tab
    - Review all reports
-   - Ensure all completed works are reported
+   - Ensure all completed works are reported (including unplanned work)
 
 2. **Click "Submit Report" Button**:
    - Find the **"Submit Report"** button (top right)
@@ -840,6 +1031,74 @@ You can report multiple works at once:
 - Click **"Generate Excel"** or **"Generate PDF"** to export
 - Click **"Report"** to report work completion
 - Click **"Cancel Work"** to cancel an approved work (requires reason)
+
+**Detailed Cancel Work Process**:
+
+1. **Navigate to Plan Tab**:
+   - Go to **Production** > Your Stage/Shift
+   - Click on the **"Plan"** tab
+   - Select the date
+   - You'll see all approved/submitted plans
+
+2. **Find Work to Cancel**:
+   - Scroll through planned works
+   - Find the work you want to cancel
+   - Works are grouped by work code
+   - Each work shows planned details
+
+3. **Click "Cancel" Button**:
+   - Find the **"Cancel"** button for the work you want to cancel
+   - **Note**: Cancel button is disabled if:
+     - Work is already cancelled
+     - Work has been reported (completed)
+   - Click the **"Cancel"** button
+
+4. **Enter Cancellation Reason**:
+   - A modal opens asking for cancellation reason
+   - **Reason is required** - you must provide a reason
+   - Enter a clear explanation, for example:
+     - "Work order cancelled by customer"
+     - "Material not available"
+     - "Work no longer required"
+     - "Stage change required"
+
+5. **Confirm Cancellation**:
+   - Review the cancellation reason
+   - Click **"Confirm"** or **"Cancel Work"** button
+   - A confirmation dialog appears showing:
+     - Number of work plans to be cancelled
+     - Warning that action cannot be reversed
+     - Cancellation reason
+   - Click **"Yes"** to confirm or **"No"** to cancel
+
+6. **Verify Cancellation**:
+   - Go back to Plan tab
+   - Refresh if needed
+   - The cancelled work should show:
+     - Status: "Cancelled"
+     - Cancellation reason visible
+     - Workers are freed from the assignment
+     - Work is no longer available for reporting
+
+**Important Notes**:
+- Cancellation is permanent and cannot be reversed
+- Once cancelled, work cannot be reported
+- Workers assigned to cancelled work are freed immediately
+- Cancellation reason is recorded for audit purposes
+- You can only cancel works that are approved/submitted but not yet reported
+- If work has multiple skill competencies, all are cancelled together
+
+**What Happens Behind the Scenes**:
+- Updates work status to "Cancelled" in `prdn_work_planning` table
+- Records cancellation reason
+- Frees worker assignments
+- Updates work order status if applicable
+- Creates audit trail of cancellation
+
+**Prerequisites**:
+- Work must be in "Approved" or "Submitted" status
+- Work must not be reported yet
+- User must have permission to cancel works
 
 #### Manpower Report Tab
 
@@ -1810,6 +2069,124 @@ EMP-002     | Jane Smith   | Worker   | PAINT | 01-01-2024| 20000    | 28000  | 
 - Production planning (all imported employees available)
 - System performance (large imports may take time)
 
+### 4. How to Bulk Update Employees
+
+**Purpose**: Update multiple employees at once using a CSV file. This is useful when you need to update common fields like salary, stage assignment, or active status for many employees.
+
+**When to Use**:
+- Multiple employees need salary updates
+- Bulk stage or shift reassignments
+- Updating active status for multiple employees
+- Changing employee categories in bulk
+- Any bulk update operation for employees
+
+**Step-by-Step Instructions**:
+
+1. **Navigate to Employee Management**:
+   - Go to **HR > Employee**
+   - View the employee list
+
+2. **Click "Bulk Update" Button**:
+   - Find the **"Bulk Update"** button (usually near "Import" button)
+   - Click it to open the Bulk Update modal
+
+3. **Download Template**:
+   - In the Bulk Update modal, click **"Download Template"** button
+   - A CSV file downloads containing all current employee data
+   - File name: Usually "employee_bulk_update_template.csv"
+
+4. **Open Template in Excel/CSV Editor**:
+   - Open the downloaded CSV file
+   - You'll see all employees with their current data
+   - **Important**: Do NOT modify:
+     - Employee ID (used to identify which employee to update)
+     - Column headers
+     - File structure
+   - **You CAN modify**:
+     - Employee Name
+     - Employee Category
+     - Skill Short
+     - Date of Joining
+     - Last Appraisal Date
+     - Basic DA
+     - Salary
+     - Stage
+     - Shift Code
+     - Active Status (Y/N)
+
+5. **Modify Employee Data**:
+   - Update only the fields you want to change
+   - Leave unchanged fields as they are
+   - **One row = One employee**
+   - Ensure data format matches:
+     - Dates: DD-MM-YYYY or YYYY-MM-DD format
+     - Numbers: No currency symbols, just digits
+     - Active Status: "Y" or "N" (or "true"/"false")
+     - Stage/Shift: Must match existing codes
+
+6. **Save the CSV File**:
+   - Save the file after making changes
+   - Keep it in CSV format (.csv)
+   - Remember where you saved it
+
+7. **Upload the File**:
+   - Go back to the Bulk Update modal
+   - Click **"Choose File"** or **"Browse"** button
+   - Navigate to your saved CSV file
+   - Select the file
+   - Click **"Upload"** or **"Bulk Update"** button
+
+8. **Review Update Results**:
+   - System processes the file
+   - You'll see update results:
+     - **Success Count**: Number of employees updated successfully
+     - **Error Count**: Number of rows with errors
+     - **Skipped Count**: Number of rows skipped (no changes detected)
+     - **Error Details**: List of errors (if any)
+   - Errors might include:
+     - Invalid Employee ID (employee doesn't exist)
+     - Invalid Skill Short
+     - Invalid Stage Code
+     - Invalid Shift Code
+     - Data format errors
+     - Missing required fields
+
+9. **Verify Updates**:
+   - Go back to employee list
+   - Refresh the page
+   - Verify that employees show updated information
+   - Check that changes are correct
+
+**Important Notes**:
+- Bulk update only updates fields that are changed in the CSV
+- Employee ID is used to identify which employee to update
+- If Employee ID doesn't exist, that row is skipped with an error
+- All validation rules apply (same as individual edit)
+- Large bulk updates may take time to process
+- It's recommended to test with a small file first
+
+**What Happens Behind the Scenes**:
+- Reads CSV file row by row
+- Identifies employee by Employee ID
+- Updates only changed fields
+- Validates all data before updating
+- Creates audit trail of changes
+- Updates related records if needed (e.g., production planning if stage changed)
+
+**Prerequisites**:
+- Employees must exist in the system (for Employee ID matching)
+- CSV file must be properly formatted
+- Modified values must be valid (skills, stages, shifts must exist)
+- User must have permission to edit employees
+
+**Areas Affected**:
+- Employee records (updated fields)
+- Production planning (if stage/shift changed)
+- Future work assignments
+- Active status affects availability
+
+---
+
 #### Shift Master
 
 **Path**: `/hr/shift-master`
@@ -2414,6 +2791,23 @@ Manages document sharing and submission for work orders and stages.
 - Submit documents for specific stages
 - View document history
 - Delete documents
+- Support for 7 document types (see Document Types below)
+
+**Document Types**:
+
+The system supports the following document types:
+
+1. **Bill of Material (BOM)** - Multi-file (multiple documents allowed per work order)
+2. **Cutting Profile** - Multi-file (multiple documents allowed per work order)
+3. **General** - Multi-file (multiple documents allowed per work order)
+4. **Material Checklist** - Single-file (only one document allowed per work order)
+5. **Platform Drawing** - Single-file (only one document allowed per work order)
+6. **Seat Layout** - Single-file (only one document allowed per work order)
+7. **Structure Drawing** - Single-file (only one document allowed per work order)
+
+**Note**: 
+- **Single-file types** (Material Checklist, Platform Drawing, Seat Layout, Structure Drawing): Only one document can be uploaded per work order. If you upload a new document, it will replace the existing one.
+- **Multi-file types** (Bill of Material, Cutting Profile, General): Multiple documents can be uploaded per work order. Each upload creates a new document entry.
 
 **How to Use**:
 
@@ -2452,29 +2846,47 @@ Manages document sharing and submission for work orders and stages.
 
 #### View Documents
 
-**Path**: `/rnd/view-documents/[stageCode]`
+**Path**: `/rnd/view-documents/[documentType]`
 
 **Description**: 
-View documents submitted for specific stages.
+View documents submitted for specific document types. Each document type has its own dedicated page.
+
+**Available Document Type Pages**:
+- `/rnd/view-documents/bom` - Bill of Material documents
+- `/rnd/view-documents/cutting-profile` - Cutting Profile documents
+- `/rnd/view-documents/general` - General documents
+- `/rnd/view-documents/material-checklist` - Material Checklist documents
+- `/rnd/view-documents/platform-drawing` - Platform Drawing documents
+- `/rnd/view-documents/seat-layout` - Seat Layout documents
+- `/rnd/view-documents/structure-drawing` - Structure Drawing documents
 
 **Features**:
-- View documents by stage
+- View documents by document type
 - Filter by work order
 - Download documents
 - View document details
+- View document submission history
 
 **How to Use**:
 
-1. **Viewing Documents**:
+1. **Viewing Documents by Type**:
    - Navigate to R&D > View Documents
-   - Select a stage
-   - View documents for that stage
-   - Filter by work order if needed
-   - Download documents
+   - Select the document type you want to view (e.g., "Bill of Material", "Structure Drawing")
+   - View all documents of that type
+   - Use the search box to filter by work order number
+   - Click on a work order to expand and see all documents
+   - Click "Download" to download a document
+   - Click "View History" to see document submission history
+
+2. **Viewing Document History**:
+   - Click "View History" button for a work order
+   - See all previous versions and submissions
+   - View submission notes and timestamps
+   - See who submitted each version
 
 **Prerequisites**:
 - Documents must be submitted in Share Documents
-- Stage must be selected
+- Document type must be selected
 
 **Areas Affected**:
 - None (read-only view)

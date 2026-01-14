@@ -1,6 +1,7 @@
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
   import Button from '$lib/components/common/Button.svelte';
+  import SortableHeader from '$lib/components/common/SortableHeader.svelte';
   import { formatTime, formatLostTimeDetails } from '../utils/timeUtils';
   import { groupReportWorks } from '../utils/planTabUtils';
   import { filterGroupedWorksBySearch } from '../utils/productionTabSearchUtils';
@@ -9,6 +10,7 @@
   import { calculateOvertime } from '$lib/services/overtimeCalculationService';
   import type { WorkerOvertime } from '$lib/services/overtimeCalculationService';
   import { supabase } from '$lib/supabaseClient';
+  import { sortTableData, handleSortClick, type SortConfig } from '$lib/utils/tableSorting';
 
   export let draftReportData: any[] = [];
   export let draftManpowerReportData: any[] = [];
@@ -25,12 +27,44 @@
   let hasOvertime = false;
   let otReported = false;
   let searchTerm = '';
+  let sortConfig: SortConfig = { column: null, direction: null };
 
   // Combine draft work reports (manpower reports have different structure, handle separately if needed)
   $: allDraftReports = draftReportData || [];
   $: groupedReportWorks = groupReportWorks(allDraftReports);
   $: filteredGroupedReportWorks = filterGroupedWorksBySearch(groupedReportWorks, searchTerm);
+  
+  // Convert grouped works to array and sort
+  $: groupedWorksArray = Object.values(filteredGroupedReportWorks);
+  $: sortedGroupedWorks = (() => {
+    if (!sortConfig.column || !sortConfig.direction) {
+      return groupedWorksArray;
+    }
+    
+    // Create enriched groups with sortable fields
+    const enriched = groupedWorksArray.map(group => ({
+      ...group,
+      sortable_woNo: group.woNo || '',
+      sortable_pwoNo: group.pwoNo || '',
+      sortable_workCode: group.workCode || '',
+      sortable_workName: group.workName || '',
+      sortable_fromTime: group.items?.[0]?.from_time || '',
+      sortable_toTime: group.items?.[0]?.to_time || '',
+      sortable_hoursWorked: group.items?.[0]?.hours_worked_today || 0,
+      sortable_totalHoursWorked: (group.items?.[0]?.hours_worked_till_date || 0) + (group.items?.[0]?.hours_worked_today || 0),
+      sortable_otHours: (group.items?.[0]?.overtime_minutes || 0) / 60,
+      sortable_ltHours: (group.items?.[0]?.lt_minutes_total || 0) / 60,
+      sortable_reportedOn: group.items?.[0]?.created_dt || ''
+    }));
+    
+    return sortTableData(enriched, sortConfig);
+  })();
+  
   $: totalReports = allDraftReports.length;
+
+  function handleSort(column: string) {
+    sortConfig = handleSortClick(column, sortConfig);
+  }
 
   $: selectedDateDisplay = (() => {
     if (!selectedDate) return '';
@@ -120,6 +154,10 @@
 
   function handleOvertimeModalClose() {
     showOvertimeModal = false;
+  }
+
+  function handleReportUnplannedWork() {
+    dispatch('reportUnplannedWork');
   }
 
   async function checkOvertime() {
@@ -412,6 +450,14 @@
         {isLoading ? 'Loading...' : 'Refresh'}
       </Button>
       <Button 
+        variant="secondary" 
+        size="sm" 
+        on:click={handleReportUnplannedWork}
+        disabled={isLoading || isPendingApproval || isApproved}
+      >
+        Report Unplanned Work
+      </Button>
+      <Button 
         variant="warning" 
         size="sm" 
         on:click={handleReportOT}
@@ -498,27 +544,27 @@
       <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700" style="table-layout: fixed; width: 100%;">
         <thead class="theme-bg-secondary">
           <tr>
-            <th class="px-4 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider" style="width: 100px;">Work Order</th>
-            <th class="px-4 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider" style="width: 120px;">PWO Number</th>
-            <th class="px-4 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider" style="width: 120px;">Work Code</th>
-            <th class="px-4 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider" style="width: 250px;">Work Name</th>
+            <SortableHeader column="sortable_woNo" {sortConfig} onSort={handleSort} label="Work Order" headerClass="w-[100px]" />
+            <SortableHeader column="sortable_pwoNo" {sortConfig} onSort={handleSort} label="PWO Number" headerClass="w-[120px]" />
+            <SortableHeader column="sortable_workCode" {sortConfig} onSort={handleSort} label="Work Code" headerClass="w-[120px]" />
+            <SortableHeader column="sortable_workName" {sortConfig} onSort={handleSort} label="Work Name" headerClass="w-[250px]" />
             <th class="px-4 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider" style="width: 180px;">Skills Required</th>
             <th class="px-4 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider" style="width: 120px;">Standard Time</th>
             <th class="px-4 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider" style="width: 120px;">Status</th>
             <th class="px-4 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider" style="width: 180px;">Worker (Skill)</th>
             <th class="px-4 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider" style="width: 140px;">Time Worked Till Date</th>
-            <th class="px-4 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider" style="width: 100px;">From Time</th>
-            <th class="px-4 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider" style="width: 100px;">To Time</th>
-            <th class="px-4 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider" style="width: 140px;">Hours Worked</th>
-            <th class="px-4 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider" style="width: 140px;">Total Hours Worked</th>
-            <th class="px-4 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider" style="width: 120px;">OT Hours</th>
-            <th class="px-4 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider" style="width: 120px;">Lost Time</th>
+            <SortableHeader column="sortable_fromTime" {sortConfig} onSort={handleSort} label="From Time" headerClass="w-[100px]" />
+            <SortableHeader column="sortable_toTime" {sortConfig} onSort={handleSort} label="To Time" headerClass="w-[100px]" />
+            <SortableHeader column="sortable_hoursWorked" {sortConfig} onSort={handleSort} label="Hours Worked" headerClass="w-[140px]" />
+            <SortableHeader column="sortable_totalHoursWorked" {sortConfig} onSort={handleSort} label="Total Hours Worked" headerClass="w-[140px]" />
+            <SortableHeader column="sortable_otHours" {sortConfig} onSort={handleSort} label="OT Hours" headerClass="w-[120px]" />
+            <SortableHeader column="sortable_ltHours" {sortConfig} onSort={handleSort} label="Lost Time" headerClass="w-[120px]" />
             <th class="px-4 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider" style="width: 200px;">Reason</th>
-            <th class="px-4 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider" style="width: 150px;">Reported On</th>
+            <SortableHeader column="sortable_reportedOn" {sortConfig} onSort={handleSort} label="Reported On" headerClass="w-[150px]" />
           </tr>
         </thead>
         <tbody class="theme-bg-primary divide-y divide-gray-200 dark:divide-gray-700">
-          {#each Object.values(filteredGroupedReportWorks) as group (group.workCode)}
+          {#each sortedGroupedWorks as group (group.workCode)}
             {@const typedGroup = group}
             <!-- Single Row per Work -->
             <tr class="hover:theme-bg-secondary transition-colors" 

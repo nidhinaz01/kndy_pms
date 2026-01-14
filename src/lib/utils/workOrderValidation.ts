@@ -25,6 +25,7 @@ const VALIDATION_SCHEMA: Record<number, ValidationRule[]> = {
     {
       field: 'wo_date',
       required: true,
+      message: 'Date WO placed is required',
       custom: (data) => {
         if (!data.wo_date) return null; // required check handles this
         const selectedDate = new Date(data.wo_date);
@@ -124,6 +125,7 @@ export function validateSection(section: number, formData: WorkOrderFormData): V
   const errors: Record<string, string> = {};
 
   for (const rule of rules) {
+    // Check custom validation first
     if (rule.custom) {
       const result = rule.custom(formData);
       if (result) {
@@ -132,8 +134,13 @@ export function validateSection(section: number, formData: WorkOrderFormData): V
         } else {
           errors[result.field] = result.message;
         }
+        // If custom validation found an error, skip required check
+        continue;
       }
-    } else if (rule.required) {
+    }
+    
+    // Check required validation (even if custom function exists and returned null)
+    if (rule.required) {
       const value = (formData as any)[rule.field];
       if (value === null || value === undefined || value === '') {
         errors[rule.field] = rule.message || `${rule.field} is required`;

@@ -28,6 +28,8 @@ export interface MultiSkillReportFormData {
   completionStatus: 'C' | 'NC';
   skillEmployees: { [skillId: string]: string };
   deviations: { [skillId: string]: SkillDeviation };
+  selectedTrainees: Array<{ emp_id: string; emp_name: string; skill_short: string }>;
+  traineeDeviationReason: string;
   ltMinutes: number;
   ltReasonId: string;
   ltComments: string;
@@ -50,6 +52,8 @@ export const initialMultiSkillReportFormData: MultiSkillReportFormData = {
   completionStatus: 'C',
   skillEmployees: {},
   deviations: {},
+  selectedTrainees: [],
+  traineeDeviationReason: '',
   ltMinutes: 0,
   ltReasonId: '',
   ltComments: '',

@@ -36,21 +36,25 @@
   let standardWorksData: any[] = [];
   let showAddWorkModal = false;
   let showImportWorkModal = false;
+  let standardWorksLoaded = false;
 
   // Derivative Works state
   let derivativeWorksData: any[] = [];
   let showAddDerivativeWorkModal = false;
   let showImportDerivativeWorkModal = false;
+  let derivativeWorksLoaded = false;
 
   // Work-Skill Mapping state
   let workSkillMappingData: any[] = [];
   let showAddWorkSkillMappingModal = false;
   let showImportWorkSkillMappingModal = false;
+  let workSkillMappingLoaded = false;
 
   // Time Standards state
   let timeStandardsData: any[] = [];
   let showAddTimeStandardModal = false;
   let showImportTimeStandardModal = false;
+  let timeStandardsLoaded = false;
 
   // Event handlers
   function handleRowSelect(row: any) {
@@ -78,29 +82,36 @@
     showImportWorkModal = false;
   }
 
-  async function loadStandardWorks() {
+  async function loadStandardWorks(forceReload = false) {
+    // Use cached data if available and not forcing reload
+    if (standardWorksLoaded && !forceReload) {
+      return;
+    }
+    
     isTableLoading = true;
     try {
       standardWorksData = await fetchAllStdWorkDetails();
+      standardWorksLoaded = true;
     } catch (error) {
       standardWorksData = [];
+      standardWorksLoaded = false;
     } finally {
       isTableLoading = false;
     }
   }
 
   async function handleWorkAdded() {
-    await loadStandardWorks();
+    await loadStandardWorks(true); // Force reload after add
     showAddWorkModal = false;
     alert('Work detail added successfully!');
   }
 
   async function handleStatusUpdated() {
-    await loadStandardWorks();
+    await loadStandardWorks(true); // Force reload after status update
   }
 
   async function handleImportSuccess() {
-    await loadStandardWorks();
+    await loadStandardWorks(true); // Force reload after import
     showImportWorkModal = false;
   }
 
@@ -121,30 +132,37 @@
     showImportDerivativeWorkModal = false;
   }
 
-  async function loadDerivativeWorks() {
+  async function loadDerivativeWorks(forceReload = false) {
+    // Use cached data if available and not forcing reload
+    if (derivativeWorksLoaded && !forceReload) {
+      return;
+    }
+    
     isTableLoading = true;
     try {
       const { fetchAllStdWorkTypeDetails } = await import('$lib/api/stdWorkTypeDetails');
       derivativeWorksData = await fetchAllStdWorkTypeDetails();
+      derivativeWorksLoaded = true;
     } catch (error) {
       derivativeWorksData = [];
+      derivativeWorksLoaded = false;
     } finally {
       isTableLoading = false;
     }
   }
 
   async function handleDerivativeWorkAdded() {
-    await loadDerivativeWorks();
+    await loadDerivativeWorks(true); // Force reload after add
     showAddDerivativeWorkModal = false;
     alert('Derivative work added successfully!');
   }
 
   async function handleDerivativeWorkStatusUpdated() {
-    await loadDerivativeWorks();
+    await loadDerivativeWorks(true); // Force reload after status update
   }
 
   async function handleDerivativeWorkImportSuccess() {
-    await loadDerivativeWorks();
+    await loadDerivativeWorks(true); // Force reload after import
     showImportDerivativeWorkModal = false;
   }
 
@@ -165,30 +183,37 @@
     showImportWorkSkillMappingModal = false;
   }
 
-  async function loadWorkSkillMappings() {
+  async function loadWorkSkillMappings(forceReload = false) {
+    // Use cached data if available and not forcing reload
+    if (workSkillMappingLoaded && !forceReload) {
+      return;
+    }
+    
     isTableLoading = true;
     try {
       const { fetchAllWorkSkillMappings } = await import('$lib/api/stdWorkSkillMapping');
       workSkillMappingData = await fetchAllWorkSkillMappings();
+      workSkillMappingLoaded = true;
     } catch (error) {
       workSkillMappingData = [];
+      workSkillMappingLoaded = false;
     } finally {
       isTableLoading = false;
     }
   }
 
   async function handleWorkSkillMappingAdded() {
-    await loadWorkSkillMappings();
+    await loadWorkSkillMappings(true); // Force reload after add
     showAddWorkSkillMappingModal = false;
     alert('Work-skill mapping added successfully!');
   }
 
   async function handleWorkSkillMappingStatusUpdated() {
-    await loadWorkSkillMappings();
+    await loadWorkSkillMappings(true); // Force reload after status update
   }
 
   async function handleWorkSkillMappingImportSuccess() {
-    await loadWorkSkillMappings();
+    await loadWorkSkillMappings(true); // Force reload after import
     showImportWorkSkillMappingModal = false;
   }
 
@@ -209,30 +234,37 @@
     showImportTimeStandardModal = false;
   }
 
-  async function loadTimeStandards() {
+  async function loadTimeStandards(forceReload = false) {
+    // Use cached data if available and not forcing reload
+    if (timeStandardsLoaded && !forceReload) {
+      return;
+    }
+    
     isTableLoading = true;
     try {
       const { fetchAllSkillTimeStandards } = await import('$lib/api/stdSkillTimeStandards');
       timeStandardsData = await fetchAllSkillTimeStandards();
+      timeStandardsLoaded = true;
     } catch (error) {
       timeStandardsData = [];
+      timeStandardsLoaded = false;
     } finally {
       isTableLoading = false;
     }
   }
 
   async function handleTimeStandardAdded() {
-    await loadTimeStandards();
+    await loadTimeStandards(true); // Force reload after add
     showAddTimeStandardModal = false;
     alert('Time standard added successfully!');
   }
 
   async function handleTimeStandardStatusUpdated() {
-    await loadTimeStandards();
+    await loadTimeStandards(true); // Force reload after status update
   }
 
   async function handleTimeStandardImportSuccess() {
-    await loadTimeStandards();
+    await loadTimeStandards(true); // Force reload after import
     showImportTimeStandardModal = false;
   }
 

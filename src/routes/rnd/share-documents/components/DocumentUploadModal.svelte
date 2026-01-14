@@ -1,40 +1,47 @@
 <script lang="ts">
-  import { onMount, createEventDispatcher } from 'svelte';
+  import { onMount, createEventDispatcher, tick } from 'svelte';
   import Button from '$lib/components/common/Button.svelte';
-  import { X, Upload, FileText, History, Download, Trash2 } from 'lucide-svelte';
+  import { X, Upload, FileText, History, Download, Trash2, XCircle, CheckCircle, Clock } from 'lucide-svelte';
   import { formatDate, formatDateTime } from '../utils/dateUtils';
   import { 
-    uploadStageDocument, 
-    uploadGeneralDocument, 
+    uploadDocument,
     deleteDocument,
     getDocumentHistory,
     getDocumentDownloadUrl,
-    getWorkOrderDocuments,
-    type DocumentSubmission
+    getDocumentStatuses,
+    markAsNotRequired,
+    removeNotRequiredStatus,
+    type DocumentSubmission,
+    type DocumentStatus
   } from '../services/documentUploadService';
+  import { ALL_DOCUMENT_TYPES, isSingleFileType, isMultiFileType } from '../constants/documentTypes';
   import DocumentHistoryModal from './DocumentHistoryModal.svelte';
 
   export let showModal = false;
-  export let workOrder: any = null; // DocumentRelease type
+  export let workOrder: any = null; // Work order with sales_order_id
 
   let isLoading = false;
   let error = '';
   let successMessage = '';
   let hasLoaded = false;
   
-  // Document data
-  let stageDocuments = new Map<string, DocumentSubmission>();
-  let generalDocuments: DocumentSubmission[] = [];
+  // Document statuses
+  let documentStatuses: DocumentStatus[] = [];
   
   // Upload states
-  let uploadingStage: string | null = null;
-  let uploadingGeneral = false;
+  let uploadingType: string | null = null;
   let fileInputs: Record<string, HTMLInputElement> = {};
-  let generalFileInput: HTMLInputElement | null = null;
+  let multiFileInputs: Record<string, HTMLInputElement> = {};
+  
+  // Not Required modal state
+  let showNotRequiredModal = false;
+  let selectedTypeForNotRequired = '';
+  let notRequiredComments = '';
+  let savingNotRequired = false;
   
   // History modal
   let showHistoryModal = false;
-  let selectedStageForHistory = '';
+  let selectedTypeForHistory = '';
   let documentHistory: DocumentSubmission[] = [];
 
   $: if (showModal && workOrder && !hasLoaded) {
@@ -46,8 +53,9 @@
     hasLoaded = false;
     error = '';
     successMessage = '';
-    stageDocuments.clear();
-    generalDocuments = [];
+    documentStatuses = [];
+    notRequiredComments = '';
+    selectedTypeForNotRequired = '';
   }
 
   async function loadDocuments() {
@@ -56,9 +64,14 @@
     try {
       isLoading = true;
       error = '';
-      const { stageDocuments: stageDocs, generalDocuments: generalDocs } = await getWorkOrderDocuments(workOrder.sales_order_id);
-      stageDocuments = stageDocs;
-      generalDocuments = generalDocs;
+      const statuses = await getDocumentStatuses(workOrder.sales_order_id);
+      // Force reactivity by clearing first, then assigning new array
+      // This ensures Svelte detects the change
+      documentStatuses = [];
+      await tick();
+      documentStatuses = statuses;
+      await tick();
+      console.log('Loaded document statuses:', documentStatuses);
     } catch (err) {
       error = `Failed to load documents: ${(err as Error).message}`;
       console.error('Error loading documents:', err);
@@ -67,15 +80,30 @@
     }
   }
 
-  async function handleStageUpload(stageCode: string) {
-    const fileInput = fileInputs[stageCode];
+  // Create a reactive map for quick lookups - this will update when documentStatuses changes
+  $: statusMap = new Map(documentStatuses.map(s => [s.document_type, s]));
+  
+  // Create a reactive object that maps document types to their statuses
+  // This ensures the template re-renders when documentStatuses changes
+  $: statusesByType = Object.fromEntries(
+    documentStatuses.map(s => [s.document_type, s])
+  );
+  
+  // Create a reactive key that changes when statuses change (for #key block)
+  $: statusesKey = documentStatuses.map(s => `${s.document_type}:${s.status}:${s.document_id || ''}`).join('|');
+
+  async function handleUpload(documentType: string, isMultiFile: boolean = false) {
+    const fileInput = isMultiFile ? multiFileInputs[documentType] : fileInputs[documentType];
     if (!fileInput || !fileInput.files || fileInput.files.length === 0) return;
     
-    const file = fileInput.files[0];
-    if (!file) return;
+    const files = Array.from(fileInput.files);
+    if (files.length === 0) return;
+    
+    // For single-file types, only take first file
+    const filesToUpload = isMultiFile ? files : [files[0]];
     
     try {
-      uploadingStage = stageCode;
+      uploadingType = documentType;
       error = '';
       successMessage = '';
       
@@ -84,47 +112,24 @@
         throw new Error('User not logged in');
       }
       
-      await uploadStageDocument(workOrder.sales_order_id, stageCode, file, username);
-      
-      successMessage = `Document uploaded successfully for ${stageCode}`;
-      fileInput.value = ''; // Reset input
-      
-      // Reload documents
-      await loadDocuments();
-      
-      // Dispatch event to parent to refresh list
-      dispatch('document-uploaded');
-    } catch (err) {
-      error = `Failed to upload document: ${(err as Error).message}`;
-      console.error('Error uploading document:', err);
-    } finally {
-      uploadingStage = null;
-    }
-  }
-
-  async function handleGeneralUpload() {
-    if (!generalFileInput || !generalFileInput.files || generalFileInput.files.length === 0) return;
-    
-    const file = generalFileInput.files[0];
-    if (!file) return;
-    
-    try {
-      uploadingGeneral = true;
-      error = '';
-      successMessage = '';
-      
-      const username = typeof window !== 'undefined' ? localStorage.getItem('username') : null;
-      if (!username) {
-        throw new Error('User not logged in');
+      // Upload all files
+      for (const file of filesToUpload) {
+        await uploadDocument(workOrder.sales_order_id, documentType, file, username);
       }
       
-      await uploadGeneralDocument(workOrder.sales_order_id, file, username);
+      // Reset input
+      fileInput.value = '';
       
-      successMessage = 'General document uploaded successfully';
-      generalFileInput.value = ''; // Reset input
+      // Small delay to ensure database transaction is fully committed
+      await new Promise(resolve => setTimeout(resolve, 200));
       
-      // Reload documents
+      // Reload documents - this will update the UI
       await loadDocuments();
+      
+      // Wait for Svelte to process the DOM updates
+      await tick();
+      
+      successMessage = `Document${filesToUpload.length > 1 ? 's' : ''} uploaded successfully for ${documentType}`;
       
       // Dispatch event to parent
       dispatch('document-uploaded');
@@ -132,11 +137,11 @@
       error = `Failed to upload document: ${(err as Error).message}`;
       console.error('Error uploading document:', err);
     } finally {
-      uploadingGeneral = false;
+      uploadingType = null;
     }
   }
 
-  async function handleDeleteDocument(documentId: number, isGeneral: boolean = false) {
+  async function handleDeleteDocument(documentId: number) {
     if (!confirm('Are you sure you want to delete this document? This action cannot be undone.')) {
       return;
     }
@@ -153,10 +158,14 @@
       
       await deleteDocument(documentId, username);
       
-      successMessage = 'Document deleted successfully';
+      // Small delay to ensure database transaction is committed
+      await new Promise(resolve => setTimeout(resolve, 200));
       
       // Reload documents
       await loadDocuments();
+      await tick();
+      
+      successMessage = 'Document deleted successfully';
       
       // Dispatch event to parent
       dispatch('document-deleted');
@@ -168,11 +177,98 @@
     }
   }
 
-  async function handleViewHistory(stageCode: string) {
+  function handleMarkNotRequired(documentType: string) {
+    selectedTypeForNotRequired = documentType;
+    notRequiredComments = '';
+    showNotRequiredModal = true;
+  }
+
+  async function saveNotRequired() {
+    if (!notRequiredComments.trim()) {
+      error = 'Comments are required when marking document as not required';
+      return;
+    }
+    
+    try {
+      savingNotRequired = true;
+      error = '';
+      successMessage = '';
+      
+      const username = typeof window !== 'undefined' ? localStorage.getItem('username') : null;
+      if (!username) {
+        throw new Error('User not logged in');
+      }
+      
+      await markAsNotRequired(
+        workOrder.sales_order_id,
+        selectedTypeForNotRequired,
+        notRequiredComments,
+        username
+      );
+      
+      // Small delay to ensure database transaction is committed
+      await new Promise(resolve => setTimeout(resolve, 200));
+      
+      // Reload documents
+      await loadDocuments();
+      await tick();
+      
+      successMessage = `${selectedTypeForNotRequired} marked as not required`;
+      showNotRequiredModal = false;
+      notRequiredComments = '';
+      selectedTypeForNotRequired = '';
+      
+      // Dispatch event to parent
+      dispatch('document-uploaded');
+    } catch (err) {
+      error = `Failed to mark as not required: ${(err as Error).message}`;
+      console.error('Error marking as not required:', err);
+    } finally {
+      savingNotRequired = false;
+    }
+  }
+
+  async function handleRemoveNotRequired(documentType: string) {
+    if (!confirm('Remove "Not Required" status? You will be able to upload documents for this type.')) {
+      return;
+    }
+    
     try {
       isLoading = true;
-      documentHistory = await getDocumentHistory(workOrder.sales_order_id, stageCode);
-      selectedStageForHistory = stageCode;
+      error = '';
+      successMessage = '';
+      
+      const username = typeof window !== 'undefined' ? localStorage.getItem('username') : null;
+      if (!username) {
+        throw new Error('User not logged in');
+      }
+      
+      await removeNotRequiredStatus(workOrder.sales_order_id, documentType, username);
+      
+      // Small delay to ensure database transaction is committed
+      await new Promise(resolve => setTimeout(resolve, 200));
+      
+      // Reload documents
+      await loadDocuments();
+      await tick();
+      
+      successMessage = `"Not Required" status removed for ${documentType}`;
+      
+      // Dispatch event to parent
+      dispatch('document-uploaded');
+    } catch (err) {
+      error = `Failed to remove not required status: ${(err as Error).message}`;
+      console.error('Error removing not required status:', err);
+    } finally {
+      isLoading = false;
+    }
+  }
+
+  async function handleViewHistory(documentType: string) {
+    try {
+      isLoading = true;
+      documentHistory = await getDocumentHistory(workOrder.sales_order_id, documentType);
+      selectedTypeForHistory = documentType;
       showHistoryModal = true;
     } catch (err) {
       error = `Failed to load document history: ${(err as Error).message}`;
@@ -196,8 +292,9 @@
     showModal = false;
     error = '';
     successMessage = '';
-    stageDocuments.clear();
-    generalDocuments = [];
+    documentStatuses = [];
+    notRequiredComments = '';
+    selectedTypeForNotRequired = '';
     dispatch('close');
   }
 
@@ -206,7 +303,7 @@
 
 {#if showModal}
   <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4 overflow-y-auto">
-    <div class="theme-bg-primary rounded-lg shadow-xl p-6 w-full max-w-4xl my-8 max-h-[90vh] overflow-y-auto">
+    <div class="theme-bg-primary rounded-lg shadow-xl p-6 w-full max-w-5xl my-8 max-h-[90vh] overflow-y-auto">
       <!-- Header -->
       <div class="flex items-center justify-between mb-6">
         <h2 class="text-2xl font-semibold theme-text-primary">
@@ -257,186 +354,250 @@
         </div>
       {/if}
 
-      {#if isLoading && !stageDocuments.size && generalDocuments.length === 0}
+      {#if isLoading && documentStatuses.length === 0}
         <div class="flex items-center justify-center py-8">
           <div class="animate-spin rounded-full h-8 w-8 border-b-2 theme-accent"></div>
         </div>
       {:else}
-        <!-- Stage-Specific Documents -->
-        <div class="mb-6">
-          <h3 class="text-lg font-semibold theme-text-primary mb-4">Stage-Specific Documents</h3>
+        <!-- Document Types -->
+        <!-- Use key block to force re-render when documentStatuses changes -->
+        {#key statusesKey}
           <div class="space-y-4">
-            {#each workOrder?.stages || [] as stage}
-              {@const doc = stageDocuments.get(stage.stage_code)}
+            {#each ALL_DOCUMENT_TYPES as documentType}
+              {@const isSingle = isSingleFileType(documentType)}
+              {@const isMulti = isMultiFileType(documentType)}
+              
               <div class="p-4 border theme-border rounded-lg">
                 <div class="flex items-center justify-between mb-3">
-                  <div>
-                    <h4 class="font-medium theme-text-primary">{stage.stage_code}</h4>
-                    <p class="text-sm theme-text-secondary">
-                      Planned: {formatDate(stage.planned_date)}
-                      {#if stage.actual_date}
-                        | Submitted: {formatDate(stage.actual_date)}
-                      {/if}
-                    </p>
-                  </div>
-                  <div class="flex items-center gap-2">
-                    {#if doc}
-                      <span class="px-2 py-1 bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200 rounded-full text-xs">
-                        ✅ Uploaded (v{doc.revision_number})
-                      </span>
-                    {:else}
-                      <span class="px-2 py-1 bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200 rounded-full text-xs">
-                        ❌ Not Uploaded
-                      </span>
-                    {/if}
-                  </div>
+                  <div class="flex items-center gap-3">
+                    <h4 class="font-medium theme-text-primary text-lg">{documentType}</h4>
+                    <!-- Access status directly - this is reactive -->
+                    {#if statusesByType[documentType]?.status === 'uploaded'}
+                    <span class="px-2 py-1 bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200 rounded-full text-xs flex items-center gap-1">
+                      <CheckCircle class="w-3 h-3" />
+                      Uploaded
+                    </span>
+                  {:else if statusesByType[documentType]?.status === 'not_required'}
+                    <span class="px-2 py-1 bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-200 rounded-full text-xs flex items-center gap-1">
+                      <XCircle class="w-3 h-3" />
+                      Not Required
+                    </span>
+                  {:else}
+                    <span class="px-2 py-1 bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200 rounded-full text-xs flex items-center gap-1">
+                      <Clock class="w-3 h-3" />
+                      Pending
+                    </span>
+                  {/if}
+                  {#if isSingle}
+                    <span class="text-xs theme-text-secondary">(Single file)</span>
+                  {:else}
+                    <span class="text-xs theme-text-secondary">(Multiple files)</span>
+                  {/if}
                 </div>
+              </div>
 
-                {#if doc}
-                  <!-- Document Info -->
-                  <div class="mb-3 p-3 theme-bg-secondary rounded">
-                    <div class="flex items-center justify-between">
-                      <div class="flex items-center gap-2">
-                        <FileText class="w-4 h-4 theme-text-primary" />
-                        <span class="theme-text-primary text-sm">{doc.document_name}</span>
-                        {#if doc.revision_number > 1}
-                          <span class="text-xs theme-text-secondary">(Revised {doc.revision_number - 1} time{doc.revision_number - 1 > 1 ? 's' : ''})</span>
-                        {/if}
+              {#if statusesByType[documentType]?.status === 'uploaded' && statusesByType[documentType]?.documents && statusesByType[documentType].documents.length > 0}
+                {@const status = statusesByType[documentType]}
+                <!-- Uploaded Documents -->
+                {#if isSingle}
+                  <!-- Single file - show current document -->
+                  {@const doc = status.documents[0]}
+                  {#if doc}
+                    <div class="mb-3 p-3 theme-bg-secondary rounded">
+                      <div class="flex items-center justify-between">
+                        <div class="flex items-center gap-2">
+                          <FileText class="w-4 h-4 theme-text-primary" />
+                          <span class="theme-text-primary text-sm">{doc.document_name}</span>
+                          {#if doc.revision_number > 1}
+                            <span class="text-xs theme-text-secondary">(v{doc.revision_number})</span>
+                          {/if}
+                        </div>
+                        <div class="flex items-center gap-2">
+                          <button
+                            on:click={() => handleDownload(doc)}
+                            class="p-1 hover:theme-bg-tertiary rounded transition-colors"
+                            title="Download"
+                          >
+                            <Download class="w-4 h-4 theme-text-primary" />
+                          </button>
+                          <button
+                            on:click={() => handleViewHistory(documentType)}
+                            class="p-1 hover:theme-bg-tertiary rounded transition-colors"
+                            title="View History"
+                          >
+                            <History class="w-4 h-4 theme-text-primary" />
+                          </button>
+                          <button
+                            on:click={() => handleDeleteDocument(doc.id)}
+                            class="p-1 hover:theme-bg-tertiary rounded transition-colors text-red-600"
+                            title="Delete"
+                            disabled={isLoading}
+                          >
+                            <Trash2 class="w-4 h-4" />
+                          </button>
+                        </div>
                       </div>
-                      <div class="flex items-center gap-2">
-                        <button
-                          on:click={() => handleDownload(doc)}
-                          class="p-1 hover:theme-bg-tertiary rounded transition-colors"
-                          title="Download"
-                        >
-                          <Download class="w-4 h-4 theme-text-primary" />
-                        </button>
-                        <button
-                          on:click={() => handleViewHistory(stage.stage_code)}
-                          class="p-1 hover:theme-bg-tertiary rounded transition-colors"
-                          title="View History"
-                        >
-                          <History class="w-4 h-4 theme-text-primary" />
-                        </button>
-                        <button
-                          on:click={() => handleDeleteDocument(doc.id, false)}
-                          class="p-1 hover:theme-bg-tertiary rounded transition-colors text-red-600"
-                          title="Delete"
-                          disabled={isLoading}
-                        >
-                          <Trash2 class="w-4 h-4" />
-                        </button>
-                      </div>
+                      <p class="text-xs theme-text-secondary mt-1">
+                        Uploaded: {formatDateTime(doc.submission_date)} by {doc.uploaded_by}
+                      </p>
                     </div>
-                    <p class="text-xs theme-text-secondary mt-1">
-                      Uploaded: {formatDateTime(doc.submission_date)}
-                    </p>
+                  {/if}
+                {:else if isMulti}
+                  <!-- Multi-file - show all documents -->
+                  <div class="mb-3 space-y-2">
+                    {#each status.documents as doc}
+                      <div class="p-3 theme-bg-secondary rounded flex items-center justify-between">
+                        <div class="flex items-center gap-2">
+                          <FileText class="w-4 h-4 theme-text-primary" />
+                          <span class="theme-text-primary text-sm">{doc.document_name}</span>
+                          <span class="text-xs theme-text-secondary">
+                            ({formatDateTime(doc.submission_date)})
+                          </span>
+                        </div>
+                        <div class="flex items-center gap-2">
+                          <button
+                            on:click={() => handleDownload(doc)}
+                            class="p-1 hover:theme-bg-tertiary rounded transition-colors"
+                            title="Download"
+                          >
+                            <Download class="w-4 h-4 theme-text-primary" />
+                          </button>
+                          <button
+                            on:click={() => handleDeleteDocument(doc.id)}
+                            class="p-1 hover:theme-bg-tertiary rounded transition-colors text-red-600"
+                            title="Delete"
+                            disabled={isLoading}
+                          >
+                            <Trash2 class="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                    {/each}
                   </div>
                 {/if}
 
-                <!-- Upload/Replace Button -->
+                <!-- Replace/Add More Button -->
                 <div class="flex items-center gap-2">
-                  <input
-                    type="file"
-                    bind:this={fileInputs[stage.stage_code]}
-                    accept=".pdf,application/pdf"
-                    class="hidden"
-                    on:change={() => handleStageUpload(stage.stage_code)}
-                    id="file-{stage.stage_code}"
-                  />
+                  {#if isSingle}
+                    <input
+                      type="file"
+                      bind:this={fileInputs[documentType]}
+                      accept=".pdf,application/pdf"
+                      class="hidden"
+                      on:change={() => handleUpload(documentType, false)}
+                      id="file-{documentType}"
+                    />
+                  {:else}
+                    <input
+                      type="file"
+                      bind:this={multiFileInputs[documentType]}
+                      accept=".pdf,application/pdf"
+                      class="hidden"
+                      on:change={() => handleUpload(documentType, true)}
+                      multiple={true}
+                      id="file-multi-{documentType}"
+                    />
+                  {/if}
                   <Button
-                    variant={doc ? "secondary" : "primary"}
+                    variant="secondary"
                     size="sm"
-                    disabled={uploadingStage === stage.stage_code || isLoading}
-                    fullWidth={true}
-                    on:click={() => fileInputs[stage.stage_code]?.click()}
+                    disabled={uploadingType === documentType || isLoading}
+                    on:click={() => {
+                      const input = isSingle ? fileInputs[documentType] : multiFileInputs[documentType];
+                      input?.click();
+                    }}
                   >
-                    {#if uploadingStage === stage.stage_code}
+                    {#if uploadingType === documentType}
                       <Upload class="w-4 h-4 mr-2 animate-pulse inline" />
                       Uploading...
-                    {:else if doc}
+                    {:else if isSingle}
                       <Upload class="w-4 h-4 mr-2 inline" />
                       Replace Document
                     {:else}
                       <Upload class="w-4 h-4 mr-2 inline" />
-                      Upload Document
+                      Add More Documents
                     {/if}
                   </Button>
                 </div>
-              </div>
-            {/each}
-          </div>
-        </div>
-
-        <!-- General Documents -->
-        <div class="mb-6">
-          <div class="flex items-center justify-between mb-4">
-            <h3 class="text-lg font-semibold theme-text-primary">General Documents</h3>
-            <div>
-              <input
-                type="file"
-                bind:this={generalFileInput}
-                accept=".pdf,application/pdf"
-                class="hidden"
-                on:change={handleGeneralUpload}
-                id="general-file-input"
-              />
-              <Button
-                variant="primary"
-                size="sm"
-                disabled={uploadingGeneral || isLoading}
-                on:click={() => generalFileInput?.click()}
-              >
-                {#if uploadingGeneral}
-                  <Upload class="w-4 h-4 mr-2 animate-pulse inline" />
-                  Uploading...
-                {:else}
-                  <Upload class="w-4 h-4 mr-2 inline" />
-                  Add General Document
-                {/if}
-              </Button>
-            </div>
-          </div>
-
-          {#if generalDocuments.length > 0}
-            <div class="space-y-2">
-              {#each generalDocuments as doc}
-                <div class="p-3 border theme-border rounded-lg flex items-center justify-between">
-                  <div class="flex items-center gap-2">
-                    <FileText class="w-4 h-4 theme-text-primary" />
-                    <span class="theme-text-primary text-sm">{doc.document_name}</span>
-                    <span class="text-xs theme-text-secondary">
-                      ({formatDateTime(doc.submission_date)})
-                    </span>
-                  </div>
-                  <div class="flex items-center gap-2">
-                    <button
-                      on:click={() => handleDownload(doc)}
-                      class="p-1 hover:theme-bg-tertiary rounded transition-colors"
-                      title="Download"
-                    >
-                      <Download class="w-4 h-4 theme-text-primary" />
-                    </button>
-                    <button
-                      on:click={() => handleDeleteDocument(doc.id, true)}
-                      class="p-1 hover:theme-bg-tertiary rounded transition-colors text-red-600"
-                      title="Delete"
-                      disabled={isLoading}
-                    >
-                      <Trash2 class="w-4 h-4" />
-                    </button>
-                  </div>
+              {:else if statusesByType[documentType]?.status === 'not_required'}
+                {@const status = statusesByType[documentType]}
+                <!-- Not Required -->
+                <div class="mb-3 p-3 theme-bg-secondary rounded">
+                  <p class="text-sm theme-text-primary mb-2">
+                    <strong>Comments:</strong> {status.not_required_comments}
+                  </p>
+                  <p class="text-xs theme-text-secondary">
+                    Marked by {status.not_required_marked_by} on {formatDateTime(status.not_required_marked_dt || '')}
+                  </p>
                 </div>
-              {/each}
+                <div class="flex items-center gap-2">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    disabled={isLoading}
+                    on:click={() => handleRemoveNotRequired(documentType)}
+                  >
+                    Remove "Not Required"
+                  </Button>
+                </div>
+              {:else}
+                <!-- Pending -->
+                <div class="flex items-center gap-2">
+                  {#if isSingle}
+                    <input
+                      type="file"
+                      bind:this={fileInputs[documentType]}
+                      accept=".pdf,application/pdf"
+                      class="hidden"
+                      on:change={() => handleUpload(documentType, false)}
+                      id="file-{documentType}"
+                    />
+                  {:else}
+                    <input
+                      type="file"
+                      bind:this={multiFileInputs[documentType]}
+                      accept=".pdf,application/pdf"
+                      class="hidden"
+                      on:change={() => handleUpload(documentType, true)}
+                      multiple={true}
+                      id="file-multi-{documentType}"
+                    />
+                  {/if}
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    disabled={uploadingType === documentType || isLoading}
+                    on:click={() => {
+                      const input = isSingle ? fileInputs[documentType] : multiFileInputs[documentType];
+                      input?.click();
+                    }}
+                  >
+                    {#if uploadingType === documentType}
+                      <Upload class="w-4 h-4 mr-2 animate-pulse inline" />
+                      Uploading...
+                    {:else}
+                      <Upload class="w-4 h-4 mr-2 inline" />
+                      Upload Document{isMulti ? 's' : ''}
+                    {/if}
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    disabled={isLoading}
+                    on:click={() => handleMarkNotRequired(documentType)}
+                  >
+                    Mark as Not Required
+                  </Button>
+                </div>
+              {/if}
             </div>
-          {:else}
-            <p class="text-sm theme-text-secondary italic">No general documents uploaded</p>
-          {/if}
-        </div>
+          {/each}
+          </div>
+        {/key}
       {/if}
 
       <!-- Footer -->
-      <div class="flex justify-end pt-4 border-t theme-border">
+      <div class="flex justify-end pt-4 border-t theme-border mt-6">
         <Button
           variant="secondary"
           on:click={handleClose}
@@ -449,13 +610,72 @@
   </div>
 {/if}
 
+<!-- Not Required Modal -->
+{#if showNotRequiredModal}
+  <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60] p-4">
+    <div class="theme-bg-primary rounded-lg shadow-xl p-6 w-full max-w-md">
+      <h3 class="text-xl font-semibold theme-text-primary mb-4">
+        Mark as Not Required
+      </h3>
+      <p class="text-sm theme-text-secondary mb-4">
+        Document Type: <strong>{selectedTypeForNotRequired}</strong>
+      </p>
+      <div class="mb-4">
+        <label class="block text-sm font-medium theme-text-primary mb-2">
+          Comments <span class="text-red-500">*</span>
+        </label>
+        <textarea
+          bind:value={notRequiredComments}
+          placeholder="Please provide a reason why this document is not required..."
+          class="w-full px-3 py-2 theme-bg-secondary theme-text-primary theme-border border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+          rows="4"
+        ></textarea>
+      </div>
+      <div class="flex justify-end gap-2">
+        <Button
+          variant="secondary"
+          on:click={() => {
+            showNotRequiredModal = false;
+            notRequiredComments = '';
+            selectedTypeForNotRequired = '';
+          }}
+          disabled={savingNotRequired}
+        >
+          Cancel
+        </Button>
+        <Button
+          variant="primary"
+          on:click={saveNotRequired}
+          disabled={savingNotRequired || !notRequiredComments.trim()}
+        >
+          {savingNotRequired ? 'Saving...' : 'Mark as Not Required'}
+        </Button>
+      </div>
+    </div>
+  </div>
+{/if}
+
 <!-- Document History Modal -->
-<DocumentHistoryModal
-  bind:showModal={showHistoryModal}
-  stageCode={selectedStageForHistory}
-  workOrderNo={workOrder?.wo_no || ''}
-  {documentHistory}
-  on:download={(e) => handleDownload(e.detail)}
-  on:close={() => showHistoryModal = false}
-/>
+{#if showHistoryModal}
+  <DocumentHistoryModal
+    bind:showModal={showHistoryModal}
+    documentType={selectedTypeForHistory}
+    workOrderNo={workOrder?.wo_no || ''}
+    {documentHistory}
+    on:download={(e) => handleDownload(e.detail)}
+    on:close={() => showHistoryModal = false}
+  />
+{/if}
+
+
+
+
+
+
+
+
+
+
+
+
 

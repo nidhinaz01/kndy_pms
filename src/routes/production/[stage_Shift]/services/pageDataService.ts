@@ -1,6 +1,7 @@
 import { loadStageWorkOrders, loadStageWorks, loadStagePlannedWorks, loadStageManpower, loadShiftBreakTimes } from '../../services/stageProductionService';
 import { getDraftWorkPlans, getDraftManpowerPlans, getDraftWorkReports, getDraftManpowerReports } from '$lib/api/production/planningReportingService';
 import { supabase } from '$lib/supabaseClient';
+import { submissionStatusCache } from './submissionStatusCache';
 
 /**
  * Load work orders data
@@ -183,6 +184,7 @@ export async function loadManpowerReportData(stageCode: string, shiftCode: strin
 
 /**
  * Get planning submission status for a stage and date
+ * Optimized: Uses cache to avoid duplicate queries
  */
 export async function getPlanningSubmissionStatus(stageCode: string, planningDate: string) {
   try {
@@ -193,6 +195,12 @@ export async function getPlanningSubmissionStatus(stageCode: string, planningDat
       dateStr = (planningDate as Date).toISOString().split('T')[0];
     } else {
       dateStr = String(planningDate || '').split('T')[0];
+    }
+
+    // Check cache first
+    const cached = submissionStatusCache.get(stageCode, dateStr, 'planning');
+    if (cached !== null) {
+      return cached;
     }
 
     // Get the latest submission (highest version number)
@@ -211,6 +219,11 @@ export async function getPlanningSubmissionStatus(stageCode: string, planningDat
       return null;
     }
 
+    const result = data || null;
+    
+    // Cache the result
+    submissionStatusCache.set(stageCode, dateStr, 'planning', result);
+
     if (data) {
       console.log(`📋 Latest submission for ${stageCode} on ${dateStr}:`, {
         id: data.id,
@@ -219,7 +232,7 @@ export async function getPlanningSubmissionStatus(stageCode: string, planningDat
       });
     }
 
-    return data || null;
+    return result;
   } catch (error) {
     console.error('Error getting planning submission status:', error);
     return null;
@@ -229,6 +242,7 @@ export async function getPlanningSubmissionStatus(stageCode: string, planningDat
 /**
  * Get reporting submission status for a stage and date
  * Returns the latest version (highest version number)
+ * Optimized: Uses cache to avoid duplicate queries
  */
 export async function getReportingSubmissionStatus(stageCode: string, reportingDate: string) {
   try {
@@ -239,6 +253,12 @@ export async function getReportingSubmissionStatus(stageCode: string, reportingD
       dateStr = (reportingDate as Date).toISOString().split('T')[0];
     } else {
       dateStr = String(reportingDate || '').split('T')[0];
+    }
+
+    // Check cache first
+    const cached = submissionStatusCache.get(stageCode, dateStr, 'reporting');
+    if (cached !== null) {
+      return cached;
     }
 
     // Get the latest version (max version number) for this stage-date
@@ -257,11 +277,29 @@ export async function getReportingSubmissionStatus(stageCode: string, reportingD
       return null;
     }
 
-    return data || null;
+    const result = data || null;
+    
+    // Cache the result
+    submissionStatusCache.set(stageCode, dateStr, 'reporting', result);
+
+    return result;
   } catch (error) {
     console.error('Error getting reporting submission status:', error);
     return null;
   }
+}
+
+/**
+ * Batch fetch both planning and reporting submission statuses in parallel
+ * Optimized: Fetches both in parallel and uses cache
+ */
+export async function getBothSubmissionStatuses(stageCode: string, date: string) {
+  const [planningStatus, reportingStatus] = await Promise.all([
+    getPlanningSubmissionStatus(stageCode, date),
+    getReportingSubmissionStatus(stageCode, date)
+  ]);
+  
+  return { planningStatus, reportingStatus };
 }
 
 /**

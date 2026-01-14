@@ -93,12 +93,37 @@ export interface WorkOrderSummary {
   customer_name: string | null;
 }
 
+export interface FetchWorkOrderOptions {
+  search?: string;
+  dateRange?: { start: string; end: string };
+  page?: number;
+  pageSize?: number;
+}
+
+export interface WorkOrderSummaryResponse {
+  data: WorkOrderSummary[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+}
+
 /**
- * Fetch all work order summaries for the data table
+ * Fetch work order summaries for the data table with search, pagination, and date filtering
  */
-export async function fetchWorkOrderSummaries(): Promise<WorkOrderSummary[]> {
+export async function fetchWorkOrderSummaries(
+  options: FetchWorkOrderOptions = {}
+): Promise<WorkOrderSummaryResponse> {
   try {
-    const { data, error } = await supabase
+    const {
+      search = '',
+      dateRange,
+      page = 1,
+      pageSize = 50
+    } = options;
+
+    // Build base query
+    let query = supabase
       .from('prdn_wo_details')
       .select(`
         id,
@@ -118,15 +143,56 @@ export async function fetchWorkOrderSummaries(): Promise<WorkOrderSummary[]> {
         wo_prdn_end,
         wo_delivery,
         customer_name
-      `)
-      .order('wo_date', { ascending: false });
+      `, { count: 'exact' });
+
+    // Apply date range filter if provided
+    if (dateRange?.start && dateRange?.end) {
+      query = query
+        .gte('wo_date', dateRange.start)
+        .lte('wo_date', dateRange.end);
+    }
+
+    // Apply search filter if provided
+    if (search && search.trim() !== '') {
+      const searchTerm = search.trim();
+      // Search across multiple columns using OR conditions
+      // Supabase .or() format: "column1.ilike.*value*,column2.ilike.*value*"
+      // The * wildcards are handled by ilike operator
+      query = query.or(
+        `wo_no.ilike.%${searchTerm}%,` +
+        `pwo_no.ilike.%${searchTerm}%,` +
+        `wo_type.ilike.%${searchTerm}%,` +
+        `wo_model.ilike.%${searchTerm}%,` +
+        `wo_chassis.ilike.%${searchTerm}%,` +
+        `customer_name.ilike.%${searchTerm}%`
+      );
+    }
+
+    // Apply ordering
+    query = query.order('wo_date', { ascending: false });
+
+    // Apply pagination
+    const from = (page - 1) * pageSize;
+    const to = from + pageSize - 1;
+    query = query.range(from, to);
+
+    const { data, error, count } = await query;
 
     if (error) {
       console.error('Error fetching work order summaries:', error);
       throw error;
     }
 
-    return data || [];
+    const total = count || 0;
+    const totalPages = Math.ceil(total / pageSize);
+
+    return {
+      data: data || [],
+      total,
+      page,
+      pageSize,
+      totalPages
+    };
   } catch (error) {
     console.error('Error in fetchWorkOrderSummaries:', error);
     throw error;

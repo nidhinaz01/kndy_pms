@@ -187,35 +187,71 @@ export async function fetchProductionEmployees(
     }
 
     // Get shift break times per shift for calculating planned hours
-    // Create a map: shift_code -> break times
+    // Optimized: Batch fetch all shift IDs and break times in parallel instead of sequential loop
     const shiftBreakTimesMap = new Map<string, Array<{ start_time: string; end_time: string }>>();
     
     // Get unique shift codes from employees
     const uniqueShiftCodes = [...new Set(employees.map(emp => emp.shift_code).filter(Boolean))];
-      
-    // Fetch break times for each unique shift
-    for (const shiftCode of uniqueShiftCodes) {
-      const { data: shiftData } = await supabase
+    
+    if (uniqueShiftCodes.length > 0) {
+      // Batch fetch all shift IDs in one query
+      const { data: allShiftData, error: shiftError } = await supabase
         .from('hr_shift_master')
-        .select('shift_id')
-        .eq('shift_code', shiftCode)
+        .select('shift_id, shift_code')
+        .in('shift_code', uniqueShiftCodes)
         .eq('is_active', true)
-        .eq('is_deleted', false)
-        .maybeSingle();
+        .eq('is_deleted', false);
       
-      if (shiftData?.shift_id) {
-        const { data: breaksData } = await supabase
-          .from('hr_shift_break_master')
-          .select('start_time, end_time')
-          .eq('shift_id', shiftData.shift_id)
-          .eq('is_active', true)
-          .eq('is_deleted', false)
-          .order('start_time', { ascending: true });
+      if (shiftError) {
+        console.error('Error fetching shift data:', shiftError);
+      } else if (allShiftData && allShiftData.length > 0) {
+        // Create map: shift_code -> shift_id
+        const shiftCodeToIdMap = new Map<string, number>();
+        allShiftData.forEach(shift => {
+          if (shift.shift_code && shift.shift_id) {
+            shiftCodeToIdMap.set(shift.shift_code, shift.shift_id);
+          }
+        });
         
-        if (breaksData) {
-          shiftBreakTimesMap.set(shiftCode, breaksData);
+        // Batch fetch all break times in one query
+        const shiftIds = Array.from(shiftCodeToIdMap.values());
+        if (shiftIds.length > 0) {
+          const { data: allBreaksData, error: breaksError } = await supabase
+            .from('hr_shift_break_master')
+            .select('shift_id, start_time, end_time')
+            .in('shift_id', shiftIds)
+            .eq('is_active', true)
+            .eq('is_deleted', false)
+            .order('shift_id', { ascending: true })
+            .order('start_time', { ascending: true });
+          
+          if (breaksError) {
+            console.error('Error fetching break times:', breaksError);
+          } else if (allBreaksData) {
+            // Group break times by shift_id, then map to shift_code
+            const breaksByShiftId = new Map<number, Array<{ start_time: string; end_time: string }>>();
+            allBreaksData.forEach(breakTime => {
+              if (breakTime.shift_id) {
+                if (!breaksByShiftId.has(breakTime.shift_id)) {
+                  breaksByShiftId.set(breakTime.shift_id, []);
+                }
+                breaksByShiftId.get(breakTime.shift_id)!.push({
+                  start_time: breakTime.start_time,
+                  end_time: breakTime.end_time
+                });
+              }
+            });
+            
+            // Map break times to shift codes
+            shiftCodeToIdMap.forEach((shiftId, shiftCode) => {
+              const breaks = breaksByShiftId.get(shiftId);
+              if (breaks && breaks.length > 0) {
+                shiftBreakTimesMap.set(shiftCode, breaks);
+              }
+            });
+          }
+        }
       }
-    }
     }
     
     // Create a map of worker_id -> shift_code for quick lookup
@@ -263,33 +299,39 @@ export async function fetchProductionEmployees(
       if (mode === 'planning') {
         // For planning mode, query prdn_planning_manpower with planning_date
         // Include draft, pending_approval, and approved statuses (all should show attendance)
+        // Note: Removed stage_code filter to support employees reassigned between stages
+        // Attendance is per employee per date, not per stage
         attendanceQuery = supabase
           .from('prdn_planning_manpower')
           .select('emp_id, attendance_status')
           .in('emp_id', employeeIds)
           .eq('planning_date', date)
-          .eq('stage_code', stage)
+          // .eq('stage_code', stage) // Removed: attendance is per employee, not per stage
           .in('status', ['draft', 'pending_approval', 'approved'])
           .eq('is_deleted', false);
       } else if (mode === 'reporting') {
         // For reporting mode, query prdn_reporting_manpower with reporting_date
         // Include draft, pending_approval, and approved statuses (all should show attendance)
+        // Note: Removed stage_code filter to support employees reassigned between stages
+        // Attendance is per employee per date, not per stage
         attendanceQuery = supabase
           .from('prdn_reporting_manpower')
           .select('emp_id, attendance_status')
           .in('emp_id', employeeIds)
           .eq('reporting_date', date)
-          .eq('stage_code', stage)
+          // .eq('stage_code', stage) // Removed: attendance is per employee, not per stage
           .in('status', ['draft', 'pending_approval', 'approved'])
           .eq('is_deleted', false);
       } else {
         // 'current' mode - use hr_attendance
+        // Note: Removed stage_code filter to support employees reassigned between stages
+        // Attendance is per employee per date, not per stage
         attendanceQuery = supabase
           .from('hr_attendance')
           .select('emp_id, attendance_status')
           .in('emp_id', employeeIds)
           .eq('attendance_date', date)
-          .eq('stage_code', stage)
+          // .eq('stage_code', stage) // Removed: attendance is per employee, not per stage
           .eq('is_deleted', false);
       }
 
@@ -298,7 +340,23 @@ export async function fetchProductionEmployees(
       if (attendanceError) {
         console.error('Error fetching attendance data:', attendanceError);
       } else {
-        attendanceData = attendanceDataResult || [];
+        // Handle potential duplicate attendance records (if employee was marked in multiple stages)
+        // Take the most recent one, or first one if created_dt is not available
+        const attendanceMap = new Map<string, any>();
+        (attendanceDataResult || []).forEach(record => {
+          if (record.emp_id) {
+            const existing = attendanceMap.get(record.emp_id);
+            if (!existing) {
+              attendanceMap.set(record.emp_id, record);
+            } else if (record.created_dt && existing.created_dt) {
+              // If both have created_dt, take the most recent
+              if (new Date(record.created_dt) > new Date(existing.created_dt)) {
+                attendanceMap.set(record.emp_id, record);
+              }
+            }
+          }
+        });
+        attendanceData = Array.from(attendanceMap.values());
       }
 
       // Query 6: Stage reassignment data

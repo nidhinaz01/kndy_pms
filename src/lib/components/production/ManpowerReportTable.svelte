@@ -8,6 +8,7 @@
   import { filterEmployees, calculateTotals, isReportingAttendanceLocked } from '$lib/utils/manpowerTableUtils';
   import type { ManpowerTableFilters, ManpowerTableState } from '$lib/types/manpowerTable';
   import { initialManpowerTableFilters, initialManpowerTableState } from '$lib/types/manpowerTable';
+  import { sortTableData, handleSortClick, type SortConfig } from '$lib/utils/tableSorting';
   import ManpowerTableHeader from './manpower-table/ManpowerTableHeader.svelte';
   import ManpowerTableFiltersComponent from './manpower-table/ManpowerTableFilters.svelte';
   import ManpowerReportTableBody from './manpower-report-table/ManpowerReportTableBody.svelte';
@@ -23,14 +24,13 @@
 
   let filters: ManpowerTableFilters = { ...initialManpowerTableFilters };
   let state: ManpowerTableState = { ...initialManpowerTableState };
+  let sortConfig: SortConfig = { column: 'emp_name', direction: 'asc' }; // Default sort by name
 
   $: filteredData = filterEmployees(data, filters);
-  // Sort by employee name in ascending order
-  $: sortedFilteredData = [...filteredData].sort((a, b) => {
-    const nameA = (a.emp_name || '').toLowerCase();
-    const nameB = (b.emp_name || '').toLowerCase();
-    return nameA.localeCompare(nameB);
-  });
+  // Apply sorting
+  $: sortedFilteredData = sortConfig.column && sortConfig.direction 
+    ? sortTableData(filteredData, sortConfig)
+    : filteredData;
   $: totals = calculateTotals(sortedFilteredData);
   $: selectedCount = state.selectedEmployees.size;
   $: eligibleEmployeesCount = sortedFilteredData.filter(emp => !isReportingAttendanceLocked(emp, reportingSubmissionStatus)).length;
@@ -46,6 +46,10 @@
 
   function handleClearFilters() {
     filters = { ...initialManpowerTableFilters };
+  }
+
+  function handleSort(column: string) {
+    sortConfig = handleSortClick(column, sortConfig);
   }
 
   function handleToggleFilters() {
@@ -229,6 +233,8 @@
           filteredData={sortedFilteredData}
           {data}
           selectedEmployees={state.selectedEmployees}
+          {sortConfig}
+          onSort={handleSort}
           {reportingSubmissionStatus}
           onToggleSelection={toggleEmployeeSelection}
           onAttendanceToggle={handleAttendanceToggle}

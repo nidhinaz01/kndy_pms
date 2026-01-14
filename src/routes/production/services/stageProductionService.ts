@@ -198,7 +198,7 @@ export async function loadStageWorkOrders(
     console.log(`🔍 Loading work orders for ${stageCode} on date: ${date}`);
     
     // Get all prdn_dates records for the stage (both entry and exit)
-    const { data: allDates, error: datesError } = await supabase
+    const { data: stageDates, error: datesError } = await supabase
       .from('prdn_dates')
       .select(`
         *,
@@ -217,6 +217,38 @@ export async function loadStageWorkOrders(
       console.error('Error loading work orders data:', datesError);
       throw datesError;
     }
+
+    // Get unique sales_order_ids from stage dates
+    const salesOrderIds = [...new Set((stageDates || []).map(d => d.sales_order_id))];
+
+    // Fetch rnd_documents dates for these work orders (stage_code = null)
+    let rndDocumentsDates: any[] = [];
+    if (salesOrderIds.length > 0) {
+      const { data: rndDates, error: rndError } = await supabase
+        .from('prdn_dates')
+        .select(`
+          *,
+          prdn_wo_details!inner(
+            id,
+            wo_no,
+            wo_model,
+            customer_name,
+            pwo_no
+          )
+        `)
+        .eq('date_type', 'rnd_documents')
+        .is('stage_code', null)
+        .in('sales_order_id', salesOrderIds);
+
+      if (rndError) {
+        console.warn('Error loading rnd_documents dates:', rndError);
+      } else {
+        rndDocumentsDates = rndDates || [];
+      }
+    }
+
+    // Combine stage dates and rnd_documents dates
+    const allDates = [...(stageDates || []), ...rndDocumentsDates];
 
     // Group dates by sales_order_id to get complete work order information
     const workOrderMap = new Map();
@@ -261,9 +293,9 @@ export async function loadStageWorkOrders(
     const workOrdersArray = Array.from(workOrderMap.values());
     
     // Fetch actual start dates from work reporting for all work orders
-    const salesOrderIds = workOrdersArray.map(wo => wo.sales_order_id);
+    const workOrderIds = workOrdersArray.map(wo => wo.sales_order_id);
     
-    if (salesOrderIds.length > 0) {
+    if (workOrderIds.length > 0) {
       const { data: reportingData, error: reportingError } = await supabase
         .from('prdn_work_reporting')
         .select(`
@@ -275,7 +307,7 @@ export async function loadStageWorkOrders(
           )
         `)
         .eq('prdn_work_planning.stage_code', stageCode)
-        .in('prdn_work_planning.wo_details_id', salesOrderIds)
+        .in('prdn_work_planning.wo_details_id', workOrderIds)
         .order('from_date', { ascending: true })
         .order('from_time', { ascending: true })
         .limit(1);

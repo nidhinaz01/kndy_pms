@@ -1,7 +1,9 @@
 <script lang="ts">
   import WorksTableRow from './WorksTableRow.svelte';
+  import SortableHeader from '$lib/components/common/SortableHeader.svelte';
   import { getWorkId } from '$lib/utils/worksTableUtils';
   import type { WorkPlanningStatus, WorkStatus } from '$lib/types/worksTable';
+  import type { SortConfig } from '$lib/utils/tableSorting';
 
   export let filteredData: any[] = [];
   export let isLoading: boolean = false;
@@ -10,6 +12,8 @@
   export let workStatus: { [key: string]: WorkStatus };
   export let filters: any;
   export let stageCode: string = '';
+  export let sortConfig: SortConfig = { column: null, direction: null };
+  export let onSort: (column: string) => void = () => {};
   export let onToggleSelection: (work: any) => void = () => {};
   export let onPlanWork: (work: any) => void = () => {};
   export let onViewWork: (work: any) => void = () => {};
@@ -38,39 +42,21 @@
         }}
       />
     </th>
-    <th class="px-6 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider">
-      WO Details ID
-    </th>
-    <th class="px-6 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider">
-      Work Order Number
-    </th>
-    <th class="px-6 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider">
-      Pre-Work Order Number
-    </th>
-    <th class="px-6 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider">
-      Vehicle Model
-    </th>
-    <th class="px-6 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider">
-      Work Code
-    </th>
-    <th class="px-6 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider">
-      Work Name
-    </th>
+    <SortableHeader column="wo_details_id" {sortConfig} {onSort} label="WO Details ID" />
+    <SortableHeader column="wo_no" {sortConfig} {onSort} label="Work Order Number" />
+    <SortableHeader column="pwo_no" {sortConfig} {onSort} label="Pre-Work Order Number" />
+    <SortableHeader column="wo_model" {sortConfig} {onSort} label="Vehicle Model" />
+    <SortableHeader column="work_code" {sortConfig} {onSort} label="Work Code" />
+    <SortableHeader column="work_name" {sortConfig} {onSort} label="Work Name" />
     <th class="px-6 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider">
       Status
     </th>
     <th class="px-6 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider">
       Required Skills
     </th>
-    <th class="px-6 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider">
-      Duration
-    </th>
-    <th class="px-6 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider">
-      Time Taken
-    </th>
-    <th class="px-6 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider">
-      Remaining Time
-    </th>
+    <SortableHeader column="duration" {sortConfig} {onSort} label="Duration" />
+    <SortableHeader column="time_taken" {sortConfig} {onSort} label="Time Taken" />
+    <SortableHeader column="remaining_time" {sortConfig} {onSort} label="Remaining Time" />
     <th class="px-6 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider">
       Actions
     </th>

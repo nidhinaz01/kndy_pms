@@ -1,11 +1,13 @@
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
   import Button from '$lib/components/common/Button.svelte';
+  import SortableHeader from '$lib/components/common/SortableHeader.svelte';
   import { formatTime, calculateBreakTimeInRange } from '../utils/timeUtils';
   import { groupPlannedWorks } from '../utils/planTabUtils';
   import { filterGroupedWorksBySearch } from '../utils/productionTabSearchUtils';
   import PlanHistoryModal from './PlanHistoryModal.svelte';
   import { supabase } from '$lib/supabaseClient';
+  import { sortTableData, handleSortClick, type SortConfig } from '$lib/utils/tableSorting';
 
   export let draftPlanData: any[] = [];
   export let draftManpowerPlanData: any[] = []; // For external reference only (not used in this component yet)
@@ -25,13 +27,43 @@
   let showHistoryModal = false;
   let hasRejectedSubmission = false; // Track if there's a previous rejected submission
   let searchTerm = '';
+  let sortConfig: SortConfig = { column: null, direction: null };
 
   // Combine draft work plans and manpower plans (only work plans for now, as manpower plans have different structure)
   $: allDraftPlans = draftPlanData || [];
   $: groupedPlannedWorks = groupPlannedWorks(allDraftPlans);
   $: filteredGroupedPlannedWorks = filterGroupedWorksBySearch(groupedPlannedWorks, searchTerm);
+  
+  // Convert grouped works to array and sort
+  $: groupedWorksArray = Object.values(filteredGroupedPlannedWorks);
+  $: sortedGroupedWorks = (() => {
+    if (!sortConfig.column || !sortConfig.direction) {
+      return groupedWorksArray;
+    }
+    
+    // Create enriched groups with sortable fields
+    const enriched = groupedWorksArray.map(group => ({
+      ...group,
+      sortable_woNo: group.woNo || '',
+      sortable_pwoNo: group.pwoNo || '',
+      sortable_workCode: group.workCode || '',
+      sortable_workName: group.workName || '',
+      sortable_fromTime: group.items?.[0]?.from_time || '',
+      sortable_toTime: group.items?.[0]?.to_time || '',
+      sortable_plannedHours: group.items?.[0]?.planned_hours || 0,
+      sortable_timeWorkedTillDate: group.items?.[0]?.time_worked_till_date || 0,
+      sortable_remainingTime: group.items?.[0]?.remainingTimeMinutes || 0
+    }));
+    
+    return sortTableData(enriched, sortConfig);
+  })();
+  
   // Count unique works (by work code), not individual skill competencies
-  $: totalPlans = Object.keys(filteredGroupedPlannedWorks).length;
+  $: totalPlans = sortedGroupedWorks.length;
+
+  function handleSort(column: string) {
+    sortConfig = handleSortClick(column, sortConfig);
+  }
   
 
   $: selectedDateDisplay = (() => {
@@ -274,24 +306,24 @@
         <thead class="theme-bg-secondary">
           <tr>
             <th class="px-6 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider">Select</th>
-            <th class="px-6 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider">Work Order</th>
-            <th class="px-6 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider">PWO Number</th>
-            <th class="px-6 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider">Work Code</th>
-            <th class="px-6 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider" style="max-width: 200px; width: 200px;">Work Name</th>
+            <SortableHeader column="sortable_woNo" {sortConfig} onSort={handleSort} label="Work Order" />
+            <SortableHeader column="sortable_pwoNo" {sortConfig} onSort={handleSort} label="PWO Number" />
+            <SortableHeader column="sortable_workCode" {sortConfig} onSort={handleSort} label="Work Code" />
+            <SortableHeader column="sortable_workName" {sortConfig} onSort={handleSort} label="Work Name" headerClass="max-w-[200px] w-[200px]" />
             <th class="px-6 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider">Skills Required</th>
             <th class="px-6 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider">Standard Time</th>
             <th class="px-6 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider">Status</th>
             <th class="px-6 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider">Worker (Skill)</th>
-            <th class="px-6 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider">From Time</th>
-            <th class="px-6 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider">To Time</th>
-            <th class="px-6 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider">Planned Hours</th>
-            <th class="px-6 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider">Time Worked Till Date</th>
-            <th class="px-6 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider">Remaining Time</th>
+            <SortableHeader column="sortable_fromTime" {sortConfig} onSort={handleSort} label="From Time" />
+            <SortableHeader column="sortable_toTime" {sortConfig} onSort={handleSort} label="To Time" />
+            <SortableHeader column="sortable_plannedHours" {sortConfig} onSort={handleSort} label="Planned Hours" />
+            <SortableHeader column="sortable_timeWorkedTillDate" {sortConfig} onSort={handleSort} label="Time Worked Till Date" />
+            <SortableHeader column="sortable_remainingTime" {sortConfig} onSort={handleSort} label="Remaining Time" />
             <th class="px-6 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider">Actions</th>
           </tr>
         </thead>
         <tbody class="theme-bg-primary divide-y divide-gray-200 dark:divide-gray-700">
-          {#each Object.values(filteredGroupedPlannedWorks) as group}
+          {#each sortedGroupedWorks as group}
             {@const typedGroup = group}
             {@const allSelected = typedGroup.items.every((item: any) => selectedRows.has(item.id))}
             {@const someSelected = typedGroup.items.some((item: any) => selectedRows.has(item.id))}

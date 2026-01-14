@@ -223,7 +223,100 @@ export async function saveWorkPlanning(
     throw new Error(`Failed to create ${insertErrors.length} plan(s)`);
   }
   
-  const totalPlans = updateResults.length + insertResults.length;
+  // Collect all created/updated plan IDs for deviation records
+  const allPlanIds: number[] = [];
+  updateResults.forEach((result: any) => {
+    if (result.data && result.data.id) {
+      allPlanIds.push(result.data.id);
+    }
+  });
+  insertResults.forEach((result: any) => {
+    if (result && result.id) {
+      allPlanIds.push(result.id);
+    }
+  });
+  
+  // Create planning records for trainees and deviation records
+  if (formData.selectedTrainees && formData.selectedTrainees.length > 0) {
+    if (!formData.traineeDeviationReason || !formData.traineeDeviationReason.trim()) {
+      throw new Error('Please provide a reason for adding trainees');
+    }
+    
+    const traineePlanPromises: Promise<any>[] = [];
+    const deviationPromises: Promise<any>[] = [];
+    
+    for (const trainee of formData.selectedTrainees) {
+      // Create planning record for trainee
+      const traineePlanData = {
+        stage_code: stageCode,
+        wo_details_id: woDetailsId,
+        derived_sw_code: derivedSwCode,
+        other_work_code: otherWorkCode,
+        sc_required: 'T', // Trainee skill
+        worker_id: trainee.emp_id,
+        from_date: fromDate,
+        from_time: formData.fromTime,
+        to_date: planningToDate,
+        to_time: formData.toTime,
+        planned_hours: formData.plannedHours,
+        time_worked_till_date: workContinuation.timeWorkedTillDate,
+        remaining_time: workContinuation.remainingTime,
+        status: 'draft' as const,
+        notes: `Trainee: ${trainee.emp_name}`,
+        wsm_id: null // Trainees don't have skill mappings
+      };
+      
+      const traineePlanPromise = createWorkPlanning(traineePlanData, currentUser);
+      traineePlanPromises.push(traineePlanPromise);
+    }
+    
+    // Wait for all trainee plans to be created
+    const traineePlanResults = await Promise.all(traineePlanPromises);
+    
+    // Check for errors in trainee plan creation
+    const traineePlanErrors = traineePlanResults.filter((result: any) => result.error || !result);
+    if (traineePlanErrors.length > 0) {
+      console.error('Errors creating trainee plans:', traineePlanErrors);
+      throw new Error(`Failed to create ${traineePlanErrors.length} trainee plan(s)`);
+    }
+    
+    // Get trainee plan IDs
+    const traineePlanIds = traineePlanResults
+      .filter((result: any) => result && result.id)
+      .map((result: any) => result.id);
+    
+    // Create deviation records for each trainee
+    for (let i = 0; i < traineePlanIds.length; i++) {
+      const traineePlanId = traineePlanIds[i];
+      const trainee = formData.selectedTrainees[i];
+      
+      const deviationData = {
+        planning_id: traineePlanId,
+        deviation_type: 'trainee_addition',
+        reason: formData.traineeDeviationReason,
+        is_active: true,
+        is_deleted: false,
+        created_by: currentUser,
+        created_dt: now
+      };
+      
+      const { error: deviationError } = await supabase
+        .from('prdn_work_planning_deviations')
+        .insert(deviationData);
+      
+      if (deviationError) {
+        console.error(`Error creating deviation record for trainee ${trainee.emp_name}:`, deviationError);
+        throw new Error(`Failed to create deviation record: ${deviationError.message}`);
+      }
+      
+      console.log(`✅ Created deviation record for trainee ${trainee.emp_name} (plan ID: ${traineePlanId})`);
+    }
+    
+    // Add trainee plans to total count
+    allPlanIds.push(...traineePlanIds);
+  }
+  
+  const totalPlans = updateResults.length + insertResults.length + (formData.selectedTrainees?.length || 0);
   
   if (totalPlans > 0) {
     await updateWorkStatus(work, stageCode, currentUser, now, fromDate);
@@ -233,7 +326,7 @@ export async function saveWorkPlanning(
     success: true,
     createdPlans: totalPlans,
     message: isEditMode 
-      ? `Successfully updated ${updateResults.length} and created ${insertResults.length} work plan(s)`
+      ? `Successfully updated ${updateResults.length} and created ${insertResults.length + (formData.selectedTrainees?.length || 0)} work plan(s)`
       : `Successfully created ${totalPlans} work plan(s)`
   };
 }

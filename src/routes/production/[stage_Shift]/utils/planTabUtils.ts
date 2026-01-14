@@ -77,6 +77,7 @@ export function groupPlannedWorks(plannedWorks: any[]): Record<string, any> {
     
     let workName = '';
     if (work.other_work_code) {
+      // Check for workAdditionData on the work item itself (after enrichment)
       if (work.workAdditionData?.other_work_desc) {
         workName = work.workAdditionData.other_work_desc;
       } else {
@@ -173,18 +174,30 @@ export function groupReportWorks(reportData: any[]): Record<string, any> {
                      planning?.std_work_type_details?.derived_sw_code || 
                      planning?.std_work_type_details?.sw_code || 'unknown';
     
+    // Include wsm_id in grouping key to separate different skill combinations for the same work
+    // This ensures that "MW1 + SS + T" and "MW2 + SS + T" are grouped separately
+    const wsmId = planning?.wsm_id || null;
+    const groupKey = wsmId ? `${workCode}_wsm${wsmId}` : workCode;
+    
     let workName = '';
     if (planning?.other_work_code) {
-      // For non-standard work, try to get description from work addition data or use code
-      workName = planning.other_work_code; // Could be enhanced with workAdditionData if available
+      // For non-standard work, try to get description from work addition data
+      // Check report first (after enrichment), then planning record, then fallback to code
+      if (report.workAdditionData?.other_work_desc) {
+        workName = report.workAdditionData.other_work_desc;
+      } else if (planning.workAdditionData?.other_work_desc) {
+        workName = planning.workAdditionData.other_work_desc;
+      } else {
+        workName = planning.other_work_code;
+      }
     } else {
       workName = planning?.std_work_type_details?.std_work_details?.sw_name || '';
     }
     const typeDescription = planning?.std_work_type_details?.type_description || '';
     const fullWorkName = workName + (typeDescription ? (workName ? ' - ' : '') + typeDescription : '');
     
-    if (!groups[workCode]) {
-      groups[workCode] = {
+    if (!groups[groupKey]) {
+      groups[groupKey] = {
         workCode,
         workName: fullWorkName,
         woNo: planning?.prdn_wo_details?.wo_no || 'N/A',
@@ -197,11 +210,11 @@ export function groupReportWorks(reportData: any[]): Record<string, any> {
     
     const lostTime = report.lt_minutes_total || 0;
     if (lostTime > 0) {
-      groups[workCode].hasLostTime = true;
-      groups[workCode].totalLostTime += lostTime;
+      groups[groupKey].hasLostTime = true;
+      groups[groupKey].totalLostTime += lostTime;
     }
     
-    groups[workCode].items.push(report);
+    groups[groupKey].items.push(report);
     return groups;
   }, {});
 }

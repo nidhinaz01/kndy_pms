@@ -26,6 +26,7 @@
   const dispatch = createEventDispatcher();
 
   export let showModal = false;
+  export let initialData: any = null; // Data to pre-fill when duplicating
 
   // Form data
   let formData: WorkOrderFormData = { ...initialFormData };
@@ -92,14 +93,32 @@
       if (dropdownOptions.cessTaxRateOptions.length > 0 && !formData.cess_tax_rate) {
         formData.cess_tax_rate = dropdownOptions.cessTaxRateOptions[0].de_value;
       }
+      
+      // If we have initial data (duplicating), populate model-related fields after dropdowns are loaded
+      if (initialData && formData.wo_model) {
+        populateModelFields(formData.wo_model);
+      }
     } catch (error) {
       console.error('Error loading dropdown data:', error);
     }
   });
 
-  // Reset form when modal is opened
+  // Reset form when modal is opened, or populate from initialData if duplicating
   $: if (showModal) {
-    resetForm();
+    if (initialData) {
+      populateFormFromWorkOrder(initialData);
+    } else {
+      resetForm();
+    }
+  }
+  
+  // Watch for model options to be loaded and populate model fields if duplicating
+  // This ensures Type, Comfort Level, Capacity, and Carrier Type are populated from model options
+  $: if (showModal && initialData && dropdownOptions.modelOptions.length > 0 && formData.wo_model) {
+    // Only populate if fields are empty (to avoid overwriting if user has already changed them)
+    if (!formData.wo_comfort_level || !formData.wo_capacity || !formData.wo_carrier_type) {
+      populateModelFields(formData.wo_model);
+    }
   }
 
   function closeModal() {
@@ -325,7 +344,117 @@
     currentSection = 1;
   }
 
+  /**
+   * Populate form data from work order details (for duplication)
+   * Clears WO/PWO numbers and production dates as per requirements
+   */
+  function populateFormFromWorkOrder(workOrderData: any) {
+    formData = {
+      // Clear WO/PWO numbers - user must enter new values
+      wo_no: '',
+      pwo_no: '',
+      
+      // Copy basic info
+      wo_type: workOrderData.wo_type || '',
+      wo_model: workOrderData.wo_model || '',
+      // Clear wo_date - user must enter new date for the duplicate work order
+      wo_date: '',
+      customer_name: workOrderData.customer_name || '',
+      
+      // Model-related fields - will be populated from model options via populateModelFields()
+      // These are set to empty initially and will be populated when dropdowns load
+      wo_comfort_level: '',
+      wo_capacity: '',
+      wo_carrier_type: '',
+      
+      // Chassis info
+      wo_chassis: workOrderData.wo_chassis || '',
+      wheel_base: workOrderData.wheel_base || '',
+      model_rate: workOrderData.model_rate || 0,
+      
+      // Openings
+      body_width_mm: workOrderData.body_width_mm || '',
+      height: workOrderData.height || '',
+      air_ventilation_nos: workOrderData.air_ventilation_nos || '',
+      escape_hatch: workOrderData.escape_hatch || '',
+      front: workOrderData.front || '',
+      rear: workOrderData.rear || '',
+      front_glass: workOrderData.front_glass || '',
+      emergency_door_nos: workOrderData.emergency_door_nos || '',
+      
+      // Exterior
+      platform: workOrderData.platform || '',
+      inside_grab_rails: workOrderData.inside_grab_rails || '',
+      paint: workOrderData.paint || '',
+      fire_extinguisher_kg: workOrderData.fire_extinguisher_kg || '',
+      wiper: workOrderData.wiper || '',
+      stepney: workOrderData.stepney || '',
+      record_box_nos: workOrderData.record_box_nos || '',
+      route_board: workOrderData.route_board || '',
+      rear_glass: workOrderData.rear_glass || '',
+      driver_cabin_partition: workOrderData.driver_cabin_partition || '',
+      voltage: workOrderData.voltage || '',
+      
+      // Interior
+      inside_top_panel: workOrderData.inside_top_panel || '',
+      inside_side_panel: workOrderData.inside_side_panel || '',
+      inside_luggage_rack: workOrderData.inside_luggage_rack || '',
+      sound_system: workOrderData.sound_system || '',
+      
+      // Seats
+      seat_type: workOrderData.seat_type || '',
+      no_of_seats: workOrderData.no_of_seats || '',
+      seat_configuration: workOrderData.seat_configuration || '',
+      seat_fabrics: workOrderData.seat_fabrics || '',
+      
+      // Others
+      dickey: workOrderData.dickey || '',
+      passenger_door_nos: workOrderData.passenger_door_nos || '',
+      side_ventilation: workOrderData.side_ventilation || '',
+      door_position_front: workOrderData.door_position_front || '',
+      door_position_rear: workOrderData.door_position_rear || '',
+      
+      // Clear production dates - this is a new work order
+      wo_prdn_start: '',
+      wo_prdn_end: '',
+      wo_delivery: '',
+      
+      // Copy additional requirements (including quantity and rate)
+      additional_requirements: workOrderData.additional_requirements && workOrderData.additional_requirements.length > 0
+        ? workOrderData.additional_requirements.map((req: any) => ({
+            work_details: req.work_details || '',
+            work_qty: req.work_qty || 1,
+            work_rate: req.work_rate || 0,
+            amount: (req.work_qty || 1) * (req.work_rate || 0)
+          }))
+        : [{ work_details: '', work_qty: 1, work_rate: 0, amount: 0 }],
+      
+      // Copy costs
+      work_order_cost: workOrderData.work_order_cost || 0,
+      gst: workOrderData.gst || 0,
+      cess: workOrderData.cess || 0,
+      total_cost: workOrderData.total_cost || 0,
+      
+      // Tax rates (will be auto-populated from dropdown if available)
+      gst_tax_rate: '',
+      cess_tax_rate: '',
+      
+      // Confirmation
+      confirmation: false
+    };
+    
+    // Note: We preserve the original costs as-is. User can recalculate if needed.
+    // calculateTotalCost() is not called here to preserve the exact costs from the original work order.
+    
+    validationErrors = {};
+    currentSection = 1;
+  }
+
   function handleModelChange(modelName: string) {
+    populateModelFields(modelName);
+  }
+  
+  function populateModelFields(modelName: string) {
     const updates = updateFieldsFromModel(modelName, dropdownOptions.modelOptions);
     Object.entries(updates).forEach(([key, value]) => {
       handleFieldChange(key, value);
@@ -340,7 +469,7 @@
       <!-- Header -->
       <div class="flex items-center justify-between p-6 border-b theme-border theme-bg-primary">
         <h2 class="text-2xl font-bold theme-text-primary">
-          Create Work Order
+          {initialData ? 'Duplicate Work Order' : 'Create Work Order'}
           {#if formData.wo_no || formData.pwo_no}
             : 
             {#if formData.wo_no}WO {formData.wo_no}{/if}

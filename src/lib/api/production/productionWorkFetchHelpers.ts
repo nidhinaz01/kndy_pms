@@ -93,12 +93,11 @@ export async function batchFetchWorkData(
   workStatusMap: Map<number, any[]>,
   workOrderMap: Map<number, {id: number, wo_model: string, wo_no: string | null, pwo_no: string | null}>
 ) {
+  // Phase 1: Fetch all independent queries in parallel
   const [
     workTypesData,
     workTypeDetailsData,
-    workFlowData,
     skillMappingsData,
-    skillTimeStandardsData,
     addedWorksData
   ] = await Promise.all([
     uniqueWoModels.size > 0 ? supabase
@@ -121,32 +120,6 @@ export async function batchFetchWorkData(
         return data || [];
       }) : Promise.resolve([]),
 
-    // Fetch vehicle work flows filtered by both derived_sw_code AND wo_type_id
-    // First get work types to get wo_type_ids, then fetch vehicle work flows
-    uniqueWoModels.size > 0 && uniqueDerivedSwCodes.size > 0 ? 
-      supabase
-        .from('mstr_wo_type')
-        .select('id')
-        .in('wo_type_name', Array.from(uniqueWoModels))
-        .then(async ({ data: woTypes, error: woError }) => {
-          if (woError || !woTypes || woTypes.length === 0) {
-            return [];
-          }
-          const woTypeIds = woTypes.map(wt => wt.id);
-          const { data, error } = await supabase
-            .from('std_vehicle_work_flow')
-            .select('*')
-            .in('derived_sw_code', Array.from(uniqueDerivedSwCodes))
-            .in('wo_type_id', woTypeIds)
-            .eq('is_active', true)
-            .eq('is_deleted', false);
-          if (error) {
-            console.error('Error fetching work flows:', error);
-            return [];
-          }
-          return data || [];
-        }) : Promise.resolve([]),
-
     uniqueDerivedSwCodes.size > 0 ? supabase
       .from('std_work_skill_mapping')
       .select(`wsm_id, derived_sw_code, sc_name, std_skill_combinations!inner(sc_id, sc_name, manpower_required, skill_combination)`)
@@ -159,42 +132,6 @@ export async function batchFetchWorkData(
         return data || [];
       }) : Promise.resolve([]),
 
-    // Fetch skill time standards for all wsm_ids from skill mappings
-    // This will be used as fallback when vehicle work flow is not available
-    uniqueDerivedSwCodes.size > 0 ? 
-      supabase
-        .from('std_work_skill_mapping')
-        .select('wsm_id')
-        .in('derived_sw_code', Array.from(uniqueDerivedSwCodes))
-        .eq('is_active', true)
-        .eq('is_deleted', false)
-        .then(async ({ data: wsmData, error: wsmError }) => {
-          if (wsmError || !wsmData || wsmData.length === 0) {
-            return [];
-          }
-          const wsmIds = [...new Set(wsmData.map(w => w.wsm_id).filter(Boolean))];
-          if (wsmIds.length === 0) {
-            return [];
-          }
-          const { data, error } = await supabase
-            .from('std_skill_time_standards')
-            .select('wsm_id, skill_short, standard_time_minutes, skill_order')
-            .in('wsm_id', wsmIds)
-            .eq('is_active', true)
-            .eq('is_deleted', false)
-            .order('wsm_id, skill_order');
-          if (error) {
-            console.error('Error fetching skill time standards:', error);
-            return [];
-          }
-          console.log(`📊 Fetched skill time standards: ${data?.length || 0} records for ${wsmIds.length} wsm_ids`);
-          if (data && data.length > 0) {
-            console.log('📊 Sample skill time standard:', data[0]);
-            console.log('📊 wsm_ids in fetched data:', [...new Set(data.map(d => d.wsm_id))]);
-          }
-          return data || [];
-        }) : Promise.resolve([]),
-
     uniqueOtherWorkCodes.size > 0 ? supabase
       .from('prdn_work_additions')
       .select('*')
@@ -205,6 +142,57 @@ export async function batchFetchWorkData(
         if (error) console.error('Error fetching added works:', error);
         return data || [];
       }) : Promise.resolve([])
+  ]);
+
+  // Phase 2: Fetch dependent queries using data from Phase 1
+  // Optimize: Reuse workTypesData for work flows (avoid duplicate query)
+  // Optimize: Extract wsm_ids from skillMappingsData (avoid duplicate query)
+  const [workFlowData, skillTimeStandardsData] = await Promise.all([
+    // Fetch vehicle work flows using wo_type_ids from workTypesData
+    uniqueWoModels.size > 0 && uniqueDerivedSwCodes.size > 0 && workTypesData.length > 0 ? 
+      (() => {
+        const woTypeIds = workTypesData.map(wt => wt.id).filter(Boolean);
+        if (woTypeIds.length === 0) return Promise.resolve([]);
+        
+        return supabase
+          .from('std_vehicle_work_flow')
+          .select('*')
+          .in('derived_sw_code', Array.from(uniqueDerivedSwCodes))
+          .in('wo_type_id', woTypeIds)
+          .eq('is_active', true)
+          .eq('is_deleted', false)
+          .then(({ data, error }) => {
+            if (error) {
+              console.error('Error fetching work flows:', error);
+              return [];
+            }
+            return data || [];
+          });
+      })() : Promise.resolve([]),
+
+    // Fetch skill time standards using wsm_ids from skillMappingsData
+    uniqueDerivedSwCodes.size > 0 && skillMappingsData.length > 0 ?
+      (() => {
+        const wsmIds = [...new Set((skillMappingsData as any[]).map((m: any) => m.wsm_id).filter(Boolean))];
+        if (wsmIds.length === 0) return Promise.resolve([]);
+        
+        return supabase
+          .from('std_skill_time_standards')
+          .select('wsm_id, skill_short, standard_time_minutes, skill_order')
+          .in('wsm_id', wsmIds)
+          .eq('is_active', true)
+          .eq('is_deleted', false)
+          .order('wsm_id', { ascending: true })
+          .order('skill_order', { ascending: true })
+          .then(({ data, error }) => {
+            if (error) {
+              console.error('Error fetching skill time standards:', error);
+              return [];
+            }
+            console.log(`📊 Fetched skill time standards: ${data?.length || 0} records for ${wsmIds.length} wsm_ids`);
+            return data || [];
+          });
+      })() : Promise.resolve([])
   ]);
 
   const scNames = [...new Set((addedWorksData || []).map((aw: any) => aw.other_work_sc).filter(Boolean))];

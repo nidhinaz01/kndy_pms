@@ -248,6 +248,8 @@
     
     formData.skillEmployees = {};
     formData.deviations = {};
+    formData.selectedTrainees = [];
+    formData.traineeDeviationReason = '';
     
     // Assign each work its own employee (no grouping)
     selectedWorks.forEach(work => {
@@ -472,6 +474,9 @@
     selectedWorkersWithSalaries = [];
     isLoading = false;
     isLoadingSalary = false;
+    // Ensure trainees are cleared
+    formData.selectedTrainees = [];
+    formData.traineeDeviationReason = '';
   }
 
   function handleEmployeeChange(workId: string, employeeId: string) {
@@ -492,6 +497,24 @@
       reason: reason.trim()
     };
     formData.deviations = { ...formData.deviations }; // Trigger reactivity
+  }
+
+  function handleTraineeAdd(trainee: { emp_id: string; emp_name: string; skill_short: string }) {
+    formData.selectedTrainees = [...formData.selectedTrainees, trainee];
+    formData = { ...formData }; // Trigger reactivity
+  }
+
+  function handleTraineeRemove(index: number) {
+    formData.selectedTrainees = formData.selectedTrainees.filter((_, i) => i !== index);
+    if (formData.selectedTrainees.length === 0) {
+      formData.traineeDeviationReason = '';
+    }
+    formData = { ...formData }; // Trigger reactivity
+  }
+
+  function handleTraineeReasonChange(reason: string) {
+    formData.traineeDeviationReason = reason;
+    formData = { ...formData }; // Trigger reactivity
   }
 
   function handleDateChange(field: string, value: string) {
@@ -572,6 +595,9 @@
               {formData}
               onEmployeeChange={handleEmployeeChange}
               onDeviationChange={handleDeviationChange}
+              onTraineeAdd={handleTraineeAdd}
+              onTraineeRemove={handleTraineeRemove}
+              onTraineeReasonChange={handleTraineeReasonChange}
             />
 
             <SharedTimeSelection
