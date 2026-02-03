@@ -4,6 +4,7 @@
   import FloatingThemeToggle from '$lib/components/common/FloatingThemeToggle.svelte';
   import Sidebar from '$lib/components/navigation/Sidebar.svelte';
   import Button from '$lib/components/common/Button.svelte';
+  import SearchableSelect from '$lib/components/common/SearchableSelect.svelte';
   import { fetchUserMenus } from '$lib/services/menuService';
   import { fetchStages } from '$lib/api/employee-api/employeeDropdownService';
   import { getActiveWorkOrders } from '$lib/api/production/productionWorkFetchHelpers';
@@ -101,6 +102,7 @@
     if (!selectedWorkOrderId || !selectedStage) {
       availableStandardWorks = [];
       selectedDerivedSwCode = '';
+      selectedWorkOrder = undefined;
       return;
     }
 
@@ -118,6 +120,18 @@
       isLoadingStandardWorks = false;
     }
   }
+
+  // Transform work orders to SearchableSelect format
+  $: workOrderOptions = workOrders.map(wo => ({
+    value: wo.id,
+    label: `${wo.wo_no || 'N/A'}${wo.pwo_no ? ` (${wo.pwo_no})` : ''} - ${wo.wo_model}`
+  }));
+
+  // Transform standard works to SearchableSelect format
+  $: standardWorkOptions = availableStandardWorks.map(work => ({
+    value: work.derived_sw_code,
+    label: `${work.derived_sw_code} - ${work.sw_name}${work.type_description ? ` (${work.type_description})` : ''}`
+  }));
 
   // Submit form
   async function handleSubmit() {
@@ -242,20 +256,15 @@
                   </p>
                 </div>
               {:else}
-                <select
+                <SearchableSelect
                   id="workOrder"
+                  options={workOrderOptions}
                   bind:value={selectedWorkOrderId}
                   on:change={handleWorkOrderChange}
                   disabled={isLoadingStandardWorks || isSubmitting}
-                  class="w-full px-3 py-2 theme-bg-primary theme-border theme-text-primary rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-50"
-                >
-                  <option value="">Select a work order...</option>
-                  {#each workOrders as wo}
-                    <option value={wo.id}>
-                      {wo.wo_no || 'N/A'} {wo.pwo_no ? `(${wo.pwo_no})` : ''} - {wo.wo_model}
-                    </option>
-                  {/each}
-                </select>
+                  placeholder="Type to search work orders..."
+                  filterPlaceholder="Type to search..."
+                />
               {/if}
             </div>
           {/if}
@@ -278,19 +287,14 @@
                   </p>
                 </div>
               {:else}
-                <select
+                <SearchableSelect
                   id="standardWork"
+                  options={standardWorkOptions}
                   bind:value={selectedDerivedSwCode}
                   disabled={isSubmitting}
-                  class="w-full px-3 py-2 theme-bg-primary theme-border theme-text-primary rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-50"
-                >
-                  <option value="">Select a standard work...</option>
-                  {#each availableStandardWorks as work}
-                    <option value={work.derived_sw_code}>
-                      {work.derived_sw_code} - {work.sw_name} {work.type_description ? `(${work.type_description})` : ''}
-                    </option>
-                  {/each}
-                </select>
+                  placeholder="Type to search standard works..."
+                  filterPlaceholder="Type to search..."
+                />
               {/if}
             </div>
           {/if}

@@ -321,13 +321,19 @@
     // Get planning IDs to exclude from conflict check (the ones being reported)
     const planningIds = selectedWorks.map(work => work.id);
     
+    // Get reporting IDs to exclude from conflict check (the ones being edited)
+    const reportingIds = selectedWorks
+      .map(work => work.reporting_id)
+      .filter((id): id is number => id !== undefined && id !== null);
+    
     const conflictResult = await checkWorkerConflicts(
       formData.skillEmployees,
       formData.fromDate,
       formData.fromTime,
       formData.toDate,
       formData.toTime,
-      planningIds
+      planningIds,
+      reportingIds.length > 0 ? reportingIds : undefined
     );
     
     if (conflictResult.hasConflict) {

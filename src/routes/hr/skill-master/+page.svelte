@@ -7,11 +7,12 @@
   import Sidebar from '$lib/components/navigation/Sidebar.svelte';
   import { fetchUserMenus } from '$lib/services/menuService';
   import DataTable from '$lib/components/common/DataTable.svelte';
-  import { Trash2, Edit } from 'lucide-svelte';
+  import { Trash2, Edit, History } from 'lucide-svelte';
   import { loadSkillsWithUsernames } from './services/skillMasterService';
   import { validateSkillMasterForm, formatWefDate } from './utils/skillMasterValidation';
   import SkillMasterForm from './components/SkillMasterForm.svelte';
   import ImportModal from './components/ImportModal.svelte';
+  import SkillHistoryModal from './components/SkillHistoryModal.svelte';
 
   // State management
   let skillNames: string[] = [];
@@ -40,6 +41,10 @@
   let showImportModal = false;
   let importFile: File | null = null;
   let importResults: { success: number; errors: string[] } | null = null;
+
+  // History modal
+  let showHistoryModal = false;
+  let selectedSkillForHistory: { skill_name: string; skill_short: string } | null = null;
 
   // Load existing skill names and shorts
   async function loadSkillData() {
@@ -96,6 +101,23 @@
     maxSalary = skill.max_salary.toString();
     wef = formatWefDate(skill.wef);
     isActive = skill.is_active;
+  }
+
+  function handleViewHistory(skill: any) {
+    selectedSkillForHistory = {
+      skill_name: skill.skill_name,
+      skill_short: skill.skill_short
+    };
+    showHistoryModal = true;
+  }
+
+  function handleHistoryModalClose() {
+    showHistoryModal = false;
+    selectedSkillForHistory = null;
+  }
+
+  async function handleHistorySave() {
+    await loadSkills();
   }
 
   // Save skill master
@@ -374,6 +396,11 @@
         ]}
         actions={[
           {
+            label: 'View History',
+            icon: History,
+            onClick: handleViewHistory
+          },
+          {
             label: 'Edit',
             icon: Edit,
             onClick: handleEdit
@@ -404,4 +431,15 @@
   onFileSelect={handleFileSelect}
   onImport={handleImport}
   onClose={() => showImportModal = false}
-/> 
+/>
+
+<!-- History Modal -->
+{#if selectedSkillForHistory}
+  <SkillHistoryModal
+    bind:showModal={showHistoryModal}
+    skillName={selectedSkillForHistory.skill_name}
+    skillShort={selectedSkillForHistory.skill_short}
+    onClose={handleHistoryModalClose}
+    onSave={handleHistorySave}
+  />
+{/if} 

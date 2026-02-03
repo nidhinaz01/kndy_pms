@@ -80,7 +80,7 @@ export async function saveWorkPlanning(
           to_time: formData.toTime,
           planned_hours: formData.plannedHours,
           time_worked_till_date: workContinuation.timeWorkedTillDate,
-          remaining_time: workContinuation.remainingTime,
+          remaining_time: Math.max(0, workContinuation.remainingTime - formData.plannedHours),
           status: 'draft' as const,
           notes: `Planned for ${skillShort} skill`,
           wsm_id: isNonStandardWork ? null : wsmId
@@ -131,7 +131,7 @@ export async function saveWorkPlanning(
         to_time: formData.toTime,
         planned_hours: formData.plannedHours,
         time_worked_till_date: workContinuation.timeWorkedTillDate,
-        remaining_time: workContinuation.remainingTime,
+        remaining_time: Math.max(0, workContinuation.remainingTime - formData.plannedHours),
         status: 'draft' as const,
         notes: 'General work planning'
       };
@@ -260,7 +260,7 @@ export async function saveWorkPlanning(
         to_time: formData.toTime,
         planned_hours: formData.plannedHours,
         time_worked_till_date: workContinuation.timeWorkedTillDate,
-        remaining_time: workContinuation.remainingTime,
+        remaining_time: Math.max(0, workContinuation.remainingTime - formData.plannedHours),
         status: 'draft' as const,
         notes: `Trainee: ${trainee.emp_name}`,
         wsm_id: null // Trainees don't have skill mappings

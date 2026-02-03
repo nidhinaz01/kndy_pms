@@ -191,6 +191,7 @@
       isLoading={isLoading} 
       selectedDate={selectedDate}
       {planningSubmissionStatus}
+      {shiftCode}
       on:refresh={handleRefresh}
       on:attendanceMarked={handleAttendanceMarked}
       on:bulkAttendanceMarked={handleBulkAttendanceMarked}

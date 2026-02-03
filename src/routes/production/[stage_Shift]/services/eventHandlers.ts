@@ -671,7 +671,9 @@ export function handleMultiReportModalClose(context: EventHandlerContext) {
  */
 export async function handleMultiSkillReportSave(context: EventHandlerContext) {
   await context.loadPlannedWorksData();
+  await context.loadWorksData();
   if (context.activeTab === 'report') await context.loadReportData();
+  if (context.activeTab === 'draft-report') await context.loadDraftReportData();
   context.setSelectedRows(new Set());
   handleMultiReportModalClose(context);
 }
@@ -974,23 +976,59 @@ export async function handleAttendanceMarked(context: EventHandlerContext, event
     return;
   }
 
-  const { empId, stageCode, date, status, notes } = event.detail;
+  console.log('🔍 [handleAttendanceMarked] Received event detail (full):', JSON.stringify(event.detail, null, 2));
+  console.log('🔍 [handleAttendanceMarked] Received event detail keys:', Object.keys(event.detail || {}));
+  const { empId, stageCode, date, status, shiftCode, notes, plannedHours, fromTime, toTime, actualHours } = event.detail;
+  console.log('🔍 [handleAttendanceMarked] Extracted values:', {
+    empId,
+    stageCode,
+    date,
+    status,
+    shiftCode,
+    notes,
+    plannedHours,
+    fromTime,
+    toTime,
+    actualHours
+  });
   
   try {
     let result;
     if (context.activeTab === 'manpower-plan') {
       // Save to planning table for the selected date
-      result = await savePlannedAttendance(empId, stageCode, date, status, notes);
+      result = await savePlannedAttendance(
+        empId, 
+        stageCode, 
+        date, 
+        status, 
+        shiftCode || context.shiftCode, 
+        notes, 
+        plannedHours, 
+        fromTime, 
+        toTime
+      );
       if (!result.success) {
         alert('Error saving planned attendance: ' + (result.error || 'Unknown error'));
         return;
       }
-  await context.loadManpowerPlanData();
+      await context.loadManpowerPlanData();
     } else if (context.activeTab === 'manpower-report') {
       // Save to reporting table (for current day) - default LTP/LTNP to 0 if not provided
       const ltpHours = event.detail.ltpHours || 0;
       const ltnpHours = event.detail.ltnpHours || 0;
-      result = await saveReportedManpower(empId, stageCode, date, status, ltpHours, ltnpHours, notes);
+      result = await saveReportedManpower(
+        empId, 
+        stageCode, 
+        date, 
+        status, 
+        shiftCode || context.shiftCode, 
+        ltpHours, 
+        ltnpHours, 
+        notes, 
+        actualHours, 
+        fromTime, 
+        toTime
+      );
       if (!result.success) {
         alert('Error saving reported attendance: ' + (result.error || 'Unknown error'));
         return;
@@ -1015,7 +1053,7 @@ export async function handleBulkAttendanceMarked(context: EventHandlerContext, e
     return;
   }
 
-  const { employees, date, status, notes } = event.detail;
+  const { employees, date, status, shiftCode, notes, plannedHours, fromTime, toTime, actualHours } = event.detail;
   
   if (!employees || employees.length === 0) {
     alert('No employees selected for bulk attendance marking');
@@ -1024,11 +1062,23 @@ export async function handleBulkAttendanceMarked(context: EventHandlerContext, e
 
   try {
     let results;
+    const effectiveShiftCode = shiftCode || context.shiftCode;
+    
     if (context.activeTab === 'manpower-plan') {
       // Save to planning table for the selected date
       results = await Promise.all(
         employees.map((emp: { empId: string; stageCode: string }) =>
-          savePlannedAttendance(emp.empId, emp.stageCode, date, status, notes)
+          savePlannedAttendance(
+            emp.empId, 
+            emp.stageCode, 
+            date, 
+            status, 
+            effectiveShiftCode, 
+            notes, 
+            plannedHours, 
+            fromTime, 
+            toTime
+          )
         )
       );
     } else if (context.activeTab === 'manpower-report') {
@@ -1037,7 +1087,19 @@ export async function handleBulkAttendanceMarked(context: EventHandlerContext, e
       const ltnpHours = event.detail.ltnpHours || 0;
       results = await Promise.all(
         employees.map((emp: { empId: string; stageCode: string }) =>
-          saveReportedManpower(emp.empId, emp.stageCode, date, status, ltpHours, ltnpHours, notes)
+          saveReportedManpower(
+            emp.empId, 
+            emp.stageCode, 
+            date, 
+            status, 
+            effectiveShiftCode, 
+            ltpHours, 
+            ltnpHours, 
+            notes, 
+            actualHours, 
+            fromTime, 
+            toTime
+          )
         )
       );
     } else {
@@ -1053,7 +1115,7 @@ export async function handleBulkAttendanceMarked(context: EventHandlerContext, e
     }
 
     if (context.activeTab === 'manpower-plan') {
-  await context.loadManpowerPlanData();
+      await context.loadManpowerPlanData();
     } else if (context.activeTab === 'manpower-report') {
       await context.loadManpowerReportData();
     }
@@ -1218,6 +1280,118 @@ export function handleReportUnplannedWorkSelected(context: EventHandlerContext, 
 }
 
 /**
+ * Edit draft report - open multi-skill report modal with report data
+ */
+export function handleEditReport(context: EventHandlerContext, event: CustomEvent) {
+  const group = event.detail;
+  if (!group || !group.items || group.items.length === 0) return;
+  
+  // Get all reports from the group
+  const reports = group.items;
+  
+  // Transform reports to match the structure expected by MultiSkillReportModal
+  // The modal expects planning records, but we have reporting records with nested planning data
+  const transformedWorks = reports.map((report: any) => {
+    const planning = report.prdn_work_planning;
+    if (!planning) {
+      console.warn('Report missing prdn_work_planning data:', report);
+      return report;
+    }
+    
+    // Merge report data with planning data, prioritizing report data for time/worker fields
+    // The modal uses work.id to identify works, so we use the planning ID
+    const transformed = {
+      // Use planning ID as the work ID (modal uses this to identify works in formData.skillEmployees)
+      id: planning.id,
+      // Report-specific fields (use report values - these are what the user actually reported)
+      from_date: report.from_date || planning.from_date,
+      from_time: report.from_time || planning.from_time,
+      to_date: report.to_date || planning.to_date,
+      to_time: report.to_time || planning.to_time,
+      worker_id: report.worker_id || planning.worker_id,
+      hours_worked_today: report.hours_worked_today || 0,
+      hours_worked_till_date: report.hours_worked_till_date || 0,
+      completion_status: report.completion_status,
+      // Planning fields (from nested planning object - needed for modal to work correctly)
+      wo_details_id: planning.wo_details_id,
+      prdn_wo_details_id: planning.wo_details_id,
+      derived_sw_code: planning.derived_sw_code,
+      other_work_code: planning.other_work_code,
+      sc_required: planning.sc_required,
+      stage_code: planning.stage_code,
+      wsm_id: planning.wsm_id,
+      // Nested objects from planning (needed for modal display and validation)
+      std_work_type_details: planning.std_work_type_details,
+      prdn_wo_details: planning.prdn_wo_details,
+      std_work_skill_mapping: planning.std_work_skill_mapping,
+      hr_emp: planning.hr_emp,
+      // Store report ID for reference (needed for update when saving)
+      reporting_id: report.id,
+      planning_id: report.planning_id || planning.id,
+      // Include time_worked_till_date for the modal (needed for hours calculation)
+      time_worked_till_date: report.hours_worked_till_date || 0,
+      hours_worked_till_date: report.hours_worked_till_date || 0,
+      // Include any enriched data that might be on the report
+      vehicleWorkFlow: report.vehicleWorkFlow || planning.vehicleWorkFlow,
+      skillTimeStandard: report.skillTimeStandard || planning.skillTimeStandard,
+      skillMapping: report.skillMapping || planning.std_work_skill_mapping,
+      // Include completion status and lost time data for the modal
+      completion_status: report.completion_status,
+      lt_minutes_total: report.lt_minutes_total || 0,
+      lt_details: report.lt_details
+    };
+    
+    return transformed;
+  });
+  
+  console.log('🔍 [handleEditReport] Transformed works for modal:', transformedWorks);
+  
+  // Set the selected works for multi-report modal
+  context.setSelectedWorksForMultiReport(transformedWorks);
+  context.setShowMultiReportModal(true);
+}
+
+/**
+ * Delete all reports for a work
+ */
+export async function handleDeleteReport(context: EventHandlerContext, event: CustomEvent) {
+  const group = event.detail;
+  if (!group || !group.items || group.items.length === 0) return;
+  
+  const workName = group.workName || group.workCode;
+  const confirmed = confirm(`Are you sure you want to delete all reports for work "${workName}"? This will delete ${group.items.length} report(s).`);
+  if (!confirmed) return;
+  
+  // Get all report IDs from the group
+  const reportIds = group.items.map((item: any) => item.id).filter(Boolean);
+  if (reportIds.length === 0) return;
+  
+  const { getCurrentUsername, getCurrentTimestamp } = await import('$lib/utils/userUtils');
+  const currentUser = getCurrentUsername();
+  const now = getCurrentTimestamp();
+  
+  // Soft delete all reports
+  const { error } = await supabase
+    .from('prdn_work_reporting')
+    .update({ 
+      is_deleted: true, 
+      modified_by: currentUser, 
+      modified_dt: now 
+    })
+    .in('id', reportIds);
+  
+  if (!error) {
+    // Reload draft report data
+    await context.loadDraftReportData();
+    
+    alert(`Successfully deleted ${reportIds.length} report(s).`);
+  } else {
+    console.error('Error deleting reports:', error);
+    alert('Error deleting reports: ' + error.message);
+  }
+}
+
+/**
  * Handle submit reporting
  */
 export async function handleSubmitReporting(context: EventHandlerContext) {
@@ -1229,6 +1403,39 @@ export async function handleSubmitReporting(context: EventHandlerContext) {
       dateStr = context.selectedDate.split('T')[0];
     } else {
       dateStr = new Date(context.selectedDate).toISOString().split('T')[0];
+    }
+    
+    // Validate employee shift reporting
+    const { validateEmployeeShiftReporting } = await import('$lib/api/production/reportingValidationService');
+    const validation = await validateEmployeeShiftReporting(
+      context.stageCode,
+      context.shiftCode,
+      dateStr
+    );
+
+    if (!validation.isValid) {
+      const errorMessage = validation.errors.join('\n');
+      if (validation.warnings.length > 0) {
+        const warningMessage = validation.warnings.join('\n');
+        const proceed = confirm(
+          `Validation Errors:\n${errorMessage}\n\nWarnings:\n${warningMessage}\n\nDo you want to proceed anyway?`
+        );
+        if (!proceed) {
+          context.setDraftReportLoading(false);
+          return;
+        }
+      } else {
+        alert(`Validation failed:\n${errorMessage}\n\nPlease fix these issues before submitting.`);
+        context.setDraftReportLoading(false);
+        return;
+      }
+    } else if (validation.warnings.length > 0) {
+      const warningMessage = validation.warnings.join('\n');
+      const proceed = confirm(`Warnings:\n${warningMessage}\n\nDo you want to proceed?`);
+      if (!proceed) {
+        context.setDraftReportLoading(false);
+        return;
+      }
     }
     
     // Check for overtime before submitting
@@ -1548,6 +1755,10 @@ export async function handleSubmitReporting(context: EventHandlerContext) {
       context.setDraftReportLoading(false);
       return;
     }
+    
+    // Clear submission status cache to force refresh
+    const { submissionStatusCache } = await import('./submissionStatusCache');
+    submissionStatusCache.clearForStageDate(context.stageCode, dateStr);
     
     // Reload data and show success message
     await context.loadDraftReportData();

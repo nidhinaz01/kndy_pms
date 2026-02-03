@@ -530,6 +530,7 @@
         isLoading={isManpowerReportLoading}
         {selectedDate}
         {reportingSubmissionStatus}
+        {shiftCode}
         on:refresh={() => dataLoading.loadManpowerReportData(dataLoadingContext)}
         on:attendanceMarked={(e) => eventHandlers.handleAttendanceMarked(eventHandlerContext, e)}
         on:bulkAttendanceMarked={(e) => eventHandlers.handleBulkAttendanceMarked(eventHandlerContext, e)}
@@ -548,6 +549,8 @@
         on:refresh={() => dataLoading.loadDraftReportData(dataLoadingContext)}
         on:reportOvertime={(e) => eventHandlers.handleReportOvertime(eventHandlerContext, e)}
         on:reportUnplannedWork={() => eventHandlers.handleReportUnplannedWork(eventHandlerContext)}
+        on:editReport={(e) => eventHandlers.handleEditReport(eventHandlerContext, e)}
+        on:deleteReport={(e) => eventHandlers.handleDeleteReport(eventHandlerContext, e)}
       />
     {:else if activeTab === 'report'}
       <ReportTab 
@@ -690,8 +693,9 @@
           showUnplannedWorkReportModal = false;
           selectedWorkForUnplannedReporting = null;
           // Reload data to show the new reports
+          await dataLoading.loadWorksData(dataLoadingContext);
           await dataLoading.loadPlannedWorksData(dataLoadingContext);
-          await dataLoading.loadDraftReportsData(dataLoadingContext);
+          await dataLoading.loadDraftReportData(dataLoadingContext);
         }
       }}
     />

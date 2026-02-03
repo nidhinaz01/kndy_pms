@@ -36,8 +36,8 @@
     <SortableHeader column="attendance_status" {sortConfig} {onSort} label="Status" />
     <SortableHeader column="stage" {sortConfig} {onSort} label="Current Stage" />
     <SortableHeader column="shift_code" {sortConfig} {onSort} label="Shift" />
-    <SortableHeader column="planned_hours" {sortConfig} {onSort} label="Hours Planned" />
-    <SortableHeader column="reported_hours" {sortConfig} {onSort} label="Hours Reported" />
+    <SortableHeader column="planned_hours" {sortConfig} {onSort} label="Hours Planned / Shift Hours Planned" />
+    <SortableHeader column="reported_hours" {sortConfig} {onSort} label="Hours Reported / Shift Hours Reported" />
     <SortableHeader column="overtime_hours" {sortConfig} {onSort} label="OT Hours" />
     <SortableHeader column="lt_hours" {sortConfig} {onSort} label="LT Hours" />
     <SortableHeader column="ltp_hours" {sortConfig} {onSort} label="LTP Hours" />

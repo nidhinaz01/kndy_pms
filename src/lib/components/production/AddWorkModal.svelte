@@ -14,6 +14,22 @@
 
   const dispatch = createEventDispatcher();
 
+  // Handle click outside to close dropdown
+  function handleClickOutside(event: MouseEvent) {
+    const target = event.target as HTMLElement;
+    if (!target.closest('.work-order-search-container')) {
+      showWorkOrderDropdown = false;
+    }
+  }
+  
+  // Add event listener when component mounts
+  onMount(() => {
+    document.addEventListener('click', handleClickOutside);
+    return () => {
+      document.removeEventListener('click', handleClickOutside);
+    };
+  });
+
   // Debug: Log when isOpen changes
   $: if (isOpen) {
     console.log('AddWorkModal isOpen changed to true, workOrders:', workOrders);
@@ -28,6 +44,8 @@
   // Step 2: Work order selection
   let selectedWorkOrderId: number | null = null;
   let selectedWorkOrder: {id: number, wo_no: string | null, pwo_no: string | null, wo_model: string} | undefined = undefined;
+  let workOrderSearchQuery: string = '';
+  let showWorkOrderDropdown: boolean = false;
   
   // Non-standard work form
   let nextWorkCode: string = '';
@@ -58,6 +76,8 @@
   function resetForm() {
     selectedWorkOrderId = null;
     selectedWorkOrder = undefined;
+    workOrderSearchQuery = '';
+    showWorkOrderDropdown = false;
     nextWorkCode = '';
     otherWorkDesc = '';
     selectedSkillCombination = '';
@@ -78,6 +98,12 @@
     console.log('handleWorkOrderSelect called with woId:', woId);
     console.log('workOrders:', workOrders);
     selectedWorkOrderId = woId;
+    const selected = workOrders.find(wo => wo.id === woId);
+    if (selected) {
+      selectedWorkOrder = selected;
+      workOrderSearchQuery = `${selected.wo_no || 'N/A'} ${selected.pwo_no ? `(${selected.pwo_no})` : ''} - ${selected.wo_model || 'N/A'}`;
+    }
+    showWorkOrderDropdown = false;
     console.log('selectedWorkOrderId set to:', selectedWorkOrderId);
     
     // Get next available work code for non-standard work
@@ -92,6 +118,16 @@
       loadingData = false;
     }
   }
+
+  // Filter work orders based on search query
+  $: filteredWorkOrders = workOrders.filter(wo => {
+    if (!workOrderSearchQuery.trim()) return true;
+    const query = workOrderSearchQuery.toLowerCase();
+    const woNo = (wo.wo_no || '').toLowerCase();
+    const pwoNo = (wo.pwo_no || '').toLowerCase();
+    const model = (wo.wo_model || '').toLowerCase();
+    return woNo.includes(query) || pwoNo.includes(query) || model.includes(query);
+  });
 
   function canSubmitNonStandard(): boolean {
     return !!(
@@ -221,24 +257,78 @@
                   No work orders available for this stage and date.
                 </div>
               {:else}
-                <div class="space-y-2 max-h-96 overflow-y-auto">
-                  {#each workOrders as workOrder}
-                    <button
-                      on:click={() => {
-                        console.log('Work order button clicked:', workOrder);
-                        handleWorkOrderSelect(workOrder.id);
-                      }}
-                      class="w-full p-4 border theme-border rounded-lg hover:theme-bg-secondary transition-colors text-left"
-                    >
-                      <div class="font-medium theme-text-primary">
-                        {workOrder.wo_no || 'N/A'} {workOrder.pwo_no ? `(${workOrder.pwo_no})` : ''}
+                <div class="relative work-order-search-container">
+                  <label for="workOrderSearch" class="block text-sm font-medium theme-text-primary mb-2">
+                    Search Work Order
+                  </label>
+                  <input
+                    id="workOrderSearch"
+                    type="text"
+                    bind:value={workOrderSearchQuery}
+                    on:focus={() => {
+                      showWorkOrderDropdown = true;
+                    }}
+                    on:input={() => {
+                      showWorkOrderDropdown = true;
+                      // Clear selection when user starts typing
+                      if (selectedWorkOrderId) {
+                        selectedWorkOrderId = null;
+                        selectedWorkOrder = undefined;
+                      }
+                    }}
+                    placeholder="Type to search by work order number or model..."
+                    class="w-full px-3 py-2 theme-bg-primary theme-border theme-text-primary rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  />
+                  
+                  {#if showWorkOrderDropdown && filteredWorkOrders.length > 0}
+                    <div class="absolute z-10 w-full mt-1 theme-bg-primary border theme-border rounded-lg shadow-lg max-h-64 overflow-y-auto">
+                      {#each filteredWorkOrders as workOrder}
+                        <button
+                          type="button"
+                          on:click={() => {
+                            console.log('Work order button clicked:', workOrder);
+                            handleWorkOrderSelect(workOrder.id);
+                          }}
+                          class="w-full p-4 hover:theme-bg-secondary transition-colors text-left border-b theme-border last:border-b-0"
+                        >
+                          <div class="font-medium theme-text-primary">
+                            {workOrder.wo_no || 'N/A'} {workOrder.pwo_no ? `(${workOrder.pwo_no})` : ''}
+                          </div>
+                          <div class="text-sm theme-text-secondary mt-1">
+                            Model: {workOrder.wo_model}
+                          </div>
+                        </button>
+                      {/each}
+                    </div>
+                  {:else if showWorkOrderDropdown && workOrderSearchQuery.trim() && filteredWorkOrders.length === 0}
+                    <div class="absolute z-10 w-full mt-1 theme-bg-primary border theme-border rounded-lg shadow-lg p-4">
+                      <div class="text-sm theme-text-secondary text-center">
+                        No work orders found matching "{workOrderSearchQuery}"
                       </div>
-                      <div class="text-sm theme-text-secondary mt-1">
-                        Model: {workOrder.wo_model}
-                      </div>
-                    </button>
-                  {/each}
+                    </div>
+                  {/if}
                 </div>
+                
+                {#if selectedWorkOrderId && selectedWorkOrder}
+                  <div class="mt-4 p-4 theme-bg-secondary rounded-lg">
+                    <div class="text-sm theme-text-secondary mb-1">Selected Work Order</div>
+                    <div class="font-medium theme-text-primary">
+                      {selectedWorkOrder.wo_no || 'N/A'} {selectedWorkOrder.pwo_no ? `(${selectedWorkOrder.pwo_no})` : ''} - {selectedWorkOrder.wo_model || 'N/A'}
+                    </div>
+                    <button
+                      type="button"
+                      on:click={() => {
+                        selectedWorkOrderId = null;
+                        selectedWorkOrder = undefined;
+                        workOrderSearchQuery = '';
+                        showWorkOrderDropdown = false;
+                      }}
+                      class="mt-2 text-sm text-blue-600 dark:text-blue-400 hover:underline"
+                    >
+                      Change selection
+                    </button>
+                  </div>
+                {/if}
               {/if}
             </div>
           {:else}

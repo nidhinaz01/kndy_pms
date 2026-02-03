@@ -10,6 +10,12 @@ export interface ProductionEmployee {
   current_stage: string;
   original_stage?: string; // Original assigned stage from hr_emp.stage
   attendance_status?: 'present' | 'absent' | null;
+  // Attendance details (from prdn_planning_manpower or prdn_reporting_manpower)
+  planned_hours?: number | null; // For planning mode
+  actual_hours?: number | null; // For reporting mode
+  attendance_from_time?: string | null;
+  attendance_to_time?: string | null;
+  attendance_notes?: string | null;
   hours_planned?: number;
   hours_reported?: number;
   ot_hours?: number;

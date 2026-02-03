@@ -330,7 +330,7 @@ export async function checkWorkerConflicts(
     const fromDateStr = typeof fromDate === 'string' ? fromDate.split('T')[0] : fromDate;
     
     const conflictPromises = uniqueWorkerIds.map(async (workerId) => {
-      let reportsQuery = supabase
+      const reportsQuery = supabase
         .from('prdn_work_reporting')
         .select('*')
         .eq('worker_id', workerId)
@@ -338,12 +338,14 @@ export async function checkWorkerConflicts(
         // Filter by same date - both reports should be on the same date
         .eq('from_date', fromDateStr);
       
-      // Exclude current reports if editing
-      if (excludeReportIds && excludeReportIds.length > 0) {
-        reportsQuery = reportsQuery.not('id', 'in', `(${excludeReportIds.join(',')})`);
-      }
+      const { data: allReports, error: reportsError } = await reportsQuery;
       
-      const { data: existingReports, error: reportsError } = await reportsQuery;
+      if (reportsError) throw reportsError;
+      
+      // Exclude current reports if editing (filter in JavaScript, similar to planning IDs)
+      const existingReports = excludeReportIds && excludeReportIds.length > 0
+        ? (allReports || []).filter((report: any) => !excludeReportIds.includes(report.id))
+        : allReports || [];
 
       if (reportsError) throw reportsError;
 

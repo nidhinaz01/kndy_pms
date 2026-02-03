@@ -65,20 +65,36 @@ function validateDateConsistency(holiday: HolidayFormData): { valid: boolean; er
     'July', 'August', 'September', 'October', 'November', 'December'
   ];
   
-  const date = new Date(holiday.dt_value);
-  if (isNaN(date.getTime())) {
-    return { valid: false, error: 'Invalid date value' };
-  }
-  
   const monthIndex = monthNames.indexOf(holiday.dt_month);
   if (monthIndex === -1) {
     return { valid: false, error: 'Invalid month name' };
   }
   
-  // Check if date components match dt_value
-  if (date.getDate() !== holiday.dt_day ||
-      date.getMonth() !== monthIndex ||
-      date.getFullYear() !== holiday.dt_year) {
+  // Construct date from components (local time)
+  const dateFromComponents = new Date(holiday.dt_year, monthIndex, holiday.dt_day);
+  
+  // Parse dt_value and extract date components (handle UTC/local timezone issues)
+  // dt_value is in YYYY-MM-DD format, parse it as local date to avoid timezone issues
+  const dtValueParts = holiday.dt_value.split('-');
+  if (dtValueParts.length !== 3) {
+    return { valid: false, error: 'Invalid date value format' };
+  }
+  
+  const dtValueYear = parseInt(dtValueParts[0], 10);
+  const dtValueMonth = parseInt(dtValueParts[1], 10) - 1; // Month is 0-indexed
+  const dtValueDay = parseInt(dtValueParts[2], 10);
+  
+  // Validate the date from components is valid (e.g., Feb 30 would be invalid)
+  if (dateFromComponents.getDate() !== holiday.dt_day ||
+      dateFromComponents.getMonth() !== monthIndex ||
+      dateFromComponents.getFullYear() !== holiday.dt_year) {
+    return { valid: false, error: `Invalid date: ${holiday.dt_day} ${holiday.dt_month} ${holiday.dt_year} does not exist.` };
+  }
+  
+  // Check if date components match dt_value (compare parsed components directly)
+  if (dtValueDay !== holiday.dt_day ||
+      dtValueMonth !== monthIndex ||
+      dtValueYear !== holiday.dt_year) {
     return { valid: false, error: 'Date components do not match dt_value' };
   }
   

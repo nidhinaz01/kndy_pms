@@ -36,7 +36,7 @@
     <SortableHeader column="attendance_status" {sortConfig} {onSort} label="Status" />
     <SortableHeader column="stage" {sortConfig} {onSort} label="Current Stage" />
     <SortableHeader column="shift_code" {sortConfig} {onSort} label="Shift" />
-    <SortableHeader column="planned_hours" {sortConfig} {onSort} label="Hours Planned" />
+    <SortableHeader column="planned_hours" {sortConfig} {onSort} label="Hours Planned / Shift Hours" />
     <th class="px-6 py-3 text-left text-xs font-medium theme-text-primary uppercase tracking-wider">To Other Stage</th>
     <th class="px-6 py-3 text-left text-xs font-medium theme-text-primary uppercase tracking-wider">From Other Stage</th>
     <th class="px-6 py-3 text-left text-xs font-medium theme-text-primary uppercase tracking-wider">Actions</th>

@@ -15,6 +15,9 @@ export interface ManpowerTableState {
   selectedEmployee: ProductionEmployee | null;
   bulkAttendanceStatus: 'present' | 'absent';
   bulkNotes: string;
+  bulkFromTime: string;
+  bulkToTime: string;
+  bulkPlannedHours: number | null;
   isBulkSubmitting: boolean;
 }
 
@@ -33,6 +36,9 @@ export const initialManpowerTableState: ManpowerTableState = {
   selectedEmployee: null,
   bulkAttendanceStatus: 'present',
   bulkNotes: '',
+  bulkFromTime: '',
+  bulkToTime: '',
+  bulkPlannedHours: null,
   isBulkSubmitting: false
 };
 

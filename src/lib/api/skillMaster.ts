@@ -9,7 +9,10 @@ export interface SkillMaster {
   max_salary: number;
   modified_by: string;
   modified_dt: string;
-  wef: string;
+  wef_date: string; // Date when this rate version becomes effective
+  wef_time: string; // Time when this rate version becomes effective (HH:MM:SS)
+  wet_date: string | null; // Date when this rate version ends (NULL = currently active)
+  wet_time: string | null; // Time when this rate version ends (HH:MM:SS)
   created_by: string;
   created_dt: string;
   is_active: boolean;
@@ -60,13 +63,14 @@ export async function fetchSkillShorts(): Promise<string[]> {
   }
 }
 
-// Fetch all skill master records
+// Fetch all active skill master records (only current versions)
 export async function fetchSkillMaster(): Promise<SkillMaster[]> {
   try {
     const { data, error } = await supabase
       .from('hr_skill_master')
       .select('*')
       .eq('is_deleted', false)
+      .is('wet_date', null) // Only active versions (wet_date IS NULL)
       .order('skill_name', { ascending: true })
       .order('modified_dt', { ascending: false });
 
@@ -82,6 +86,29 @@ export async function fetchSkillMaster(): Promise<SkillMaster[]> {
   }
 }
 
+// Fetch all versions (history) for a specific skill
+export async function fetchSkillHistory(skillName: string): Promise<SkillMaster[]> {
+  try {
+    const { data, error } = await supabase
+      .from('hr_skill_master')
+      .select('*')
+      .eq('skill_name', skillName)
+      .eq('is_deleted', false)
+      .order('wef_date', { ascending: true })
+      .order('wef_time', { ascending: true });
+
+    if (error) {
+      console.error('Error fetching skill history:', error);
+      throw error;
+    }
+
+    return data || [];
+  } catch (error) {
+    console.error('Error in fetchSkillHistory:', error);
+    throw error;
+  }
+}
+
 // Save skill master record
 export async function saveSkillMaster(skillData: {
   skill_name: string;
@@ -90,6 +117,8 @@ export async function saveSkillMaster(skillData: {
   min_salary: number;
   max_salary: number;
   wef: string;
+  wef_date?: string;
+  wef_time?: string;
   is_active?: boolean;
 }, createdBy: string): Promise<void> {
   try {
@@ -104,6 +133,10 @@ export async function saveSkillMaster(skillData: {
     // Format WEF as YYYY-MM-DD for DATE type
     const formattedWef = wefDate.toISOString().split('T')[0];
     
+    // Use provided wef_date/wef_time or derive from wef
+    const wef_date = skillData.wef_date || formattedWef;
+    const wef_time = skillData.wef_time || '00:00:00';
+    
     // Convert rate_per_hour to integer (round to nearest whole number)
     const rateAsInteger = Math.round(skillData.rate_per_hour);
     
@@ -115,7 +148,10 @@ export async function saveSkillMaster(skillData: {
         rate_per_hour: rateAsInteger,
         min_salary: skillData.min_salary,
         max_salary: skillData.max_salary,
-        wef: formattedWef,
+        wef_date: wef_date,
+        wef_time: wef_time,
+        wet_date: null, // New record is active
+        wet_time: null,
         is_active: skillData.is_active ?? true,
         created_by: createdBy,
         created_dt: currentTime,
@@ -157,15 +193,7 @@ export async function updateSkillMaster(id: number, skillData: {
     if (skillData.max_salary !== undefined) updateData.max_salary = skillData.max_salary;
     if (skillData.is_active !== undefined) updateData.is_active = skillData.is_active;
     
-    // Handle WEF date formatting if provided
-    if (skillData.wef) {
-      const wefDate = new Date(skillData.wef);
-      if (isNaN(wefDate.getTime())) {
-        throw new Error('Invalid WEF date format');
-      }
-      // Format WEF as YYYY-MM-DD for DATE type
-      updateData.wef = wefDate.toISOString().split('T')[0];
-    }
+    // Note: wef column has been removed, use wef_date and wef_time instead
     
     const { error } = await supabase
       .from('hr_skill_master')
@@ -325,6 +353,284 @@ function parseDate(dateString: string): Date | null {
   
   const date = new Date(dateString.trim());
   return isNaN(date.getTime()) ? null : date;
+}
+
+// Validate date ranges for skill versions (check for gaps and overlaps)
+export interface DateRangeValidationResult {
+  isValid: boolean;
+  errors: string[];
+  warnings: string[];
+}
+
+export function validateSkillDateRanges(versions: Array<{
+  id?: number;
+  wef_date: string;
+  wef_time: string;
+  wet_date: string | null;
+  wet_time: string | null;
+}>): DateRangeValidationResult {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+
+  // Sort versions by wef_date and wef_time
+  const sortedVersions = [...versions].sort((a, b) => {
+    const dateCompare = a.wef_date.localeCompare(b.wef_date);
+    if (dateCompare !== 0) return dateCompare;
+    return a.wef_time.localeCompare(b.wef_time);
+  });
+
+  // Check for gaps and overlaps
+  for (let i = 0; i < sortedVersions.length - 1; i++) {
+    const current = sortedVersions[i];
+    const next = sortedVersions[i + 1];
+
+    // Current version must have wet_date if not the last one
+    if (!current.wet_date && i < sortedVersions.length - 1) {
+      errors.push(`Version starting at ${current.wef_date} ${current.wef_time} must have an end date (except the last version)`);
+      continue;
+    }
+
+    if (current.wet_date && current.wet_time) {
+      // Calculate end datetime
+      const currentEnd = new Date(`${current.wet_date}T${current.wet_time}`);
+      
+      // Calculate next start datetime
+      const nextStart = new Date(`${next.wef_date}T${next.wef_time}`);
+
+      // Calculate expected next start (current end date + 1 day at 00:00:00)
+      // If current ends at 30-06-2026 23:59:59, next should start at 01-07-2026 00:00:00
+      const expectedNextStart = new Date(currentEnd);
+      expectedNextStart.setDate(expectedNextStart.getDate() + 1);
+      expectedNextStart.setHours(0, 0, 0, 0);
+
+      // Check if they are exactly consecutive (wet ends on day N at 23:59:59, next wef starts on day N+1 at 00:00:00)
+      const timeDiff = nextStart.getTime() - expectedNextStart.getTime();
+      if (timeDiff !== 0) {
+        // Not exactly consecutive
+        if (timeDiff < 0) {
+          errors.push(`Overlap: Version ending at ${current.wet_date} ${current.wet_time} overlaps with version starting at ${next.wef_date} ${next.wef_time}`);
+        } else {
+          errors.push(`Gap: Version ending at ${current.wet_date} ${current.wet_time} has a gap before version starting at ${next.wef_date} ${next.wef_time}. Expected next start: ${expectedNextStart.toISOString().split('T')[0]} 00:00:00`);
+        }
+      }
+    }
+  }
+
+  // Check that only one version has wet_date = NULL (active)
+  const activeVersions = sortedVersions.filter(v => !v.wet_date);
+  if (activeVersions.length === 0) {
+    errors.push('At least one version must be active (wet_date = NULL)');
+  } else if (activeVersions.length > 1) {
+    errors.push(`Multiple active versions found. Only one version can be active at a time.`);
+  }
+
+  return {
+    isValid: errors.length === 0,
+    errors,
+    warnings
+  };
+}
+
+// Bulk update skill versions
+export async function bulkUpdateSkillVersions(
+  skillName: string,
+  versions: Array<{
+    id?: number;
+    rate_per_hour: number;
+    min_salary: number;
+    max_salary: number;
+    wef_date: string;
+    wef_time: string;
+    wet_date: string | null;
+    wet_time: string | null;
+    is_active?: boolean;
+  }>,
+  username: string
+): Promise<void> {
+  try {
+    // Validate date ranges
+    const validation = validateSkillDateRanges(versions);
+    if (!validation.isValid) {
+      throw new Error(`Validation failed: ${validation.errors.join('; ')}`);
+    }
+
+    const currentTime = new Date().toISOString();
+
+    // Update or insert each version
+    for (const version of versions) {
+      const rateAsInteger = Math.round(version.rate_per_hour);
+      
+      if (version.id) {
+        // Update existing version
+        const { error } = await supabase
+          .from('hr_skill_master')
+          .update({
+            rate_per_hour: rateAsInteger,
+            min_salary: version.min_salary,
+            max_salary: version.max_salary,
+            wef_date: version.wef_date,
+            wef_time: version.wef_time,
+            wet_date: version.wet_date,
+            wet_time: version.wet_time,
+            is_active: version.is_active ?? (version.wet_date === null),
+            modified_by: username,
+            modified_dt: currentTime
+          })
+          .eq('id', version.id);
+
+        if (error) {
+          console.error('Error updating skill version:', error);
+          throw error;
+        }
+      } else {
+        // Insert new version
+        // Get skill_short from existing version
+        const existing = await supabase
+          .from('hr_skill_master')
+          .select('skill_short')
+          .eq('skill_name', skillName)
+          .eq('is_deleted', false)
+          .limit(1)
+          .single();
+
+        if (existing.error || !existing.data) {
+          throw new Error(`Cannot find skill_short for skill: ${skillName}`);
+        }
+
+        const { error } = await supabase
+          .from('hr_skill_master')
+          .insert({
+            skill_name: skillName,
+            skill_short: existing.data.skill_short,
+            rate_per_hour: rateAsInteger,
+            min_salary: version.min_salary,
+            max_salary: version.max_salary,
+            wef_date: version.wef_date,
+            wef_time: version.wef_time,
+            wet_date: version.wet_date,
+            wet_time: version.wet_time,
+            is_active: version.is_active ?? (version.wet_date === null),
+            created_by: username,
+            created_dt: currentTime,
+            modified_by: username,
+            modified_dt: currentTime
+          });
+
+        if (error) {
+          console.error('Error inserting skill version:', error);
+          throw error;
+        }
+      }
+    }
+  } catch (error) {
+    console.error('Error in bulkUpdateSkillVersions:', error);
+    throw error;
+  }
+}
+
+// Add new skill version (ends previous active version)
+export async function addNewSkillVersion(
+  skillName: string,
+  wefDate: string,
+  wefTime: string,
+  skillData: {
+    rate_per_hour: number;
+    min_salary: number;
+    max_salary: number;
+    is_active?: boolean;
+  },
+  username: string
+): Promise<void> {
+  try {
+    // Get current active version
+    const { data: activeVersion, error: fetchError } = await supabase
+      .from('hr_skill_master')
+      .select('*')
+      .eq('skill_name', skillName)
+      .is('wet_date', null)
+      .eq('is_deleted', false)
+      .single();
+
+    if (fetchError && fetchError.code !== 'PGRST116') {
+      // PGRST116 = no rows returned, which is OK for new skills
+      throw fetchError;
+    }
+
+    const currentTime = new Date().toISOString();
+    const rateAsInteger = Math.round(skillData.rate_per_hour);
+
+    // Calculate previous version's end date/time
+    // Previous wet_date = wef_date - 1 day
+    // Previous wet_time = 23:59:59
+    const wefDateTime = new Date(`${wefDate}T${wefTime}`);
+    const prevEndDateTime = new Date(wefDateTime);
+    prevEndDateTime.setDate(prevEndDateTime.getDate() - 1);
+    prevEndDateTime.setHours(23, 59, 59, 0);
+
+    const prevWetDate = prevEndDateTime.toISOString().split('T')[0];
+    const prevWetTime = '23:59:59';
+
+    // If there's an active version, end it
+    if (activeVersion) {
+      const { error: updateError } = await supabase
+        .from('hr_skill_master')
+        .update({
+          wet_date: prevWetDate,
+          wet_time: prevWetTime,
+          is_active: false,
+          modified_by: username,
+          modified_dt: currentTime
+        })
+        .eq('id', activeVersion.id);
+
+      if (updateError) {
+        console.error('Error ending previous active version:', updateError);
+        throw updateError;
+      }
+    }
+
+    // Get skill_short
+    const { data: skillDataRow } = await supabase
+      .from('hr_skill_master')
+      .select('skill_short')
+      .eq('skill_name', skillName)
+      .eq('is_deleted', false)
+      .limit(1)
+      .single();
+
+    const skillShort = skillDataRow?.skill_short || activeVersion?.skill_short;
+    if (!skillShort) {
+      throw new Error(`Cannot find skill_short for skill: ${skillName}`);
+    }
+
+    // Insert new version
+    const { error: insertError } = await supabase
+      .from('hr_skill_master')
+      .insert({
+        skill_name: skillName,
+        skill_short: skillShort,
+        rate_per_hour: rateAsInteger,
+        min_salary: skillData.min_salary,
+        max_salary: skillData.max_salary,
+        wef_date: wefDate,
+        wef_time: wefTime,
+        wet_date: null, // New version is active
+        wet_time: null,
+        is_active: skillData.is_active ?? true,
+        created_by: username,
+        created_dt: currentTime,
+        modified_by: username,
+        modified_dt: currentTime
+      });
+
+    if (insertError) {
+      console.error('Error adding new skill version:', insertError);
+      throw insertError;
+    }
+  } catch (error) {
+    console.error('Error in addNewSkillVersion:', error);
+    throw error;
+  }
 }
 
 // Import skills from CSV data

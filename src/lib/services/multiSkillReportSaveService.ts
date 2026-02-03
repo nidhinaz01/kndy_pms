@@ -112,7 +112,47 @@ export async function saveMultiSkillReports(
       }
     };
     
-    const reportData = selectedWorks.map(work => {
+    // Check if any works have reporting_id (indicating they're existing reports to update)
+    const worksToUpdate = selectedWorks.filter(work => work.reporting_id);
+    const worksToInsert = selectedWorks.filter(work => !work.reporting_id);
+    
+    // Prepare update data for existing reports
+    const updatePromises = worksToUpdate.map(async (work) => {
+      const hasDeviation = formData.deviations[work.id]?.hasDeviation || false;
+      const workerId = hasDeviation ? null : (formData.skillEmployees[work.id] || null);
+      
+      // Calculate lt_details specific to this worker
+      const workerLtDetails = calculateLtDetailsForWorker(workerId);
+      
+      const updateData = {
+        worker_id: workerId,
+        from_date: formData.fromDate,
+        from_time: formData.fromTime,
+        to_date: formData.toDate,
+        to_time: formData.toTime,
+        hours_worked_till_date: work.hours_worked_till_date || work.time_worked_till_date || 0,
+        hours_worked_today: hoursWorkedToday,
+        completion_status: formData.completionStatus,
+        lt_minutes_total: formData.ltMinutes,
+        lt_details: workerLtDetails,
+        lt_comments: formData.ltComments,
+        modified_by: currentUser,
+        modified_dt: now
+      };
+      
+      const { data, error } = await supabase
+        .from('prdn_work_reporting')
+        .update(updateData)
+        .eq('id', work.reporting_id)
+        .select()
+        .single();
+      
+      if (error) throw error;
+      return data;
+    });
+    
+    // Prepare insert data for new reports
+    const reportData = worksToInsert.map(work => {
       const hasDeviation = formData.deviations[work.id]?.hasDeviation || false;
       const workerId = hasDeviation ? null : (formData.skillEmployees[work.id] || null);
       
@@ -126,7 +166,7 @@ export async function saveMultiSkillReports(
         from_time: formData.fromTime,
         to_date: formData.toDate,
         to_time: formData.toTime,
-        hours_worked_till_date: work.time_worked_till_date || 0,
+        hours_worked_till_date: work.hours_worked_till_date || work.time_worked_till_date || 0,
         hours_worked_today: hoursWorkedToday,
         completion_status: formData.completionStatus,
         lt_minutes_total: formData.ltMinutes,
@@ -140,16 +180,23 @@ export async function saveMultiSkillReports(
       };
     });
 
-    const { data, error } = await supabase
-      .from('prdn_work_reporting')
-      .insert(reportData)
-      .select();
+    // Execute updates and inserts
+    const [updatedReports, insertResult] = await Promise.all([
+      Promise.all(updatePromises),
+      reportData.length > 0 
+        ? supabase
+            .from('prdn_work_reporting')
+            .insert(reportData)
+            .select()
+        : Promise.resolve({ data: [], error: null })
+    ]);
 
-    if (error) {
-      return { success: false, error: error.message || 'Unknown error' };
+    if (insertResult.error) {
+      return { success: false, error: insertResult.error.message || 'Unknown error' };
     }
 
-    const savedReports = data || [];
+    // Combine updated and newly inserted reports
+    const savedReports = [...updatedReports, ...(insertResult.data || [])];
     
     // Calculate piece rate for all planning_ids if any report is completed
     const completedPlanningIds = new Set<number>();

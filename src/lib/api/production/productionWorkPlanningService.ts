@@ -10,7 +10,7 @@ export async function createWorkPlanning(planningData: CreateWorkPlanningData, c
       .insert({
         ...planningData,
         time_worked_till_date: planningData.time_worked_till_date || 0,
-        remaining_time: planningData.remaining_time || planningData.planned_hours,
+        remaining_time: planningData.remaining_time ?? 0,
         status: planningData.status || 'planned',
         created_by: createdBy,
         created_dt: now,

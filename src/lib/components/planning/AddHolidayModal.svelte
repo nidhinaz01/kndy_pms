@@ -48,7 +48,12 @@
       return;
     }
 
-    formData.dt_value = date.toISOString().split('T')[0];
+    // Construct dt_value directly from components to avoid timezone issues
+    // Format: YYYY-MM-DD (pad with zeros)
+    const year = formData.dt_year.toString();
+    const month = (monthIndex + 1).toString().padStart(2, '0');
+    const day = formData.dt_day.toString().padStart(2, '0');
+    formData.dt_value = `${year}-${month}-${day}`;
     formData.is_active = isActive;
 
     onSave(formData);

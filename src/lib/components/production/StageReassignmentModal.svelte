@@ -54,9 +54,26 @@
     loadStages();
   }
 
-  // Watch for modal opening and load shift details
+  // Watch for modal opening and load shift details (only if attendance times are not available)
   $: if (showModal && employee && !shiftDetails.shift) {
-    loadShiftDetails();
+    // Only load shift details if attendance times are not marked (fallback)
+    if (!employee.attendance_from_time || !employee.attendance_to_time) {
+      loadShiftDetails();
+    }
+  }
+  
+  // Watch for modal opening and initialize times from attendance if available
+  let timesInitialized = false;
+  $: if (showModal && employee && !timesInitialized) {
+    // Initialize from and to times from attendance if available
+    if (employee.attendance_from_time && employee.attendance_to_time) {
+      fromTime = employee.attendance_from_time.substring(0, 5); // Extract HH:MM from HH:MM:SS
+      toTime = employee.attendance_to_time.substring(0, 5);
+      timesInitialized = true;
+    }
+  }
+  $: if (!showModal) {
+    timesInitialized = false;
   }
 
   // Reset selectedStage when modal opens (only once)
@@ -158,24 +175,47 @@
     fromTimeError = '';
     toTimeError = '';
 
-    if (!shiftDetails.shift) return;
-
-    const shiftStart = shiftDetails.shift.start_time;
-    const shiftEnd = shiftDetails.shift.end_time;
+    // Use attendance time range if available, otherwise fall back to shift time
+    const attendanceStart = employee?.attendance_from_time;
+    const attendanceEnd = employee?.attendance_to_time;
     
-    // Calculate earliest allowed time (3 hours before shift start)
-    const earliestAllowedTime = subtractHours(shiftStart, 3);
+    // If attendance times are marked, use them; otherwise use shift times
+    let timeStart: string;
+    let timeEnd: string;
+    
+    if (attendanceStart && attendanceEnd) {
+      // Use attendance time range
+      timeStart = attendanceStart;
+      timeEnd = attendanceEnd;
+    } else if (shiftDetails.shift) {
+      // Fall back to shift time range
+      timeStart = shiftDetails.shift.start_time;
+      timeEnd = shiftDetails.shift.end_time;
+    } else {
+      // No time constraints available
+      return;
+    }
+    
+    // Calculate earliest allowed time (3 hours before time start)
+    const earliestAllowedTime = subtractHours(timeStart, 3);
 
     if (fromTime) {
-      // Allow start time up to 3 hours before shift start
+      // Allow start time up to 3 hours before time start
       if (fromTime < earliestAllowedTime) {
-        fromTimeError = `Start time cannot be more than 3 hours before shift start (${formatTime(earliestAllowedTime)})`;
+        fromTimeError = `Start time cannot be more than 3 hours before ${attendanceStart ? 'attendance start' : 'shift start'} (${formatTime(earliestAllowedTime)})`;
+      }
+      // Ensure fromTime is not before attendance start
+      if (attendanceStart && fromTime < attendanceStart) {
+        fromTimeError = `Start time cannot be before attendance start time (${formatTime(attendanceStart)})`;
       }
     }
 
     if (toTime) {
-      if (toTime > shiftEnd) {
-        toTimeError = `End time cannot be after shift end (${formatTime(shiftEnd)})`;
+      // Ensure toTime is not after attendance end
+      if (attendanceEnd && toTime > attendanceEnd) {
+        toTimeError = `End time cannot be after attendance end time (${formatTime(attendanceEnd)})`;
+      } else if (!attendanceEnd && shiftDetails.shift && toTime > timeEnd) {
+        toTimeError = `End time cannot be after ${attendanceStart ? 'attendance end' : 'shift end'} (${formatTime(timeEnd)})`;
       }
     }
 
@@ -275,18 +315,40 @@
   }
 
   function getAvailableTimeRange() {
-    if (!shiftDetails.shift) return { start: '', end: '' };
+    // Priority: Use attendance time range if available, otherwise use shift time range
+    const attendanceStart = employee?.attendance_from_time;
+    const attendanceEnd = employee?.attendance_to_time;
+    
+    let availableStart = '';
+    let availableEnd = '';
 
-    let availableStart = shiftDetails.shift.start_time;
-    let availableEnd = shiftDetails.shift.end_time;
+    if (attendanceStart && attendanceEnd) {
+      // Use attendance time range
+      availableStart = attendanceStart;
+      availableEnd = attendanceEnd;
+    } else if (shiftDetails.shift) {
+      // Fall back to shift time range
+      availableStart = shiftDetails.shift.start_time;
+      availableEnd = shiftDetails.shift.end_time;
+    }
 
     // If this is a reassignment, check the original assignment time constraints
     if (employee?.stage_journey && employee.stage_journey.length > 0) {
       const lastAssignment = employee.stage_journey[employee.stage_journey.length - 1];
       if (lastAssignment.to_stage === employee.current_stage) {
         // Worker was reassigned to current stage, use original assignment time constraints
-        availableStart = lastAssignment.from_time;
-        availableEnd = lastAssignment.to_time;
+        // But still respect attendance time boundaries
+        const originalStart = lastAssignment.from_time;
+        const originalEnd = lastAssignment.to_time;
+        
+        // Use the intersection of attendance time and original assignment time
+        if (attendanceStart && attendanceEnd) {
+          availableStart = originalStart > attendanceStart ? originalStart : attendanceStart;
+          availableEnd = originalEnd < attendanceEnd ? originalEnd : attendanceEnd;
+        } else {
+          availableStart = originalStart;
+          availableEnd = originalEnd;
+        }
       }
     }
 
@@ -330,8 +392,27 @@
           </p>
         </div>
 
-        <!-- Shift Information -->
-        {#if shiftDetails.shift}
+        <!-- Attendance Time Information -->
+        {#if employee.attendance_from_time && employee.attendance_to_time}
+          <div class="theme-bg-secondary theme-border rounded-lg" style="padding: 15px; margin-bottom: 20px;">
+            <h4 class="theme-text-primary" style="margin: 0 0 10px 0; font-size: 16px; font-weight: 500;">Attendance Time Range:</h4>
+            <p class="theme-text-primary font-medium">
+              {formatTime(employee.attendance_from_time)} - {formatTime(employee.attendance_to_time)}
+            </p>
+            <p class="theme-text-secondary text-xs mt-2">
+              Reassignment must be within this time range.
+            </p>
+          </div>
+        {:else}
+          <div class="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-500 rounded-lg" style="padding: 15px; margin-bottom: 20px;">
+            <p class="text-yellow-800 dark:text-yellow-200 text-sm">
+              <strong>⚠️ Attendance time not marked:</strong> Please mark attendance with time in the attendance modal before reassigning.
+            </p>
+          </div>
+        {/if}
+
+        <!-- Shift Information (fallback) -->
+        {#if shiftDetails.shift && (!employee.attendance_from_time || !employee.attendance_to_time)}
           <div class="theme-bg-secondary theme-border rounded-lg" style="padding: 15px; margin-bottom: 20px;">
             <h4 class="theme-text-primary" style="margin: 0 0 10px 0; font-size: 16px; font-weight: 500;">Shift Details:</h4>
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
@@ -391,11 +472,15 @@
             <legend class="theme-text-primary" style="display: block; margin-bottom: 10px; font-weight: 500;">Reassignment Time Period:</legend>
             
             <!-- Available Time Range Info -->
-            {#if shiftDetails.shift}
-              {@const timeRange = getAvailableTimeRange()}
+            {#if availableTimeRange.start && availableTimeRange.end}
               <div class="mb-3 p-2 rounded text-xs" style="background-color: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.3);">
                 <p class="text-gray-900 dark:text-gray-100">
-                  <strong>Available Time Range:</strong> {formatTime(timeRange.start)} - {formatTime(timeRange.end)}
+                  <strong>Available Time Range:</strong> {formatTime(availableTimeRange.start)} - {formatTime(availableTimeRange.end)}
+                  {#if employee.attendance_from_time && employee.attendance_to_time}
+                    <span class="text-gray-600 dark:text-gray-400">(from attendance)</span>
+                  {:else if shiftDetails.shift}
+                    <span class="text-gray-600 dark:text-gray-400">(from shift)</span>
+                  {/if}
                 </p>
                 {#if employee.stage_journey && employee.stage_journey.length > 0}
                   {@const lastAssignment = employee.stage_journey[employee.stage_journey.length - 1]}

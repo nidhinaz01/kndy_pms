@@ -7,6 +7,7 @@
   export let isLoading: boolean = false;
   export let selectedDate: string = '';
   export let reportingSubmissionStatus: any = null;
+  export let shiftCode: string = '';
 
   const dispatch = createEventDispatcher();
 
@@ -53,6 +54,7 @@
       isLoading={isLoading} 
       selectedDate={selectedDate}
       {reportingSubmissionStatus}
+      {shiftCode}
       on:refresh={handleRefresh}
       on:attendanceMarked={handleAttendanceMarked}
       on:bulkAttendanceMarked={handleBulkAttendanceMarked}

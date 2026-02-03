@@ -160,6 +160,14 @@
     dispatch('reportUnplannedWork');
   }
 
+  function handleEditReport(group: any) {
+    dispatch('editReport', group);
+  }
+
+  function handleDeleteReport(group: any) {
+    dispatch('deleteReport', group);
+  }
+
   async function checkOvertime() {
     try {
       const result = await calculateOvertime(stageCode, selectedDate);
@@ -561,6 +569,7 @@
             <SortableHeader column="sortable_ltHours" {sortConfig} onSort={handleSort} label="Lost Time" headerClass="w-[120px]" />
             <th class="px-4 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider" style="width: 200px;">Reason</th>
             <SortableHeader column="sortable_reportedOn" {sortConfig} onSort={handleSort} label="Reported On" headerClass="w-[150px]" />
+            <th class="px-4 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider" style="width: 150px;">Actions</th>
           </tr>
         </thead>
         <tbody class="theme-bg-primary divide-y divide-gray-200 dark:divide-gray-700">
@@ -738,6 +747,28 @@
                   {/each}
                 </div>
                   </td>
+              <td class="px-4 py-2 whitespace-nowrap text-sm theme-text-primary">
+                {#if canEdit}
+                  <div class="flex space-x-2">
+                    <Button 
+                      variant="primary" 
+                      size="sm" 
+                      on:click={() => handleEditReport(typedGroup)}
+                    >
+                      Edit
+                    </Button>
+                    <Button 
+                      variant="danger" 
+                      size="sm" 
+                      on:click={() => handleDeleteReport(typedGroup)}
+                    >
+                      Delete
+                    </Button>
+                  </div>
+                {:else}
+                  <span class="text-xs theme-text-secondary italic">Read-only</span>
+                {/if}
+              </td>
                 </tr>
           {/each}
         </tbody>

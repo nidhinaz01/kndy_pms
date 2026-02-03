@@ -338,9 +338,12 @@
         
         reassignmentsData = data || [];
         reassignmentsError = error;
-      } catch (err: any) {
-        // If column doesn't exist, try querying by date and stage
-        if (err?.message?.includes('reporting_submission_id') || err?.code === '42703') {
+        
+        // If error is about missing column, try fallback
+        if (reassignmentsError && (reassignmentsError.code === '42703' || 
+            reassignmentsError.code === 'PGRST204' ||
+            reassignmentsError.message?.includes('reporting_submission_id') ||
+            reassignmentsError.message?.includes('Could not find'))) {
           console.warn('reporting_submission_id column not found, using fallback query');
           const { data: fallbackData, error: fallbackError } = await supabase
             .from('prdn_reporting_stage_reassignment')
@@ -354,12 +357,39 @@
           
           reassignmentsData = fallbackData || [];
           reassignmentsError = fallbackError;
+        }
+      } catch (err: any) {
+        // If column doesn't exist, try querying by date and stage
+        if (err?.message?.includes('reporting_submission_id') || 
+            err?.code === '42703' || 
+            err?.code === 'PGRST204' ||
+            err?.message?.includes('Could not find')) {
+          console.warn('reporting_submission_id column not found, using fallback query');
+          try {
+            const { data: fallbackData, error: fallbackError } = await supabase
+              .from('prdn_reporting_stage_reassignment')
+              .select(`
+                *,
+                hr_emp!inner(emp_id, emp_name, skill_short)
+              `)
+              .eq('reporting_date', selectedSubmission.reporting_date)
+              .eq('to_stage_code', selectedSubmission.stage_code)
+              .eq('is_deleted', false);
+            
+            reassignmentsData = fallbackData || [];
+            reassignmentsError = fallbackError;
+          } catch (fallbackErr: any) {
+            reassignmentsError = fallbackErr;
+          }
         } else {
           reassignmentsError = err;
         }
       }
       
-      if (reassignmentsError && !reassignmentsError.message?.includes('reporting_submission_id')) {
+      if (reassignmentsError && 
+          !reassignmentsError.message?.includes('reporting_submission_id') &&
+          reassignmentsError.code !== '42703' &&
+          reassignmentsError.code !== 'PGRST204') {
         console.warn('Error loading stage reassignments:', reassignmentsError);
         // Don't throw - continue without stage reassignments
       }
@@ -533,19 +563,26 @@
           reassignmentsError = error;
         } catch (err: any) {
           // If reporting_submission_id column doesn't exist, use fallback
-          if (err?.message?.includes('reporting_submission_id') || err?.code === '42703') {
+          if (err?.message?.includes('reporting_submission_id') || 
+              err?.code === '42703' || 
+              err?.code === 'PGRST204' ||
+              err?.message?.includes('Could not find')) {
             console.warn('reporting_submission_id column not found, using fallback update');
-            const { error: fallbackError } = await supabase
-              .from('prdn_reporting_stage_reassignment')
-              .update({
-                status: newStatus,
-                modified_by: currentUser,
-                modified_dt: now
-              })
-              .eq('reporting_date', selectedSubmission.reporting_date)
-              .eq('to_stage_code', selectedSubmission.stage_code);
-            
-            reassignmentsError = fallbackError;
+            try {
+              const { error: fallbackError } = await supabase
+                .from('prdn_reporting_stage_reassignment')
+                .update({
+                  status: newStatus,
+                  modified_by: currentUser,
+                  modified_dt: now
+                })
+                .eq('reporting_date', selectedSubmission.reporting_date)
+                .eq('to_stage_code', selectedSubmission.stage_code);
+              
+              reassignmentsError = fallbackError;
+            } catch (fallbackErr: any) {
+              reassignmentsError = fallbackErr;
+            }
           } else {
             reassignmentsError = err;
           }
@@ -567,23 +604,30 @@
                 .eq('reporting_submission_id', selectedSubmission.id);
               
               updateError = error;
-            } catch (err: any) {
-              // If reporting_submission_id doesn't exist, use fallback
-              if (err?.message?.includes('reporting_submission_id') || err?.code === '42703') {
-                const { error: fallbackError } = await supabase
-                  .from('prdn_reporting_stage_reassignment')
-                  .update({
-                    modified_by: currentUser,
-                    modified_dt: now
-                  })
-                  .eq('reporting_date', selectedSubmission.reporting_date)
-                  .eq('to_stage_code', selectedSubmission.stage_code);
-                
-                updateError = fallbackError;
-              } else {
-                updateError = err;
+              } catch (err: any) {
+                // If reporting_submission_id doesn't exist, use fallback
+                if (err?.message?.includes('reporting_submission_id') || 
+                    err?.code === '42703' || 
+                    err?.code === 'PGRST204' ||
+                    err?.message?.includes('Could not find')) {
+                  try {
+                    const { error: fallbackError } = await supabase
+                      .from('prdn_reporting_stage_reassignment')
+                      .update({
+                        modified_by: currentUser,
+                        modified_dt: now
+                      })
+                      .eq('reporting_date', selectedSubmission.reporting_date)
+                      .eq('to_stage_code', selectedSubmission.stage_code);
+                    
+                    updateError = fallbackError;
+                  } catch (fallbackErr: any) {
+                    updateError = fallbackErr;
+                  }
+                } else {
+                  updateError = err;
+                }
               }
-            }
             
             if (updateError) {
               console.error('Error updating stage reassignments:', updateError);
@@ -637,60 +681,58 @@
             reassignmentsRejectError = error;
           } catch (err: any) {
             // If reporting_submission_id column doesn't exist, use fallback
-            if (err?.message?.includes('reporting_submission_id') || err?.code === '42703') {
+            if (err?.message?.includes('reporting_submission_id') || 
+                err?.code === '42703' || 
+                err?.code === 'PGRST204' ||
+                err?.message?.includes('Could not find')) {
               console.warn('reporting_submission_id column not found, using fallback update for reject');
-              const { error: fallbackError } = await supabase
-                .from('prdn_reporting_stage_reassignment')
-                .update({
-                  status: 'draft',
-                  modified_by: currentUser,
-                  modified_dt: now
-                })
-                .eq('reporting_date', selectedSubmission.reporting_date)
-                .eq('to_stage_code', selectedSubmission.stage_code);
-              
-              reassignmentsRejectError = fallbackError;
+              try {
+                const { error: fallbackError } = await supabase
+                  .from('prdn_reporting_stage_reassignment')
+                  .update({
+                    status: 'draft',
+                    modified_by: currentUser,
+                    modified_dt: now
+                  })
+                  .eq('reporting_date', selectedSubmission.reporting_date)
+                  .eq('to_stage_code', selectedSubmission.stage_code);
+                
+                reassignmentsRejectError = fallbackError;
+              } catch (fallbackErr: any) {
+                reassignmentsRejectError = fallbackErr;
+              }
             } else {
               reassignmentsRejectError = err;
             }
           }
           
           if (reassignmentsRejectError) {
-            // If error is about missing column, try without status
-            if (reassignmentsRejectError.message?.includes('status') || reassignmentsRejectError.message?.includes('column')) {
+            // Check if error is about missing reporting_submission_id column
+            if (reassignmentsRejectError.code === '42703' || 
+                reassignmentsRejectError.code === 'PGRST204' ||
+                reassignmentsRejectError.message?.includes('reporting_submission_id') ||
+                reassignmentsRejectError.message?.includes('Could not find')) {
+              // Column doesn't exist - skip update or use fallback without reporting_submission_id
+              console.warn('reporting_submission_id column not found in prdn_reporting_stage_reassignment, skipping update');
+              // Don't try to update - the column doesn't exist
+            } else if (reassignmentsRejectError.message?.includes('status') || reassignmentsRejectError.message?.includes('column')) {
               console.warn('prdn_reporting_stage_reassignment table may not have status column:', reassignmentsRejectError.message);
-              let updateError: any = null;
+              // Try updating without status and without reporting_submission_id
               try {
-                const { error } = await supabase
+                const { error: fallbackError } = await supabase
                   .from('prdn_reporting_stage_reassignment')
                   .update({
-                    reporting_submission_id: null,
                     modified_by: currentUser,
                     modified_dt: now
                   })
-                  .eq('reporting_submission_id', selectedSubmission.id);
+                  .eq('reporting_date', selectedSubmission.reporting_date)
+                  .eq('to_stage_code', selectedSubmission.stage_code);
                 
-                updateError = error;
-              } catch (err: any) {
-                // If reporting_submission_id doesn't exist, use fallback
-                if (err?.message?.includes('reporting_submission_id') || err?.code === '42703') {
-                  const { error: fallbackError } = await supabase
-                    .from('prdn_reporting_stage_reassignment')
-                    .update({
-                      modified_by: currentUser,
-                      modified_dt: now
-                    })
-                    .eq('reporting_date', selectedSubmission.reporting_date)
-                    .eq('to_stage_code', selectedSubmission.stage_code);
-                  
-                  updateError = fallbackError;
-                } else {
-                  updateError = err;
+                if (fallbackError) {
+                  console.error('Error updating stage reassignments on reject (fallback):', fallbackError);
                 }
-              }
-              
-              if (updateError) {
-                console.error('Error updating stage reassignments on reject:', updateError);
+              } catch (err: any) {
+                console.error('Error updating stage reassignments on reject (fallback failed):', err);
               }
             } else {
               console.error('Error updating stage reassignments on reject:', reassignmentsRejectError);

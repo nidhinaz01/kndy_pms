@@ -11,9 +11,42 @@
   export let onAttendanceToggle: () => void = () => {};
   export let onStageReassignment: () => void = () => {};
   export let onViewJourney: () => void = () => {};
+
+  // Get shift hours from attendance
+  $: shiftHoursPlanned = employee.planned_hours ?? null; // From planning attendance
+  $: shiftHoursReported = employee.actual_hours ?? null; // From reporting attendance
+
+  // Highlight if employee is present and work hours don't match shift hours
+  let hasMismatchedPlannedHours = false;
+  let hasMismatchedReportedHours = false;
+  
+  $: {
+    const workHoursPlanned = employee.hours_planned || 0;
+    const workHoursReported = employee.hours_reported || 0;
+    const isPresent = employee.attendance_status === 'present';
+    
+    // Check planned hours mismatch
+    const hasPlannedHours = shiftHoursPlanned !== null && shiftHoursPlanned !== undefined;
+    hasMismatchedPlannedHours = isPresent && hasPlannedHours && workHoursPlanned !== shiftHoursPlanned;
+    
+    // Check reported hours mismatch
+    const hasReportedHours = shiftHoursReported !== null && shiftHoursReported !== undefined;
+    hasMismatchedReportedHours = isPresent && hasReportedHours && workHoursReported !== shiftHoursReported;
+  }
+  
+  // Format hours to show up to 2 decimal places, removing trailing zeros
+  function formatHours(hours: number | null | undefined): string {
+    if (hours === null || hours === undefined) return '0';
+    const formatted = hours.toFixed(2);
+    // Remove trailing zeros and decimal point if not needed
+    return formatted.replace(/\.?0+$/, '');
+  }
+  
+  // Check if any column should be highlighted
+  $: hasMismatchedHours = hasMismatchedPlannedHours || hasMismatchedReportedHours;
 </script>
 
-<tr class="hover:theme-bg-secondary transition-colors">
+<tr class="hover:theme-bg-secondary transition-colors {hasMismatchedHours ? '!bg-yellow-50 dark:!bg-yellow-900/30 !border-l-4 !border-yellow-500' : ''}">
   <td class="px-6 py-4 whitespace-nowrap">
     <input 
       type="checkbox" 
@@ -24,11 +57,11 @@
   </td>
   <td class="px-6 py-4 whitespace-nowrap">
     <div>
-      <div class="text-sm font-medium theme-text-primary">{employee.emp_name}</div>
-      <div class="text-sm theme-text-secondary">{employee.emp_id}</div>
+      <div class="text-sm font-medium {hasMismatchedHours ? 'text-gray-900 dark:text-yellow-100' : 'theme-text-primary'}">{employee.emp_name}</div>
+      <div class="text-sm {hasMismatchedHours ? 'text-gray-700 dark:text-yellow-200' : 'theme-text-secondary'}">{employee.emp_id}</div>
     </div>
   </td>
-  <td class="px-6 py-4 whitespace-nowrap text-sm theme-text-primary">
+  <td class="px-6 py-4 whitespace-nowrap text-sm {hasMismatchedHours ? '!text-gray-900 dark:!text-yellow-100' : 'theme-text-primary'}">
     {employee.skill_short}
   </td>
   <td class="px-6 py-4 whitespace-nowrap">
@@ -65,32 +98,40 @@
   </td>
   <td class="px-6 py-4 whitespace-nowrap">
     <div>
-      <div class="text-sm font-medium theme-text-primary">{employee.shift_code}</div>
-      <div class="text-sm theme-text-secondary">{employee.shift_name}</div>
+      <div class="text-sm font-medium {hasMismatchedHours ? 'text-gray-900 dark:text-yellow-100' : 'theme-text-primary'}">{employee.shift_code}</div>
+      <div class="text-sm {hasMismatchedHours ? 'text-gray-700 dark:text-yellow-200' : 'theme-text-secondary'}">{employee.shift_name}</div>
     </div>
   </td>
-  <td class="px-6 py-4 whitespace-nowrap text-sm theme-text-primary">
-    {employee.hours_planned || 0}h
+  <td class="px-6 py-4 whitespace-nowrap text-sm {hasMismatchedPlannedHours ? '!text-gray-900 dark:!text-yellow-100' : 'theme-text-primary'}">
+    {#if employee.attendance_status === 'present' && shiftHoursPlanned !== null}
+      {formatHours(employee.hours_planned || 0)}h/{formatHours(shiftHoursPlanned)}h
+    {:else}
+      {formatHours(employee.hours_planned || 0)}h
+    {/if}
   </td>
-  <td class="px-6 py-4 whitespace-nowrap text-sm theme-text-primary">
-    {employee.hours_reported || 0}h
+  <td class="px-6 py-4 whitespace-nowrap text-sm {hasMismatchedReportedHours ? '!text-gray-900 dark:!text-yellow-100' : 'theme-text-primary'}">
+    {#if employee.attendance_status === 'present' && shiftHoursReported !== null}
+      {formatHours(employee.hours_reported || 0)}h/{formatHours(shiftHoursReported)}h
+    {:else}
+      {formatHours(employee.hours_reported || 0)}h
+    {/if}
   </td>
-  <td class="px-6 py-4 whitespace-nowrap text-sm theme-text-primary">
+  <td class="px-6 py-4 whitespace-nowrap text-sm {hasMismatchedHours ? '!text-gray-900 dark:!text-yellow-100' : 'theme-text-primary'}">
     {employee.ot_hours || 0}h
   </td>
-  <td class="px-6 py-4 whitespace-nowrap text-sm theme-text-primary">
+  <td class="px-6 py-4 whitespace-nowrap text-sm {hasMismatchedHours ? '!text-gray-900 dark:!text-yellow-100' : 'theme-text-primary'}">
     {employee.lt_hours || 0}h
   </td>
-  <td class="px-6 py-4 whitespace-nowrap text-sm theme-text-primary">
+  <td class="px-6 py-4 whitespace-nowrap text-sm {hasMismatchedHours ? '!text-gray-900 dark:!text-yellow-100' : 'theme-text-primary'}">
     {employee.ltp_hours || 0}h
   </td>
-  <td class="px-6 py-4 whitespace-nowrap text-sm theme-text-primary">
+  <td class="px-6 py-4 whitespace-nowrap text-sm {hasMismatchedHours ? '!text-gray-900 dark:!text-yellow-100' : 'theme-text-primary'}">
     {employee.ltnp_hours || 0}h
   </td>
-  <td class="px-6 py-4 whitespace-nowrap text-sm theme-text-primary">
+  <td class="px-6 py-4 whitespace-nowrap text-sm {hasMismatchedHours ? '!text-gray-900 dark:!text-yellow-100' : 'theme-text-primary'}">
     {employee.to_other_stage_hours || 0}h
   </td>
-  <td class="px-6 py-4 whitespace-nowrap text-sm theme-text-primary">
+  <td class="px-6 py-4 whitespace-nowrap text-sm {hasMismatchedHours ? '!text-gray-900 dark:!text-yellow-100' : 'theme-text-primary'}">
     {employee.from_other_stage_hours || 0}h
   </td>
   <td class="px-6 py-4 whitespace-nowrap text-sm theme-text-primary">

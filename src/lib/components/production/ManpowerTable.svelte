@@ -19,6 +19,7 @@
   export let isLoading: boolean = false;
   export let selectedDate: string = '';
   export let planningSubmissionStatus: any = null;
+  export let shiftCode: string = ''; // Shift code for bulk operations
 
   const dispatch = createEventDispatcher();
 
@@ -90,27 +91,98 @@
     state.showBulkAttendanceModal = true;
     state.bulkAttendanceStatus = 'present';
     state.bulkNotes = '';
+    state.bulkFromTime = '';
+    state.bulkToTime = '';
+    state.bulkPlannedHours = null;
   }
 
-  function handleBulkAttendanceSubmit() {
+  async function handleBulkAttendanceSubmit() {
     if (state.selectedEmployees.size === 0) {
       alert('No employees selected.');
       return;
+    }
+
+    // Validate notes if required for partial attendance
+    if (state.bulkAttendanceStatus === 'present' && state.bulkPlannedHours !== null) {
+      // Calculate full shift hours for validation
+      let fullShiftHours = 8; // Default fallback
+      if (shiftCode) {
+        try {
+          const { supabase } = await import('$lib/supabaseClient');
+          const { calculateBreakTimeInMinutes } = await import('$lib/utils/breakTimeUtils');
+          
+          const { data: shiftData } = await supabase
+            .from('hr_shift_master')
+            .select('shift_id, start_time, end_time')
+            .eq('shift_code', shiftCode)
+            .eq('is_active', true)
+            .eq('is_deleted', false)
+            .maybeSingle();
+
+          if (shiftData) {
+            const shiftStartTime = shiftData.start_time;
+            const shiftEndTime = shiftData.end_time;
+            const shiftId = shiftData.shift_id;
+
+            const { data: shiftBreaks } = await supabase
+              .from('hr_shift_break_master')
+              .select('start_time, end_time')
+              .eq('shift_id', shiftId)
+              .eq('is_active', true)
+              .eq('is_deleted', false)
+              .order('start_time', { ascending: true });
+
+            const shiftStart = new Date(`2000-01-01T${shiftStartTime}`);
+            let shiftEnd = new Date(`2000-01-01T${shiftEndTime}`);
+            if (shiftEnd < shiftStart) {
+              shiftEnd = new Date(`2000-01-02T${shiftEndTime}`);
+            }
+            const shiftDurationMinutes = (shiftEnd.getTime() - shiftStart.getTime()) / (1000 * 60);
+            
+            const totalBreakMinutes = calculateBreakTimeInMinutes(
+              shiftStartTime,
+              shiftEndTime,
+              shiftBreaks || []
+            );
+            
+            fullShiftHours = (shiftDurationMinutes - totalBreakMinutes) / 60;
+          }
+        } catch (error) {
+          console.error('Error calculating full shift hours:', error);
+        }
+      }
+
+      if (state.bulkPlannedHours < fullShiftHours) {
+        if (!state.bulkNotes.trim()) {
+          alert('Reason is required for partial attendance (hours less than full shift)');
+          return;
+        }
+      }
     }
 
     state.isBulkSubmitting = true;
 
     const employeesToMark = sortedFilteredData.filter(emp => state.selectedEmployees.has(emp.emp_id));
     
-    dispatch('bulkAttendanceMarked', {
+    const eventData: any = {
       employees: employeesToMark.map(emp => ({
         empId: emp.emp_id,
         stageCode: emp.current_stage
       })),
       date: selectedDate,
       status: state.bulkAttendanceStatus,
+      shiftCode: shiftCode,
       notes: state.bulkNotes.trim() || undefined
-    });
+    };
+
+    // Add time/hours fields only for present employees
+    if (state.bulkAttendanceStatus === 'present') {
+      eventData.plannedHours = state.bulkPlannedHours;
+      eventData.fromTime = state.bulkFromTime;
+      eventData.toTime = state.bulkToTime;
+    }
+    
+    dispatch('bulkAttendanceMarked', eventData);
 
     employeesToMark.forEach(emp => {
       emp.attendance_status = state.bulkAttendanceStatus;
@@ -119,6 +191,9 @@
     state.selectedEmployees = new Set();
     state.bulkAttendanceStatus = 'present';
     state.bulkNotes = '';
+    state.bulkFromTime = '';
+    state.bulkToTime = '';
+    state.bulkPlannedHours = null;
     state.showBulkAttendanceModal = false;
     state.isBulkSubmitting = false;
   }
@@ -127,10 +202,15 @@
     state.showBulkAttendanceModal = false;
     state.bulkAttendanceStatus = 'present';
     state.bulkNotes = '';
+    state.bulkFromTime = '';
+    state.bulkToTime = '';
+    state.bulkPlannedHours = null;
   }
 
   function handleAttendanceToggle(employee: ProductionEmployee) {
-    state.selectedEmployee = { ...employee };
+    // Find the latest employee data from the table (in case it was refreshed)
+    const latestEmployee = data.find(e => e.emp_id === employee.emp_id) || employee;
+    state.selectedEmployee = { ...latestEmployee };
     state.showAttendanceModal = true;
   }
 
@@ -145,14 +225,17 @@
   }
 
   function handleAttendanceMarked(event: CustomEvent) {
-    const { empId, stageCode, date, status, notes } = event.detail;
+    // Pass through ALL fields from the event, not just a subset
+    const eventDetail = event.detail;
+    const { empId, stageCode, date, status, notes, shiftCode, fromTime, toTime, plannedHours, actualHours } = eventDetail;
     
     const employee = data.find(emp => emp.emp_id === empId);
     if (employee) {
       employee.attendance_status = status;
     }
     
-    dispatch('attendanceMarked', { empId, stageCode, date, status, notes });
+    // Pass through all fields including time/hours data
+    dispatch('attendanceMarked', eventDetail);
     
     state.showAttendanceModal = false;
     state.selectedEmployee = null;
@@ -253,6 +336,7 @@
     showModal={state.showAttendanceModal}
     employee={state.selectedEmployee}
     {selectedDate}
+    isPlanningMode={true}
     on:attendanceMarked={handleAttendanceMarked}
     on:close={closeAttendanceModal}
   />
@@ -276,8 +360,12 @@
     showModal={state.showBulkAttendanceModal}
     {selectedCount}
     {selectedDate}
+    {shiftCode}
     bulkAttendanceStatus={state.bulkAttendanceStatus}
     bulkNotes={state.bulkNotes}
+    bind:fromTime={state.bulkFromTime}
+    bind:toTime={state.bulkToTime}
+    bind:plannedHours={state.bulkPlannedHours}
     isSubmitting={state.isBulkSubmitting}
     onStatusChange={(status) => state.bulkAttendanceStatus = status}
     onNotesChange={(notes) => state.bulkNotes = notes}

@@ -168,6 +168,9 @@ export async function validateEmployeeShiftPlanning(
     // Total shift minutes (full duration, no break deduction)
     // Break time should only be deducted from work planned, not from shift time
     const totalShiftMinutes = calculateDuration(shiftStartTime, shiftEndTime);
+    
+    // Calculate full shift hours (shift duration minus breaks) for default when planned_hours is not specified
+    const fullShiftHours = (totalShiftMinutes - totalBreakMinutes) / 60;
 
     // 2. Get all employees assigned to this stage and shift who are marked as present
     const { data: employees, error: employeesError } = await supabase
@@ -189,7 +192,7 @@ export async function validateEmployeeShiftPlanning(
     // 3. Get all employees recorded in planning attendance (both present and absent)
     const { data: plannedAttendance, error: presentError } = await supabase
       .from('prdn_planning_manpower')
-      .select('emp_id, attendance_status')
+      .select('emp_id, attendance_status, planned_hours')
       .eq('stage_code', stageCode)
       .eq('planning_date', planningDate)
       .eq('status', 'draft')
@@ -374,7 +377,15 @@ export async function validateEmployeeShiftPlanning(
 
       if (isOriginallyAssigned) {
         // For employees originally assigned to this stage:
-        // Their full shift must be covered by either work at this stage OR reassignment away
+        // Their planned hours (or full shift if not specified) must be covered by either work at this stage OR reassignment away
+        
+        // Get planned hours from attendance record (if specified, otherwise use full shift)
+        const attendanceRecord = (plannedAttendance || []).find(a => a.emp_id === empId);
+        const employeePlannedHours = attendanceRecord?.planned_hours;
+        const expectedHours = employeePlannedHours !== null && employeePlannedHours !== undefined 
+          ? employeePlannedHours 
+          : fullShiftHours; // Use full shift hours if not specified
+        const expectedMinutes = expectedHours * 60;
         
         // Merge work slots to avoid double-counting overlapping work plans
         const mergedWorkSlots = mergeTimeSlots(workSlots);
@@ -385,21 +396,59 @@ export async function validateEmployeeShiftPlanning(
         const workPlannedEffectiveMinutes = calculateTotalCoveredWithBreaks(mergedWorkSlots, shiftBreaks || []); // Effective time for display
         const reassignedAwayMinutes = calculateTotalCovered(mergedAwaySlots); // Reassignments don't need break deduction
         
-        // Total covered = work planned (raw time) + reassigned away (raw time)
-        // Compare against full shift duration (no break deduction)
-        // Break time should NOT be deducted from coverage check - only from display
-        const totalCoveredMinutes = workPlannedRawMinutes + reassignedAwayMinutes;
+        // For validation, we need to compare effective work time (with breaks deducted) against expected hours
+        // Expected hours are already in effective hours (planned_hours is after break deduction)
+        // So we compare: workPlannedEffectiveMinutes + reassignedAwayMinutes (effective) vs expectedMinutes
+        const totalCoveredEffectiveMinutes = workPlannedEffectiveMinutes + reassignedAwayMinutes;
+        const expectedMinutesEffective = expectedMinutes; // Already in effective hours (planned_hours or fullShiftHours)
 
-        // Check if full shift is covered
-        if (totalCoveredMinutes < totalShiftMinutes) {
-          const missingMinutes = totalShiftMinutes - totalCoveredMinutes;
+        // Check if expected hours are covered (using effective time)
+        if (totalCoveredEffectiveMinutes < expectedMinutesEffective) {
+          const missingMinutes = expectedMinutesEffective - totalCoveredEffectiveMinutes;
           const missingHours = Math.floor(missingMinutes / 60);
           const missingMins = missingMinutes % 60;
+          const expectedHoursDisplay = employeePlannedHours !== null && employeePlannedHours !== undefined
+            ? `${expectedHours.toFixed(2)}h (planned)`
+            : `${fullShiftHours.toFixed(2)}h (full shift)`;
+          
+          // Format missing time: show hours only if >= 1 hour, otherwise show minutes
+          let missingTimeDisplay = '';
+          if (missingHours > 0) {
+            missingTimeDisplay = missingMins > 0 ? `${missingHours}h ${missingMins}m` : `${missingHours}h`;
+          } else {
+            missingTimeDisplay = `${missingMins}m`;
+          }
+          
           errors.push(
-            `${empName} (${empId}): ${missingHours}h ${missingMins}m of shift time is not planned. ` +
+            `${empName} (${empId}): ${missingTimeDisplay} of expected time is not planned. ` +
+            `Expected: ${expectedHoursDisplay}, ` +
             `Work planned: ${Math.round(workPlannedEffectiveMinutes / 60 * 10) / 10}h, ` +
             `Reassigned away: ${Math.round(reassignedAwayMinutes / 60 * 10) / 10}h`
           );
+        }
+        
+        // Check if work planned exceeds attendance planned hours (over-planning)
+        // Only check if employee has planned_hours specified (not full shift)
+        if (employeePlannedHours !== null && employeePlannedHours !== undefined) {
+          // Compare effective work planned (with breaks deducted) against planned hours
+          if (workPlannedEffectiveMinutes > expectedMinutesEffective) {
+            const excessMinutes = workPlannedEffectiveMinutes - expectedMinutesEffective;
+            const excessHours = Math.floor(excessMinutes / 60);
+            const excessMins = excessMinutes % 60;
+            
+            // Format excess time: show hours only if >= 1 hour, otherwise show minutes
+            let excessTimeDisplay = '';
+            if (excessHours > 0) {
+              excessTimeDisplay = excessMins > 0 ? `${excessHours}h ${excessMins}m` : `${excessHours}h`;
+            } else {
+              excessTimeDisplay = `${excessMins}m`;
+            }
+            
+            errors.push(
+              `${empName} (${empId}): Work planned (${Math.round(workPlannedEffectiveMinutes / 60 * 10) / 10}h) exceeds attendance planned hours (${expectedHours.toFixed(2)}h) by ${excessTimeDisplay}. ` +
+              `Please reduce work planning or update attendance hours.`
+            );
+          }
         }
       }
 

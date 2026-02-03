@@ -289,6 +289,10 @@ export async function fetchProductionEmployees(
     let ltnpMap = new Map<string, number>();
     let ltMap = new Map<string, number>();
     
+    // For reporting mode, also fetch planned_hours from planning attendance for comparison
+    // Declare at function scope so it's accessible later
+    let plannedAttendanceData: any[] = [];
+    
     if (employeeIds.length > 0) {
       // Use different tables based on mode:
       // - 'planning': prdn_planning_manpower (planned attendance for selected date)
@@ -303,7 +307,7 @@ export async function fetchProductionEmployees(
         // Attendance is per employee per date, not per stage
         attendanceQuery = supabase
           .from('prdn_planning_manpower')
-          .select('emp_id, attendance_status')
+          .select('emp_id, attendance_status, planned_hours, from_time, to_time, notes')
           .in('emp_id', employeeIds)
           .eq('planning_date', date)
           // .eq('stage_code', stage) // Removed: attendance is per employee, not per stage
@@ -316,7 +320,7 @@ export async function fetchProductionEmployees(
         // Attendance is per employee per date, not per stage
         attendanceQuery = supabase
           .from('prdn_reporting_manpower')
-          .select('emp_id, attendance_status')
+          .select('emp_id, attendance_status, actual_hours, from_time, to_time, notes')
           .in('emp_id', employeeIds)
           .eq('reporting_date', date)
           // .eq('stage_code', stage) // Removed: attendance is per employee, not per stage
@@ -357,6 +361,23 @@ export async function fetchProductionEmployees(
           }
         });
         attendanceData = Array.from(attendanceMap.values());
+      }
+
+      // For reporting mode, also fetch planned_hours from planning attendance for comparison
+      if (mode === 'reporting' && employeeIds.length > 0) {
+        const { data: plannedAttendanceResult, error: plannedAttendanceError } = await supabase
+          .from('prdn_planning_manpower')
+          .select('emp_id, planned_hours')
+          .in('emp_id', employeeIds)
+          .eq('planning_date', date)
+          .in('status', ['draft', 'pending_approval', 'approved'])
+          .eq('is_deleted', false);
+
+        if (plannedAttendanceError) {
+          console.error('Error fetching planned attendance data:', plannedAttendanceError);
+        } else {
+          plannedAttendanceData = plannedAttendanceResult || [];
+        }
       }
 
       // Query 6: Stage reassignment data
@@ -560,6 +581,25 @@ export async function fetchProductionEmployees(
     const productionEmployees: ProductionEmployee[] = (employees || []).map(emp => {
       // Find attendance for this employee
       const attendance = attendanceData.find(a => a.emp_id === emp.emp_id);
+      // Find planned attendance for this employee (for reporting mode)
+      const plannedAttendance = mode === 'reporting' 
+        ? plannedAttendanceData.find(a => a.emp_id === emp.emp_id)
+        : null;
+      
+      // Debug logging for attendance data
+      if (attendance && (attendance.planned_hours || attendance.actual_hours)) {
+        console.log('🔍 [fetchProductionEmployees] Found attendance for employee:', {
+          emp_id: emp.emp_id,
+          emp_name: emp.emp_name,
+          mode,
+          attendance_status: attendance.attendance_status,
+          planned_hours: attendance.planned_hours,
+          actual_hours: attendance.actual_hours,
+          from_time: attendance.from_time,
+          to_time: attendance.to_time,
+          notes: attendance.notes
+        });
+      }
       
       // Find reassignments for this employee
       // Normalize date field name (could be planning_date or reassignment_date)
@@ -605,6 +645,16 @@ export async function fetchProductionEmployees(
         current_stage: currentStage,
         original_stage: emp.stage, // Original assigned stage from hr_emp table
         attendance_status: attendance ? (attendance.attendance_status || null) : null,
+        // Attendance details from prdn_planning_manpower or prdn_reporting_manpower
+        planned_hours: mode === 'planning' && attendance 
+          ? (attendance.planned_hours ?? null) 
+          : mode === 'reporting' && plannedAttendance
+          ? (plannedAttendance.planned_hours ?? null)
+          : undefined,
+        actual_hours: mode === 'reporting' && attendance ? (attendance.actual_hours ?? null) : undefined,
+        attendance_from_time: attendance ? (attendance.from_time || null) : null,
+        attendance_to_time: attendance ? (attendance.to_time || null) : null,
+        attendance_notes: attendance ? (attendance.notes || null) : null,
         hours_planned: plannedHoursMap.get(emp.emp_id) || 0,
         hours_reported: reportedHoursMap.get(emp.emp_id) || 0,
         ot_hours: mode === 'reporting' ? (otHoursMapConverted.get(emp.emp_id) || 0) : 0,
@@ -615,6 +665,20 @@ export async function fetchProductionEmployees(
         to_other_stage_hours: toOtherStageHours,
         from_other_stage_hours: fromOtherStageHours
       };
+    }).map(emp => {
+      // Debug: Log final employee object with attendance data
+      if (emp.planned_hours !== undefined || emp.actual_hours !== undefined) {
+        console.log('🔍 [fetchProductionEmployees] Final employee object:', {
+          emp_id: emp.emp_id,
+          emp_name: emp.emp_name,
+          planned_hours: emp.planned_hours,
+          actual_hours: emp.actual_hours,
+          attendance_from_time: emp.attendance_from_time,
+          attendance_to_time: emp.attendance_to_time,
+          attendance_notes: emp.attendance_notes
+        });
+      }
+      return emp;
     });
 
     return productionEmployees;
