@@ -1349,13 +1349,11 @@ export function handleEditReport(context: EventHandlerContext, event: CustomEven
       planning_id: report.planning_id || planning.id,
       // Include time_worked_till_date for the modal (needed for hours calculation)
       time_worked_till_date: report.hours_worked_till_date || 0,
-      hours_worked_till_date: report.hours_worked_till_date || 0,
       // Include any enriched data that might be on the report
       vehicleWorkFlow: report.vehicleWorkFlow || planning.vehicleWorkFlow,
       skillTimeStandard: report.skillTimeStandard || planning.skillTimeStandard,
       skillMapping: report.skillMapping || planning.std_work_skill_mapping,
-      // Include completion status and lost time data for the modal
-      completion_status: report.completion_status,
+      // Include lost time data for the modal (completion_status already set above)
       lt_minutes_total: report.lt_minutes_total || 0,
       lt_details: report.lt_details
     };

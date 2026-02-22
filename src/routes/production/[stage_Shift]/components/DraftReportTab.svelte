@@ -581,7 +581,7 @@
           </tr>
         </thead>
         <tbody class="theme-bg-primary divide-y divide-gray-200 dark:divide-gray-700">
-          {#each sortedGroupedWorks as group (group.workCode)}
+          {#each sortedGroupedWorks as group (group.workCode + '_' + (group.woDetailsId || 'unknown'))}
             {@const typedGroup = group}
             <!-- Single Row per Work -->
             <tr class="hover:theme-bg-secondary transition-colors" 

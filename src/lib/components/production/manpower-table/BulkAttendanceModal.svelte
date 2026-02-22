@@ -262,7 +262,7 @@
           class="w-full px-3 py-2 border theme-border rounded-lg theme-bg-primary theme-text-primary focus:ring-2 focus:ring-blue-500 focus:border-transparent"
           rows="3"
           required={isNotesRequired}
-        />
+        ></textarea>
         {#if isNotesRequired && !bulkNotes.trim()}
           <p class="text-red-500 dark:text-red-400 text-sm mt-1">
             Reason is required for partial attendance

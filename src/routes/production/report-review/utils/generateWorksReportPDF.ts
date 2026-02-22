@@ -256,103 +256,7 @@ export function generateWorksReportPDF(
       drawHeader(); // Redraw header on new page
     }
 
-    // Collect all worker info for this work - each worker gets its own entry
-    const workerData: Array<{
-      worker: string;
-      skill: string;
-      status: string;
-      tillDate: string;
-      fromTime: string;
-      toTime: string;
-      hoursWorked: string;
-      totalHours: string;
-      otHours: string;
-      lostTime: string;
-      reason: string;
-    }> = [];
-    
-    // Collect unique skills for display
-    const uniqueSkills = new Set<string>();
-    
-    group.items.forEach((report: WorkReport) => {
-      // Skills - collect all unique skills
-      const skillName = report.skillMapping?.sc_name || report.prdn_work_planning?.std_work_skill_mapping?.sc_name || report.prdn_work_planning?.sc_required || 'N/A';
-      uniqueSkills.add(skillName);
-      
-      // Worker info - fix HTML entities
-      let workerText = 'No worker';
-      if (report.deviations && report.deviations.length > 0) {
-        const deviation = report.deviations[0];
-        // Clean HTML entities
-        const cleanDeviationType = deviation.deviation_type?.replace(/&nbsp;/g, ' ').replace(/&p/g, '').trim() || 'deviation';
-        workerText = `⚠️ ${cleanDeviationType}`;
-      } else if (report.worker_id && report.prdn_work_planning?.hr_emp) {
-        const empName = report.prdn_work_planning.hr_emp.emp_name || 'N/A';
-        const skillShort = report.prdn_work_planning.hr_emp.skill_short || 'N/A';
-        workerText = `${empName} (${skillShort})`;
-      }
-      
-      // Status (all workers have same status, so we'll show it once)
-      const status = report.completion_status === 'C' ? 'Completed' : report.completion_status === 'NC' ? 'Not Completed' : 'Unknown';
-      
-      // Times - formatTime expects hours, not minutes
-      const tillDate = formatTime(report.hours_worked_till_date || 0);
-      const fromTime = report.from_time || 'N/A';
-      const toTime = report.to_time || 'N/A';
-      const hoursWorked = formatTime(report.hours_worked_today || 0);
-      const totalHoursWorked = formatTime((report.hours_worked_till_date || 0) + (report.hours_worked_today || 0));
-      const otHours = report.overtime_minutes && report.overtime_minutes > 0 
-        ? formatTime((report.overtime_minutes || 0) / 60) 
-        : '-';
-      const lostTime = report.lt_minutes_total ? `${report.lt_minutes_total}` : '0';
-      
-      // Lost time reason - format properly and fix encoding issues
-      let reasonText = '-';
-      if (report.lt_details && Array.isArray(report.lt_details) && report.lt_details.length > 0) {
-        reasonText = report.lt_details.map(lt => {
-          // Fix character encoding issues (e.g., "(Badequate" -> "Inadequate")
-          let cleanReason = lt.lt_reason || 'N/A';
-          // Fix common encoding issues
-          cleanReason = cleanReason.replace(/\(B/g, 'In').replace(/&nbsp;/g, ' ').trim();
-          return `${cleanReason} (${lt.lt_minutes}m)`;
-        }).join(', ');
-      }
-      
-      workerData.push({
-        worker: workerText,
-        skill: skillName,
-        status,
-        tillDate,
-        fromTime,
-        toTime,
-        hoursWorked,
-        totalHours: totalHoursWorked,
-        otHours,
-        lostTime,
-        reason: reasonText
-      });
-    });
-
-    // Get standard time from first item
-    const firstItem = group.items[0];
-    let standardTime = 'N/A';
-    if (firstItem?.vehicleWorkFlow?.estimated_duration_minutes) {
-      standardTime = formatTime(firstItem.vehicleWorkFlow.estimated_duration_minutes / 60);
-    } else if (firstItem?.skillTimeStandard?.standard_time_minutes) {
-      standardTime = formatTime(firstItem.skillTimeStandard.standard_time_minutes / 60);
-    }
-
-    // Get status (same for all workers)
-    const status = workerData[0]?.status || 'Unknown';
-    
-    // Build skills string (all unique skills)
-    const skillsString = Array.from(uniqueSkills).join(', ');
-
-    // Common data for the work (same across all workers)
-    const workOrder = group.woNo || 'N/A';
-    const pwoNo = group.pwoNo || 'N/A';
-    const workCode = group.workCode || 'N/A';
-    const workName = (group.workName || 'N/A').length > 35 ? (group.workName || 'N/A').substring(0, 32) + '...' : (group.workName || 'N/A');
+    // (Using values computed earlier: firstItem, standardTime, workOrder/pwoNo/workCode/workName)
 
     // Draw the row with cell borders - common columns span full height, worker columns stack
     let x = startX;
@@ -390,38 +294,31 @@ export function generateWorksReportPDF(
     drawCell(x, startRowY, colWidths[7], rowHeight, workerTexts, 'left', 'top');
     x += colWidths[7];
     
-    // Column 9: Till Date - one per worker, stacked vertically
-    const tillDates = workerData.map(data => data.tillDate);
+    // Column 9: Till Date - one per worker, stacked vertically (use arrays computed above)
     drawCell(x, startRowY, colWidths[8], rowHeight, tillDates, 'left', 'top');
     x += colWidths[8];
     
     // Column 10: From Time - one per worker, stacked vertically
-    const fromTimes = workerData.map(data => data.fromTime);
     drawCell(x, startRowY, colWidths[9], rowHeight, fromTimes, 'left', 'top');
     x += colWidths[9];
     
     // Column 11: To Time - one per worker, stacked vertically
-    const toTimes = workerData.map(data => data.toTime);
     drawCell(x, startRowY, colWidths[10], rowHeight, toTimes, 'left', 'top');
     x += colWidths[10];
     
     // Column 12: Hours Worked - one per worker, stacked vertically
-    const hoursWorked = workerData.map(data => data.hoursWorked);
     drawCell(x, startRowY, colWidths[11], rowHeight, hoursWorked, 'left', 'top');
     x += colWidths[11];
     
     // Column 13: Total Hours - one per worker, stacked vertically
-    const totalHours = workerData.map(data => data.totalHours);
     drawCell(x, startRowY, colWidths[12], rowHeight, totalHours, 'left', 'top');
     x += colWidths[12];
     
     // Column 14: OT Hours - one per worker, stacked vertically
-    const otHours = workerData.map(data => data.otHours);
     drawCell(x, startRowY, colWidths[13], rowHeight, otHours, 'left', 'top');
     x += colWidths[13];
     
     // Column 15: Lost Time - one per worker, stacked vertically
-    const lostTimes = workerData.map(data => data.lostTime);
     drawCell(x, startRowY, colWidths[14], rowHeight, lostTimes, 'left', 'top');
     x += colWidths[14];
     
