@@ -59,40 +59,45 @@ export function generateWorksReportPDF(
 
   // Table headers - matching the new single-row format
   const headers = ['Work Order', 'PWO', 'Work Code', 'Work Name', 'Skills', 'Std Time', 'Status', 'Worker (Skill)', 'Till Date', 'From', 'To', 'Hours', 'Total Hours', 'OT Hours', 'Lost Time (Minutes)', 'Reason'];
-  const colWidths = [18, 18, 20, 45, 30, 18, 20, 35, 18, 15, 15, 20, 20, 18, 18, 55];
+  // Adjusted widths to match Plan PDF feel (wider Work Name column) and reduce wrapping
+  const colWidths = [18, 18, 20, 60, 30, 18, 20, 35, 18, 15, 15, 20, 20, 18, 18, 55];
   const startX = margin;
 
   // Helper function to draw header with proper height for word wrap
   const drawHeader = () => {
+    // Match Plan PDF header sizing: slightly taller headers and use same header font size
     doc.setFontSize(9);
     doc.setFont('helvetica', 'bold');
     doc.setFillColor(200, 200, 200);
     
-    // Calculate max height needed for headers with word wrap
-    let maxHeight = lineHeight * 1.5;
+    // Calculate max height needed for headers with word wrap - use multiplier like Plan
+    let maxHeight = lineHeight * 2.5;
     headers.forEach((header, index) => {
       const lines = doc.splitTextToSize(header, colWidths[index] - 2);
-      const headerHeight = lines.length * lineHeight;
+      const headerHeight = lines.length * lineHeight * 1.2; // extra spacing for wrapped lines
       if (headerHeight > maxHeight) {
         maxHeight = headerHeight;
       }
     });
     
-    doc.rect(startX, currentY, pageWidth - 2 * margin, maxHeight + 3, 'F');
+    if (maxHeight < lineHeight * 2.5) maxHeight = lineHeight * 2.5;
+    
+    doc.rect(startX, currentY, pageWidth - 2 * margin, maxHeight + 4, 'F');
     
     let x = startX;
     headers.forEach((header, index) => {
       const lines = doc.splitTextToSize(header, colWidths[index] - 2);
+      const verticalCenter = currentY + (maxHeight / 2) - ((lines.length - 1) * lineHeight / 2);
       lines.forEach((line: string, lineIndex: number) => {
-        doc.text(line, x + 2, currentY + (lineIndex + 1) * lineHeight + 1, { maxWidth: colWidths[index] - 4, align: 'left' });
+        doc.text(line, x + 2, verticalCenter + (lineIndex * lineHeight) + 1, { maxWidth: colWidths[index] - 4, align: 'left' });
       });
       x += colWidths[index];
     });
-    currentY += maxHeight + 4;
+    currentY += maxHeight + 6;
     
-    // Reset font to normal after drawing header
+    // Reset font to normal after drawing header and set data font to match Plan
     doc.setFont('helvetica', 'normal');
-    doc.setFontSize(8);
+    doc.setFontSize(10);
   };
 
   // Draw initial header
@@ -156,8 +161,95 @@ export function generateWorksReportPDF(
   // Draw table rows - single row per work with all workers stacked vertically
   Object.values(groupedReports).forEach((group: any) => {
     const numWorkers = group.items.length;
-    const rowHeight = numWorkers * lineHeight + 4; // Height based on number of workers
-    
+
+    // Build column texts (single or array) in the same order as columns drawn below
+    const workOrder = group.woNo || 'N/A';
+    const pwoNo = group.pwoNo || 'N/A';
+    const workCode = group.workCode || 'N/A';
+    // Use full workName (no truncation) and let wrapping handle width
+    const workName = group.workName || 'N/A';
+    const uniqueSkills = new Set<string>();
+    group.items.forEach((r: any) => {
+      const skillName = r.skillMapping?.sc_name || r.prdn_work_planning?.std_work_skill_mapping?.sc_name || r.prdn_work_planning?.sc_required || 'N/A';
+      uniqueSkills.add(skillName);
+    });
+    const skillsString = Array.from(uniqueSkills).join(', ');
+    const firstItem = group.items[0];
+    const standardTime = firstItem?.vehicleWorkFlow?.estimated_duration_minutes
+      ? formatTime(firstItem.vehicleWorkFlow.estimated_duration_minutes / 60)
+      : firstItem?.skillTimeStandard?.standard_time_minutes
+        ? formatTime(firstItem.skillTimeStandard.standard_time_minutes / 60)
+        : 'N/A';
+    const status = group.items[0] ? (group.items[0].completion_status === 'C' ? 'Completed' : group.items[0].completion_status === 'NC' ? 'Not Completed' : 'Unknown') : 'Unknown';
+
+    const workerTexts = group.items.map((it: any) => {
+      if (it.deviations && it.deviations.length > 0) {
+        const d = it.deviations[0];
+        const cleanDeviationType = d.deviation_type?.replace(/&nbsp;/g, ' ').replace(/&p/g, '').trim() || 'deviation';
+        return `⚠️ ${cleanDeviationType}`;
+      } else if (it.worker_id && it.prdn_work_planning?.hr_emp) {
+        const empName = it.prdn_work_planning.hr_emp.emp_name || 'N/A';
+        const skillShort = it.prdn_work_planning.hr_emp.skill_short || 'N/A';
+        return `${empName} (${skillShort})`;
+      } else {
+        return 'No worker';
+      }
+    });
+    const tillDates = group.items.map((it: any) => formatTime(it.hours_worked_till_date || 0));
+    const fromTimes = group.items.map((it: any) => it.from_time || 'N/A');
+    const toTimes = group.items.map((it: any) => it.to_time || 'N/A');
+    const hoursWorked = group.items.map((it: any) => formatTime(it.hours_worked_today || 0));
+    const totalHours = group.items.map((it: any) => formatTime((it.hours_worked_till_date || 0) + (it.hours_worked_today || 0)));
+    const otHours = group.items.map((it: any) => (it.overtime_minutes && it.overtime_minutes > 0) ? formatTime((it.overtime_minutes || 0) / 60) : '-');
+    const lostTimes = group.items.map((it: any) => it.lt_minutes_total ? `${it.lt_minutes_total}` : '0');
+    const reasons = group.items.map((it: any) => {
+      if (it.lt_details && Array.isArray(it.lt_details) && it.lt_details.length > 0) {
+        return it.lt_details.map((lt: any) => lt.lt_reason?.replace(/\(B/g, 'In').replace(/&nbsp;/g, ' ').trim() || 'N/A').join(', ');
+      }
+      return '-';
+    });
+
+    // Prepare column texts array for height calculation
+    const columnValues: Array<string | string[]> = [
+      workOrder,
+      pwoNo,
+      workCode,
+      workName,
+      skillsString,
+      standardTime,
+      status,
+      workerTexts,
+      tillDates,
+      fromTimes,
+      toTimes,
+      hoursWorked,
+      totalHours,
+      otHours,
+      lostTimes,
+      reasons
+    ];
+
+    // Calculate required heights per column using splitTextToSize logic
+    let requiredHeights: number[] = columnValues.map((val, idx) => {
+      const colW = colWidths[idx] - 4;
+      if (Array.isArray(val)) {
+        // sum wrapped lines for each item
+        let linesCount = 0;
+        val.forEach(item => {
+          const lines = doc.splitTextToSize(String(item), colW);
+          linesCount += lines.length;
+        });
+        return linesCount * lineHeight;
+      } else {
+        const lines = doc.splitTextToSize(String(val), colW);
+        return lines.length * lineHeight;
+      }
+    });
+
+    const maxRequiredHeight = Math.max(...requiredHeights, 0);
+    const minHeight = numWorkers * lineHeight + 1;
+    const rowHeight = Math.max(minHeight, Math.ceil(maxRequiredHeight) + 1);
+
     if (currentY > maxY - rowHeight) {
       doc.addPage();
       currentY = startY;
@@ -266,36 +358,35 @@ export function generateWorksReportPDF(
     let x = startX;
     const startRowY = currentY;
     
-    // Column 1: Work Order (spans all workers, centered vertically)
-    drawCell(x, startRowY, colWidths[0], rowHeight, workOrder, 'left', 'middle');
+    // Column 1: Work Order (spans all workers, top aligned to match Plan)
+    drawCell(x, startRowY, colWidths[0], rowHeight, workOrder, 'left', 'top');
     x += colWidths[0];
     
     // Column 2: PWO Number (spans all workers, centered vertically)
-    drawCell(x, startRowY, colWidths[1], rowHeight, pwoNo, 'left', 'middle');
+    drawCell(x, startRowY, colWidths[1], rowHeight, pwoNo, 'left', 'top');
     x += colWidths[1];
     
     // Column 3: Work Code (spans all workers, centered vertically)
-    drawCell(x, startRowY, colWidths[2], rowHeight, workCode, 'left', 'middle');
+    drawCell(x, startRowY, colWidths[2], rowHeight, workCode, 'left', 'top');
     x += colWidths[2];
     
     // Column 4: Work Name (spans all workers, centered vertically)
-    drawCell(x, startRowY, colWidths[3], rowHeight, workName, 'left', 'middle');
+    drawCell(x, startRowY, colWidths[3], rowHeight, workName, 'left', 'top');
     x += colWidths[3];
     
     // Column 5: Skills (spans all workers, centered vertically)
-    drawCell(x, startRowY, colWidths[4], rowHeight, skillsString, 'left', 'middle');
+    drawCell(x, startRowY, colWidths[4], rowHeight, skillsString, 'left', 'top');
     x += colWidths[4];
     
     // Column 6: Standard Time (spans all workers, centered vertically)
-    drawCell(x, startRowY, colWidths[5], rowHeight, standardTime, 'left', 'middle');
+    drawCell(x, startRowY, colWidths[5], rowHeight, standardTime, 'left', 'top');
     x += colWidths[5];
     
     // Column 7: Status (spans all workers, centered vertically)
-    drawCell(x, startRowY, colWidths[6], rowHeight, status, 'left', 'middle');
+    drawCell(x, startRowY, colWidths[6], rowHeight, status, 'left', 'top');
     x += colWidths[6];
     
     // Column 8: Worker (Skill) - one per worker, stacked vertically
-    const workerTexts = workerData.map(data => data.worker);
     drawCell(x, startRowY, colWidths[7], rowHeight, workerTexts, 'left', 'top');
     x += colWidths[7];
     
@@ -335,7 +426,6 @@ export function generateWorksReportPDF(
     x += colWidths[14];
     
     // Column 16: Reason - one per worker, stacked vertically (with word wrap)
-    const reasons = workerData.map(data => data.reason);
     drawCell(x, startRowY, colWidths[15], rowHeight, reasons, 'left', 'top');
     
     // Move to next row

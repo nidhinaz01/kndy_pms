@@ -4,6 +4,7 @@
   import Button from '$lib/components/common/Button.svelte';
   import { Edit, Trash2 } from 'lucide-svelte';
   import { fetchSupabaseAuthUsers, type SupabaseAuthUser } from '$lib/api/userManagement';
+  import { supabase } from '$lib/supabaseClient';
   
   export let users: any[] = [];
   export let isLoading: boolean = false;
@@ -257,13 +258,66 @@
 
         <!-- Submit Button -->
         <div class="flex justify-end">
-          <button
-            type="submit"
-            disabled={isSaving}
-            class="px-6 py-3 text-base font-medium rounded-lg transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 bg-blue-600 text-white border-2 border-blue-600 hover:bg-blue-700 hover:border-blue-700 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {isSaving ? 'Saving...' : (isEditMode ? 'Update User' : 'Save User')}
-          </button>
+          <div class="flex items-center space-x-3">
+            {#if isEditMode}
+              <button
+                type="button"
+                on:click={async () => {
+                  if (!userForm.email) {
+                    dispatch('message', { text: 'User email missing; cannot send reset.', type: 'error' });
+                    return;
+                  }
+                  const ok = confirm(`Send password reset email to ${userForm.email}?`);
+                  if (!ok) return;
+
+                  try {
+                    // Try to get the current session access token to authenticate the server endpoint
+                    const { data: sessionData } = await supabase.auth.getSession();
+                    const accessToken = sessionData?.session?.access_token || null;
+
+                    if (accessToken) {
+                      // Call server endpoint with Authorization header so audit is recorded
+                      const res = await fetch('/api/admin/send-reset', {
+                        method: 'POST',
+                        headers: {
+                          'Content-Type': 'application/json',
+                          Authorization: `Bearer ${accessToken}`
+                        },
+                        body: JSON.stringify({ email: userForm.email, target_user_id: userForm.auth_user_id })
+                      });
+                      const payload = await res.json();
+                      if (res.ok && payload.success) {
+                        dispatch('message', { text: 'Password reset email sent.', type: 'success' });
+                      } else {
+                        dispatch('message', { text: 'Failed to send reset email: ' + (payload?.error || res.statusText), type: 'error' });
+                      }
+                    } else {
+                      // Fallback: call supabase client directly (audit won't be recorded)
+                      const { error: resetErr } = await supabase.auth.resetPasswordForEmail(userForm.email);
+                      if (resetErr) {
+                        dispatch('message', { text: 'Failed to send reset email: ' + resetErr.message, type: 'error' });
+                      } else {
+                        dispatch('message', { text: 'Password reset email sent (no audit).', type: 'success' });
+                      }
+                    }
+                  } catch (error) {
+                    console.error('Error sending reset:', error);
+                    dispatch('message', { text: 'Error sending reset email', type: 'error' });
+                  }
+                }}
+                class="px-4 py-2 text-sm font-medium rounded-lg transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 bg-gray-100 text-gray-800 border-2 border-gray-200 hover:bg-gray-200"
+              >
+                Reset Password
+              </button>
+            {/if}
+            <button
+              type="submit"
+              disabled={isSaving}
+              class="px-6 py-3 text-base font-medium rounded-lg transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 bg-blue-600 text-white border-2 border-blue-600 hover:bg-blue-700 hover:border-blue-700 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isSaving ? 'Saving...' : (isEditMode ? 'Update User' : 'Save User')}
+            </button>
+          </div>
         </div>
       </form>
 

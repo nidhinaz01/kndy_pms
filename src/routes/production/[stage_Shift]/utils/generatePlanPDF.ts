@@ -190,17 +190,28 @@ export function generatePlanPDF(
       });
     });
 
-    // Generate PDF blob and open in new tab
-    const pdfBlob = doc.output('blob');
-    const pdfUrl = URL.createObjectURL(pdfBlob);
-    window.open(pdfUrl, '_blank');
-    
-    // Clean up the URL after a delay to free memory
-    setTimeout(() => {
-      URL.revokeObjectURL(pdfUrl);
-    }, 100);
-    
-    console.log('✅ PDF plan generated successfully and opened in new tab');
+    // Build a user-friendly, unique filename and trigger direct download.
+    // Filename pattern: Plan - <stage> - <shift> - <dd MMM yyyy> - <YYYY-MM-DD_HH-mm-ss>.pdf
+    const generatedAt = new Date();
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const generatedTimestamp = `${generatedAt.getFullYear()}-${pad(generatedAt.getMonth() + 1)}-${pad(generatedAt.getDate())}_${pad(generatedAt.getHours())}-${pad(generatedAt.getMinutes())}-${pad(generatedAt.getSeconds())}`;
+
+    const userDate = (() => {
+      try {
+        const d = new Date(planningDate);
+        return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+      } catch {
+        return planningDate;
+      }
+    })();
+
+    const sanitize = (s: string) => String(s || '').replace(/[\/\\:<>?"|*]/g, '-').trim();
+
+    const filename = `Plan - ${sanitize(stageCode)} - ${sanitize(shiftCode)} - ${userDate} - ${generatedTimestamp}.pdf`;
+
+    // Use jsPDF's save() to trigger a direct download with the chosen filename.
+    doc.save(filename);
+    console.log(`✅ PDF plan generated and download started: ${filename}`);
   } catch (error) {
     console.error('Error generating PDF:', error);
     alert('Error generating PDF file. Please try again.');

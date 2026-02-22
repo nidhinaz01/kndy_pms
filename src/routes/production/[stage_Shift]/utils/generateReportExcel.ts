@@ -33,7 +33,8 @@ export function generateReportExcel(
   reportWorks: ReportWork[],
   stageCode: string,
   shiftCode: string,
-  reportingDate: string
+  reportingDate: string,
+  manpowerEmployees: any[] = []
 ): void {
   try {
     // Group works
@@ -122,6 +123,44 @@ export function generateReportExcel(
       { wch: 20 }
     ];
 
+    // Create Worker Summary sheet (from Manpower Report data)
+    // Columns: Employee, Skill, Attendance Status, Hours Planned, Hours Reported, OT Hours, LT Hours, LTP Hours, LTNP Hours, To Other Stage, From Other Stage
+    const workerSummaryData = (manpowerEmployees || []).map(emp => ({
+      'Employee': emp.emp_name || '',
+      'Skill': emp.skill_short || '',
+      'Attendance Status': emp.attendance_status === 'present' ? 'Present' : emp.attendance_status === 'absent' ? 'Absent' : (emp.attendance_status ? String(emp.attendance_status) : ''),
+      'Hours Planned': emp.hours_planned != null ? emp.hours_planned : '',
+      'Hours Reported': emp.hours_reported != null ? emp.hours_reported : 0,
+      'OT Hours': emp.ot_hours != null ? emp.ot_hours : 0,
+      'LT Hours': emp.lt_hours != null ? emp.lt_hours : 0,
+      'LTP Hours': emp.ltp_hours != null ? emp.ltp_hours : 0,
+      'LTNP Hours': emp.ltnp_hours != null ? emp.ltnp_hours : 0,
+      'To Other Stage': emp.to_other_stage_hours != null ? emp.to_other_stage_hours : 0,
+      'From Other Stage': emp.from_other_stage_hours != null ? emp.from_other_stage_hours : 0
+    })).sort((a, b) => {
+      const na = (a.Employee || '').toLowerCase();
+      const nb = (b.Employee || '').toLowerCase();
+      if (na < nb) return -1;
+      if (na > nb) return 1;
+      return 0;
+    });
+
+    const workerSummaryWs = XLSX.utils.json_to_sheet(workerSummaryData);
+    // Set some reasonable column widths
+    workerSummaryWs['!cols'] = [
+      { wch: 30 }, // Employee
+      { wch: 10 }, // Skill
+      { wch: 18 }, // Attendance Status
+      { wch: 15 }, // Hours Planned
+      { wch: 15 }, // Hours Reported
+      { wch: 12 }, // OT Hours
+      { wch: 12 }, // LT Hours
+      { wch: 12 }, // LTP Hours
+      { wch: 12 }, // LTNP Hours
+      { wch: 15 }, // To Other Stage
+      { wch: 15 }  // From Other Stage
+    ];
+
     // Create Reported Works sheet
     const reportedWorksWs = XLSX.utils.json_to_sheet(reportData);
 
@@ -194,9 +233,25 @@ export function generateReportExcel(
     // Create workbook and add sheets
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, summaryWs, 'Summary');
+    XLSX.utils.book_append_sheet(wb, workerSummaryWs, 'Worker Summary');
     XLSX.utils.book_append_sheet(wb, reportedWorksWs, 'Reported Works');
     
-    XLSX.writeFile(wb, formatStageShiftExportFilename(stageCode, shiftCode, reportingDate, 'Work_Reporting'));
+    // Build filename with generated timestamp similar to PDF naming:
+    // Report - <stage> - <shift> - <dd MMM yyyy> - <YYYY-MM-DD_HH-mm-ss>.xlsx
+    const generatedAt = new Date();
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const generatedTimestamp = `${generatedAt.getFullYear()}-${pad(generatedAt.getMonth() + 1)}-${pad(generatedAt.getDate())}_${pad(generatedAt.getHours())}-${pad(generatedAt.getMinutes())}-${pad(generatedAt.getSeconds())}`;
+    const userDate = (() => {
+      try {
+        const d = new Date(reportingDate);
+        return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+      } catch {
+        return reportingDate;
+      }
+    })();
+    const sanitize = (s: string) => String(s || '').replace(/[\/\\:<>?"|*]/g, '-').trim();
+    const filename = `Report - ${sanitize(stageCode)} - ${sanitize(shiftCode)} - ${userDate} - ${generatedTimestamp}.xlsx`;
+    XLSX.writeFile(wb, filename);
 
     console.log('✅ Excel report generated successfully');
   } catch (error) {

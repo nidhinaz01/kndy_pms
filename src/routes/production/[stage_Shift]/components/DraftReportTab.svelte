@@ -84,10 +84,18 @@
 
   function getUniqueSkills(items: any[]): string {
     if (!items || items.length === 0) return 'N/A';
-    const skills = items
-      .map(report => report.skillMapping?.sc_name || report.prdn_work_planning?.sc_required || 'N/A')
-      .filter((skill, index, arr) => arr.indexOf(skill) === index); // Get unique values
-    return skills.join(', ');
+    // Prefer an explicit combined sc_name when available (e.g., "US + T")
+    for (const report of items) {
+      const scName = report.skillMapping?.sc_name || report.prdn_work_planning?.std_work_skill_mapping?.sc_name;
+      if (scName && typeof scName === 'string' && scName.trim() !== '') {
+        return scName;
+      }
+    }
+    // Fallback: collect unique tokens (sc_required or mapping short) and join with ' + ' to match Plan format
+    const tokens = items
+      .map(report => report.prdn_work_planning?.sc_required || report.skillMapping?.sc_name || 'N/A')
+      .filter((t, i, arr) => arr.indexOf(t) === i);
+    return tokens.join(' + ');
   }
 
   async function handleReportOT() {

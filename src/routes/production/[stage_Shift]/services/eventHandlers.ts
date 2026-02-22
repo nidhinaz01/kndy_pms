@@ -1,7 +1,7 @@
 import { supabase } from '$lib/supabaseClient';
 import { getWaitingWorkOrdersForEntry, getAvailableWorkOrdersForExit, recordWorkOrderEntry, recordWorkOrderExit } from '../../services/stageWorkOrderService';
 import { submitPlanning, submitReporting } from '$lib/api/production/planningReportingService';
-import { savePlannedAttendance, savePlannedStageReassignment, saveReportedManpower } from '$lib/api/production/manpowerPlanningReportingService';
+import { savePlannedAttendance, savePlannedStageReassignment, saveReportedManpower, saveReportedStageReassignment } from '$lib/api/production/manpowerPlanningReportingService';
 import { convertPlanToDraftReport } from '$lib/services/convertPlanToDraftReportService';
 import { validateReportingAttendance } from '$lib/utils/reportingAttendanceValidation';
 
@@ -1137,21 +1137,40 @@ export async function handleStageReassigned(context: EventHandlerContext, event?
   const { empId, fromStageCode, toStageCode, date, shiftCode, fromTime, toTime, reason } = event.detail;
   
   try {
-    const result = await savePlannedStageReassignment(
-      empId,
-      fromStageCode,
-      toStageCode,
-      date,
-      shiftCode,
-      fromTime,
-      toTime,
-      reason
-    );
-    if (!result.success) {
-      alert('Error saving stage reassignment: ' + (result.error || 'Unknown error'));
-      return;
+    // Decide whether to save as a planned reassignment (planning tab) or as a reported reassignment (manpower-report tab)
+    if (context.activeTab === 'manpower-report') {
+      const result = await saveReportedStageReassignment(
+        empId,
+        fromStageCode,
+        toStageCode,
+        date,
+        shiftCode,
+        fromTime,
+        toTime,
+        reason
+      );
+      if (!result.success) {
+        alert('Error saving reported stage reassignment: ' + (result.error || 'Unknown error'));
+        return;
+      }
+      await context.loadManpowerReportData();
+    } else {
+      const result = await savePlannedStageReassignment(
+        empId,
+        fromStageCode,
+        toStageCode,
+        date,
+        shiftCode,
+        fromTime,
+        toTime,
+        reason
+      );
+      if (!result.success) {
+        alert('Error saving planned stage reassignment: ' + (result.error || 'Unknown error'));
+        return;
+      }
+      await context.loadManpowerPlanData();
     }
-  await context.loadManpowerPlanData();
   } catch (error) {
     console.error('Error saving stage reassignment:', error);
     alert('Error saving stage reassignment: ' + ((error as Error).message || 'Unknown error'));

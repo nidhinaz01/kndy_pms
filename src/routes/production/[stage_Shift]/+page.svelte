@@ -332,12 +332,16 @@
   }
 
   // Excel/PDF generation
-  function generatePlanExcelHandler() {
+  async function generatePlanExcelHandler() {
     if (plannedWorksWithStatus.length === 0) {
       alert('No planned works to export');
       return;
     }
-    generatePlanExcel(plannedWorksWithStatus, stageCode, shiftCode, selectedDate, shiftBreakTimes);
+    // Ensure manpower plan data is loaded so Worker Summary sheet can be populated.
+    if (!manpowerPlanData || manpowerPlanData.length === 0) {
+      await dataLoading.loadManpowerPlanData(dataLoadingContext);
+    }
+    generatePlanExcel(plannedWorksWithStatus, stageCode, shiftCode, selectedDate, shiftBreakTimes, manpowerPlanData);
   }
 
   function generatePlanPDFHandler() {
@@ -348,13 +352,17 @@
     generatePlanPDF(plannedWorksWithStatus, stageCode, shiftCode, selectedDate, shiftBreakTimes);
   }
 
-  function handleGenerateReportExcel() {
+  async function handleGenerateReportExcel() {
     if (!reportData || reportData.length === 0) {
       alert('No report data available to generate Excel.');
       return;
     }
     try {
-      generateReportExcel(reportData, stageCode, shiftCode, selectedDate);
+      // Ensure manpower report data is loaded so Worker Summary sheet can be populated.
+      if (!manpowerReportData || manpowerReportData.length === 0) {
+        await dataLoading.loadManpowerReportData(dataLoadingContext);
+      }
+      generateReportExcel(reportData, stageCode, shiftCode, selectedDate, manpowerReportData);
     } catch (error) {
       console.error('Error generating Excel:', error);
       alert('Error generating Excel file. Please try again.');

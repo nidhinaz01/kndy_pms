@@ -354,6 +354,10 @@
 
     return { start: availableStart, end: availableEnd };
   }
+
+  // Reactive availableTimeRange used by the template
+  let availableTimeRange: { start: string; end: string } = { start: '', end: '' };
+  $: availableTimeRange = getAvailableTimeRange();
 </script>
 
 {#if showModal}

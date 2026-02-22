@@ -20,12 +20,27 @@
   onMount(() => {
     theme.initialize();
     
-    // Check if this is a first login
-    const urlParams = new URLSearchParams(window.location.search);
-    isFirstLogin = urlParams.get('first_login') === 'true';
+    (async () => {
+      // Parse any Supabase session tokens that may be present in the URL
+      try {
+        // If Supabase returned session tokens in the URL after verify, parse them and store session
+        // supabase.auth.getSessionFromUrl will extract tokens from the URL fragment/query and store them
+        // into the Supabase client so supabase.auth.getSession() returns a valid session.
+        // Use a try/catch to avoid breaking if no tokens are present.
+        // @ts-ignore - method exists on supabase-js v2
+        await supabase.auth.getSessionFromUrl({ storeSession: true });
+      } catch (err) {
+        // ignore - no token in URL or parsing failed
+        console.debug('No session token in URL or failed to parse token:', err);
+      }
 
-    // Check if we have a valid session (required for password reset)
-    checkSession();
+      // Check if this is a first login
+      const urlParams = new URLSearchParams(window.location.search);
+      isFirstLogin = urlParams.get('first_login') === 'true';
+
+      // Check if we have a valid session (required for password reset)
+      await checkSession();
+    })();
   });
 
   async function checkSession() {

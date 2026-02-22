@@ -32,7 +32,15 @@ export async function loadReportData(stageCode: string, selectedDate: string) {
       .eq('is_deleted', false);
     
     if (error) throw error;
-    return data || [];
+    // Enrich report rows with vehicleWorkFlow and skillTimeStandard same as planned data
+    try {
+      const { batchEnrichItems } = await import('$lib/utils/workEnrichmentService');
+      const enriched = await batchEnrichItems(data || [], stageCode);
+      return enriched || [];
+    } catch (enrichError) {
+      console.warn('Warning: failed to enrich report data, returning raw data', enrichError);
+      return data || [];
+    }
   } catch (error) {
     console.error('Error loading report data:', error);
     return [];

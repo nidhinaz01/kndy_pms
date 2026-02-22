@@ -161,28 +161,87 @@ export function groupPlannedWorks(plannedWorks: any[]): Record<string, any> {
     }
   });
   
-  return groups;
+  // ---------- Order groups by category (Parent P, Mother M, Child C, Other O), then by workCode, then by earliest from_time ----------
+  const categoryOrderMap: Record<string, number> = { P: 0, M: 1, C: 2, O: 3 };
+
+  function getCategoryIndex(workCode: string | undefined): number {
+    if (!workCode || typeof workCode !== 'string' || workCode.length === 0) return categoryOrderMap.O;
+    const firstChar = workCode.trim().charAt(0).toUpperCase();
+    if (firstChar === 'P') return categoryOrderMap.P;
+    if (firstChar === 'M') return categoryOrderMap.M;
+    if (firstChar === 'C') return categoryOrderMap.C;
+    return categoryOrderMap.O;
+  }
+
+  function parseWorkCode(workCode: string | undefined): { prefix: string; num: number | null; suffix: string } {
+    if (!workCode || typeof workCode !== 'string') return { prefix: '', num: null, suffix: '' };
+    const m = workCode.match(/^([A-Za-z]+)?0*([0-9]+)?([A-Za-z0-9-]*)$/);
+    if (!m) return { prefix: workCode, num: null, suffix: '' };
+    const prefix = (m[1] || '').toUpperCase();
+    const num = m[2] ? parseInt(m[2], 10) : null;
+    const suffix = (m[3] || '').toUpperCase();
+    return { prefix, num, suffix };
+  }
+
+  function timeToMinutes(timeStr: string | undefined): number {
+    if (!timeStr || typeof timeStr !== 'string') return Number.MAX_SAFE_INTEGER;
+    const parts = timeStr.split(':').map(Number);
+    if (parts.length < 2) return Number.MAX_SAFE_INTEGER;
+    const [h, m] = parts;
+    return (h || 0) * 60 + (m || 0);
+  }
+
+  const groupEntries = Object.entries(groups);
+  groupEntries.sort((a, b) => {
+    const [, ga] = a;
+    const [, gb] = b;
+
+    const codeA: string = ga.workCode || '';
+    const codeB: string = gb.workCode || '';
+
+    const catA = getCategoryIndex(codeA);
+    const catB = getCategoryIndex(codeB);
+    if (catA !== catB) return catA - catB;
+
+    const pa = parseWorkCode(codeA);
+    const pb = parseWorkCode(codeB);
+    if (pa.num !== null && pb.num !== null) {
+      if (pa.num !== pb.num) return pa.num - pb.num;
+      if (pa.suffix !== pb.suffix) return pa.suffix.localeCompare(pb.suffix);
+    } else {
+      const cmp = codeA.localeCompare(codeB);
+      if (cmp !== 0) return cmp;
+    }
+
+    const earliestA = Math.min(...(ga.items || []).map((it: any) => timeToMinutes(it.from_time)));
+    const earliestB = Math.min(...(gb.items || []).map((it: any) => timeToMinutes(it.from_time)));
+    return earliestA - earliestB;
+  });
+
+  const orderedGroups: Record<string, any> = {};
+  for (const [key, value] of groupEntries) {
+    orderedGroups[key] = value;
+  }
+
+  return orderedGroups;
 }
 
 /**
  * Group report works by work code
  */
 export function groupReportWorks(reportData: any[]): Record<string, any> {
-  return reportData.reduce((groups, report) => {
+  const groups = (reportData || []).reduce((groups, report) => {
     const planning = report.prdn_work_planning;
     const workCode = planning?.other_work_code || 
                      planning?.std_work_type_details?.derived_sw_code || 
                      planning?.std_work_type_details?.sw_code || 'unknown';
     
-    // Include wsm_id in grouping key to separate different skill combinations for the same work
-    // This ensures that "MW1 + SS + T" and "MW2 + SS + T" are grouped separately
-    const wsmId = planning?.wsm_id || null;
-    const groupKey = wsmId ? `${workCode}_wsm${wsmId}` : workCode;
+    // Include wo_details_id (work order identity) in grouping key to match Plan grouping.
+    const woDetailsId = planning?.wo_details_id || planning?.prdn_wo_details?.id || null;
+    const groupKey = `${workCode}_${woDetailsId || 'unknown'}`;
     
     let workName = '';
     if (planning?.other_work_code) {
-      // For non-standard work, try to get description from work addition data
-      // Check report first (after enrichment), then planning record, then fallback to code
       if (report.workAdditionData?.other_work_desc) {
         workName = report.workAdditionData.other_work_desc;
       } else if (planning.workAdditionData?.other_work_desc) {
@@ -202,6 +261,7 @@ export function groupReportWorks(reportData: any[]): Record<string, any> {
         workName: fullWorkName,
         woNo: planning?.prdn_wo_details?.wo_no || 'N/A',
         pwoNo: planning?.prdn_wo_details?.pwo_no || 'N/A',
+        woDetailsId: woDetailsId,
         items: [],
         hasLostTime: false,
         totalLostTime: 0
@@ -217,6 +277,83 @@ export function groupReportWorks(reportData: any[]): Record<string, any> {
     groups[groupKey].items.push(report);
     return groups;
   }, {});
+
+  // Sort items within each report group by skill order (reuse logic from planned grouping)
+  Object.values(groups).forEach((group: any) => {
+    if (!group.items || group.items.length === 0) return;
+    const firstItem = group.items[0];
+    const skillMapping = firstItem?.skillMapping || firstItem?.prdn_work_planning?.std_work_skill_mapping;
+    const skillOrderMap = getSkillOrderMap(skillMapping);
+    if (skillOrderMap.size > 0) {
+      group.items.sort((a: any, b: any) => {
+        const skillA = a.skillMapping?.sc_name || a.prdn_work_planning?.sc_required || '';
+        const skillB = b.skillMapping?.sc_name || b.prdn_work_planning?.sc_required || '';
+        let orderA = skillOrderMap.get(skillA);
+        if (orderA === undefined) {
+          const empSkillA = a.prdn_work_planning?.hr_emp?.skill_short || a.hr_emp?.skill_short;
+          if (empSkillA) orderA = skillOrderMap.get(empSkillA);
+        }
+        orderA = orderA ?? 999;
+        let orderB = skillOrderMap.get(skillB);
+        if (orderB === undefined) {
+          const empSkillB = b.prdn_work_planning?.hr_emp?.skill_short || b.hr_emp?.skill_short;
+          if (empSkillB) orderB = skillOrderMap.get(empSkillB);
+        }
+        orderB = orderB ?? 999;
+        if (orderA === orderB) return 0;
+        return orderA - orderB;
+      });
+    }
+  });
+
+  // Order groups by same rules as planned grouping: category, workCode numeric, earliest from_time
+  const categoryOrderMap: Record<string, number> = { P: 0, M: 1, C: 2, O: 3 };
+  function getCategoryIndex(workCode: string | undefined): number {
+    if (!workCode || typeof workCode !== 'string' || workCode.length === 0) return categoryOrderMap.O;
+    const firstChar = workCode.trim().charAt(0).toUpperCase();
+    if (firstChar === 'P') return categoryOrderMap.P;
+    if (firstChar === 'M') return categoryOrderMap.M;
+    if (firstChar === 'C') return categoryOrderMap.C;
+    return categoryOrderMap.O;
+  }
+  function parseWorkCode(workCode: string | undefined): { prefix: string; num: number | null; suffix: string } {
+    if (!workCode || typeof workCode !== 'string') return { prefix: '', num: null, suffix: '' };
+    const m = workCode.match(/^([A-Za-z]+)?0*([0-9]+)?([A-Za-z0-9-]*)$/);
+    if (!m) return { prefix: workCode, num: null, suffix: '' };
+    const prefix = (m[1] || '').toUpperCase();
+    const num = m[2] ? parseInt(m[2], 10) : null;
+    const suffix = (m[3] || '').toUpperCase();
+    return { prefix, num, suffix };
+  }
+  function timeToMinutes(timeStr: string | undefined): number {
+    if (!timeStr || typeof timeStr !== 'string') return Number.MAX_SAFE_INTEGER;
+    const parts = timeStr.split(':').map(Number);
+    if (parts.length < 2) return Number.MAX_SAFE_INTEGER;
+    const [h, m] = parts;
+    return (h || 0) * 60 + (m || 0);
+  }
+  const groupEntries = Object.entries(groups);
+  groupEntries.sort((a, b) => {
+    const [, ga] = a; const [, gb] = b;
+    const codeA: string = ga.workCode || '';
+    const codeB: string = gb.workCode || '';
+    const catA = getCategoryIndex(codeA); const catB = getCategoryIndex(codeB);
+    if (catA !== catB) return catA - catB;
+    const pa = parseWorkCode(codeA); const pb = parseWorkCode(codeB);
+    if (pa.num !== null && pb.num !== null) {
+      if (pa.num !== pb.num) return pa.num - pb.num;
+      if (pa.suffix !== pb.suffix) return pa.suffix.localeCompare(pb.suffix);
+    } else {
+      const cmp = codeA.localeCompare(codeB);
+      if (cmp !== 0) return cmp;
+    }
+    const earliestA = Math.min(...(ga.items || []).map((it: any) => timeToMinutes(it.from_time)));
+    const earliestB = Math.min(...(gb.items || []).map((it: any) => timeToMinutes(it.from_time)));
+    return earliestA - earliestB;
+  });
+  const orderedGroups: Record<string, any> = {};
+  for (const [key, value] of groupEntries) orderedGroups[key] = value;
+  return orderedGroups;
 }
 
 /**

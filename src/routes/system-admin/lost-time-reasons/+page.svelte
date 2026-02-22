@@ -143,20 +143,38 @@
   }
 
   onMount(async () => {
-    // Check if user is admin
-    const username = localStorage.getItem('username');
-    if (!username || username.toLowerCase() !== 'admin') {
-      console.log('User is not admin, redirecting to dashboard');
-      window.location.href = '/dashboard';
-      return;
-    }
+    try {
+      const savedUserStr = localStorage.getItem('user');
+      if (!savedUserStr) {
+        console.log('User not logged in, redirecting to login');
+        window.location.href = '/';
+        return;
+      }
 
-    console.log('Admin access confirmed, loading lost time reasons');
-    await loadData();
+      let savedUser: any = null;
+      try {
+        savedUser = JSON.parse(savedUserStr);
+      } catch (err) {
+        console.error('Failed to parse saved user from localStorage:', err);
+        window.location.href = '/';
+        return;
+      }
 
-    // Load menus
-    if (username) {
+      const username = savedUser?.username;
+      if (!username) {
+        console.log('No username found in saved user, redirecting to login');
+        window.location.href = '/';
+        return;
+      }
+
+      console.log('Loading lost time reasons');
+      await loadData();
+
+      // Load menus
       menus = await fetchUserMenus(username);
+    } catch (err) {
+      console.error('Error during lost-time-reasons initialization:', err);
+      window.location.href = '/';
     }
   });
 </script>

@@ -26,7 +26,8 @@ export function generatePlanExcel(
   stageCode: string,
   shiftCode: string,
   planningDate: string,
-  shiftBreakTimes: Array<{ start_time: string; end_time: string }> = []
+  shiftBreakTimes: Array<{ start_time: string; end_time: string }> = [],
+  manpowerEmployees: any[] = []
 ): void {
   try {
     // Group works by work code
@@ -102,6 +103,33 @@ export function generatePlanExcel(
       { wch: 20 }
     ];
 
+    // Create Worker Summary sheet (from Manpower Plan data)
+    // Columns: Employee, Skill, Attendance Status, Hours Planned, To Other Stage, From Other Stage
+    const workerSummaryData = (manpowerEmployees || []).map(emp => ({
+      'Employee': emp.emp_name || '',
+      'Skill': emp.skill_short || '',
+      'Attendance Status': emp.attendance_status === 'present' ? 'Present' : emp.attendance_status === 'absent' ? 'Absent' : (emp.attendance_status ? String(emp.attendance_status) : ''),
+      'Hours Planned': emp.hours_planned != null ? emp.hours_planned : '',
+      'To Other Stage': emp.to_other_stage_hours != null ? emp.to_other_stage_hours : 0,
+      'From Other Stage': emp.from_other_stage_hours != null ? emp.from_other_stage_hours : 0
+    })).sort((a, b) => {
+      const na = (a.Employee || '').toLowerCase();
+      const nb = (b.Employee || '').toLowerCase();
+      if (na < nb) return -1;
+      if (na > nb) return 1;
+      return 0;
+    });
+
+    const workerSummaryWs = XLSX.utils.json_to_sheet(workerSummaryData);
+    workerSummaryWs['!cols'] = [
+      { wch: 30 }, // Employee
+      { wch: 10 }, // Skill
+      { wch: 18 }, // Attendance Status
+      { wch: 15 }, // Hours Planned
+      { wch: 15 }, // To Other Stage
+      { wch: 15 }  // From Other Stage
+    ];
+
     // Create Planned Works sheet
     const plannedWorksWs = XLSX.utils.json_to_sheet(plannedWorksData);
 
@@ -143,12 +171,28 @@ export function generatePlanExcel(
       }
     }
 
-    // Create workbook and add sheets
+    // Create workbook and add sheets (insert Worker Summary between Summary and Planned Works)
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, summaryWs, 'Summary');
+    XLSX.utils.book_append_sheet(wb, workerSummaryWs, 'Worker Summary');
     XLSX.utils.book_append_sheet(wb, plannedWorksWs, 'Planned Works');
     
-    XLSX.writeFile(wb, formatStageShiftExportFilename(stageCode, shiftCode, planningDate, 'Work_Planning'));
+    // Build filename with generated timestamp similar to PDF naming:
+    // Plan - <stage> - <shift> - <dd MMM yyyy> - <YYYY-MM-DD_HH-mm-ss>.xlsx
+    const generatedAt = new Date();
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const generatedTimestamp = `${generatedAt.getFullYear()}-${pad(generatedAt.getMonth() + 1)}-${pad(generatedAt.getDate())}_${pad(generatedAt.getHours())}-${pad(generatedAt.getMinutes())}-${pad(generatedAt.getSeconds())}`;
+    const userDate = (() => {
+      try {
+        const d = new Date(planningDate);
+        return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+      } catch {
+        return planningDate;
+      }
+    })();
+    const sanitize = (s: string) => String(s || '').replace(/[\/\\:<>?"|*]/g, '-').trim();
+    const filename = `Plan - ${sanitize(stageCode)} - ${sanitize(shiftCode)} - ${userDate} - ${generatedTimestamp}.xlsx`;
+    XLSX.writeFile(wb, filename);
 
     console.log('✅ Excel plan generated successfully');
   } catch (error) {
