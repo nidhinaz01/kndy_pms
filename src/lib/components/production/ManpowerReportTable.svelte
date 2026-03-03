@@ -20,6 +20,7 @@
   export let selectedDate: string = '';
   export let reportingSubmissionStatus: any = null;
   export let shiftCode: string = ''; // Shift code for bulk operations
+  export let stageCode: string = '';
 
   const dispatch = createEventDispatcher();
 
@@ -174,6 +175,10 @@
     state.showJourneyModal = true;
   }
 
+  function handleJourneyDelete(event: CustomEvent) {
+    dispatch('stageJourneyDelete', event.detail);
+  }
+
   function handleAttendanceMarked(event: CustomEvent) {
     // Pass through ALL fields from the event, not just a subset
     const eventDetail = event.detail;
@@ -269,6 +274,7 @@
           {sortConfig}
           onSort={handleSort}
           {reportingSubmissionStatus}
+          {stageCode}
           onToggleSelection={toggleEmployeeSelection}
           onAttendanceToggle={handleAttendanceToggle}
           onStageReassignment={handleStageReassignment}
@@ -303,7 +309,11 @@
     showModal={state.showJourneyModal}
     employee={state.selectedEmployee}
     {selectedDate}
+    mode="reporting"
+    parentStage={stageCode}
+    disableDeleteButtons={reportingSubmissionStatus?.status === 'pending_approval' || reportingSubmissionStatus?.status === 'approved' || reportingSubmissionStatus?.status === 'resubmitted'}
     on:close={handleJourneyModalClose}
+    on:deleteJourney={handleJourneyDelete}
   />
 
   <BulkAttendanceModal

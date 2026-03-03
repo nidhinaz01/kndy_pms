@@ -24,6 +24,7 @@
   // Validation state
   let fromTimeError: string = '';
   let toTimeError: string = '';
+  let overlapError: string = '';
   let workPlanConflictError: string = '';
 
   // Shift information
@@ -174,28 +175,29 @@
   function validateTimes() {
     fromTimeError = '';
     toTimeError = '';
+    overlapError = '';
 
-    // Use attendance time range if available, otherwise fall back to shift time
-    const attendanceStart = employee?.attendance_from_time;
-    const attendanceEnd = employee?.attendance_to_time;
-    
-    // If attendance times are marked, use them; otherwise use shift times
+    // Normalize attendance times to HH:MM when present (employee.attendance_* may include seconds)
+    const rawAttendanceStart = employee?.attendance_from_time;
+    const rawAttendanceEnd = employee?.attendance_to_time;
+    const attendanceStart = rawAttendanceStart ? rawAttendanceStart.substring(0, 5) : null;
+    const attendanceEnd = rawAttendanceEnd ? rawAttendanceEnd.substring(0, 5) : null;
+
+    // Use attendance time range if available, otherwise use shift time (normalized)
     let timeStart: string;
     let timeEnd: string;
-    
+
     if (attendanceStart && attendanceEnd) {
-      // Use attendance time range
       timeStart = attendanceStart;
       timeEnd = attendanceEnd;
     } else if (shiftDetails.shift) {
-      // Fall back to shift time range
-      timeStart = shiftDetails.shift.start_time;
-      timeEnd = shiftDetails.shift.end_time;
+      timeStart = shiftDetails.shift.start_time.substring(0, 5);
+      timeEnd = shiftDetails.shift.end_time.substring(0, 5);
     } else {
       // No time constraints available
       return;
     }
-    
+
     // Calculate earliest allowed time (3 hours before time start)
     const earliestAllowedTime = subtractHours(timeStart, 3);
 
@@ -204,18 +206,18 @@
       if (fromTime < earliestAllowedTime) {
         fromTimeError = `Start time cannot be more than 3 hours before ${attendanceStart ? 'attendance start' : 'shift start'} (${formatTime(earliestAllowedTime)})`;
       }
-      // Ensure fromTime is not before attendance start
+      // Ensure fromTime is not before attendance start (compare normalized HH:MM)
       if (attendanceStart && fromTime < attendanceStart) {
         fromTimeError = `Start time cannot be before attendance start time (${formatTime(attendanceStart)})`;
       }
     }
 
     if (toTime) {
-      // Ensure toTime is not after attendance end
+      // Ensure toTime is not after attendance end (compare normalized HH:MM)
       if (attendanceEnd && toTime > attendanceEnd) {
         toTimeError = `End time cannot be after attendance end time (${formatTime(attendanceEnd)})`;
       } else if (!attendanceEnd && shiftDetails.shift && toTime > timeEnd) {
-        toTimeError = `End time cannot be after ${attendanceStart ? 'attendance end' : 'shift end'} (${formatTime(timeEnd)})`;
+        toTimeError = `End time cannot be after ${formatTime(timeEnd)} (shift end)`;
       }
     }
 
@@ -223,19 +225,18 @@
       if (fromTime >= toTime) {
         toTimeError = 'End time must be after start time';
       }
-
-      // Check if this is a reassignment within existing time constraints
+      // Overlap check: new period must not overlap existing reassignments. Touching (e.g. 09:00–10:00 and 10:00–11:00) is allowed.
       if (employee?.stage_journey && employee.stage_journey.length > 0) {
-        const lastAssignment = employee.stage_journey[employee.stage_journey.length - 1];
-        if (lastAssignment.to_stage === employee.current_stage) {
-          // Worker was reassigned to current stage, check time constraints
-          // Calculate earliest allowed time for original assignment (3 hours before original assignment start)
-          const originalEarliestAllowed = subtractHours(lastAssignment.from_time, 3);
-          if (fromTime < originalEarliestAllowed) {
-            fromTimeError = `Start time cannot be more than 3 hours before original assignment start (${formatTime(originalEarliestAllowed)})`;
-          }
-          if (toTime > lastAssignment.to_time) {
-            toTimeError = `End time cannot be after ${formatTime(lastAssignment.to_time)} (original assignment end)`;
+        const newStart = fromTime.substring(0, 5);
+        const newEnd = toTime.substring(0, 5);
+        for (const journey of employee.stage_journey) {
+          const exStart = journey.from_time ? journey.from_time.substring(0, 5) : null;
+          const exEnd = journey.to_time ? journey.to_time.substring(0, 5) : null;
+          if (!exStart || !exEnd) continue;
+          // Overlap when: newStart < exEnd && exStart < newEnd (touching is OK: newEnd === exStart or exEnd === newStart)
+          if (newStart < exEnd && exStart < newEnd) {
+            overlapError = `This time period overlaps with an existing reassignment (${exStart} – ${exEnd}). Use a different period or touching periods (e.g. 10:00 after 09:00–10:00).`;
+            break;
           }
         }
       }
@@ -262,32 +263,38 @@
     validateTimes();
     // Check work plan conflicts (async, but we'll wait for it)
     await checkWorkPlanConflicts();
-    if (fromTimeError || toTimeError || workPlanConflictError) {
-      console.error('Validation failed:', { fromTimeError, toTimeError, workPlanConflictError });
+    if (fromTimeError || toTimeError || overlapError || workPlanConflictError) {
+      console.error('Validation failed:', { fromTimeError, toTimeError, overlapError, workPlanConflictError });
       return;
     }
 
     isSubmitting = true;
     
-    // Dispatch event to parent component
+    // Reassignments are always from the employee's home stage (original_stage), not current_stage.
+    const fromStage = employee.original_stage || employee.current_stage;
+    const empId = employee.emp_id;
+    const shiftCodeVal = employee.shift_code;
+    const currentStageForReset = employee.current_stage;
+
     dispatch('stageReassigned', {
-      empId: employee.emp_id,
-      fromStageCode: employee.current_stage,
+      empId,
+      fromStageCode: fromStage,
       toStageCode: selectedStage,
       date: selectedDate,
-      shiftCode: employee.shift_code,
+      shiftCode: shiftCodeVal,
       fromTime: fromTime,
       toTime: toTime,
       reason: reason.trim() || undefined
     });
 
-    // Reset form
-    selectedStage = employee.current_stage;
+    // Reset form (parent may clear employee after dispatch, so use captured values)
+    selectedStage = currentStageForReset;
     fromTime = '';
     toTime = '';
     reason = '';
     fromTimeError = '';
     toTimeError = '';
+    overlapError = '';
     isSubmitting = false;
   }
 
@@ -315,39 +322,40 @@
   }
 
   function getAvailableTimeRange() {
-    // Priority: Use attendance time range if available, otherwise use shift time range
-    const attendanceStart = employee?.attendance_from_time;
-    const attendanceEnd = employee?.attendance_to_time;
-    
+    // Normalize times to HH:MM for reliable comparisons and display
+    const rawAttendanceStart = employee?.attendance_from_time;
+    const rawAttendanceEnd = employee?.attendance_to_time;
+    const attendanceStart = rawAttendanceStart ? rawAttendanceStart.substring(0, 5) : null;
+    const attendanceEnd = rawAttendanceEnd ? rawAttendanceEnd.substring(0, 5) : null;
+
     let availableStart = '';
     let availableEnd = '';
 
     if (attendanceStart && attendanceEnd) {
-      // Use attendance time range
       availableStart = attendanceStart;
       availableEnd = attendanceEnd;
     } else if (shiftDetails.shift) {
-      // Fall back to shift time range
-      availableStart = shiftDetails.shift.start_time;
-      availableEnd = shiftDetails.shift.end_time;
+      availableStart = shiftDetails.shift.start_time.substring(0, 5);
+      availableEnd = shiftDetails.shift.end_time.substring(0, 5);
     }
 
     // If this is a reassignment, check the original assignment time constraints
     if (employee?.stage_journey && employee.stage_journey.length > 0) {
       const lastAssignment = employee.stage_journey[employee.stage_journey.length - 1];
       if (lastAssignment.to_stage === employee.current_stage) {
-        // Worker was reassigned to current stage, use original assignment time constraints
-        // But still respect attendance time boundaries
-        const originalStart = lastAssignment.from_time;
-        const originalEnd = lastAssignment.to_time;
-        
-        // Use the intersection of attendance time and original assignment time
-        if (attendanceStart && attendanceEnd) {
-          availableStart = originalStart > attendanceStart ? originalStart : attendanceStart;
-          availableEnd = originalEnd < attendanceEnd ? originalEnd : attendanceEnd;
-        } else {
-          availableStart = originalStart;
-          availableEnd = originalEnd;
+        // Normalize original assignment times
+        const originalStart = lastAssignment.from_time ? lastAssignment.from_time.substring(0, 5) : null;
+        const originalEnd = lastAssignment.to_time ? lastAssignment.to_time.substring(0, 5) : null;
+
+        if (originalStart && originalEnd) {
+          // Use the intersection of attendance time and original assignment time when attendance exists
+          if (attendanceStart && attendanceEnd) {
+            availableStart = originalStart > attendanceStart ? originalStart : attendanceStart;
+            availableEnd = originalEnd < attendanceEnd ? originalEnd : attendanceEnd;
+          } else {
+            availableStart = originalStart;
+            availableEnd = originalEnd;
+          }
         }
       }
     }
@@ -462,7 +470,7 @@
                 style="width: 100%; padding: 8px; font-size: 14px; border: 1px solid #ccc; border-radius: 4px; background: white; color: black;"
               >
                 <option value="">Select target stage...</option>
-                {#each availableStages.filter(stage => stage !== employee.current_stage) as stage}
+                {#each availableStages.filter(stage => stage !== (employee.original_stage || employee.current_stage)) as stage}
                   <option value={stage}>
                     {stage}
                   </option>
@@ -525,8 +533,11 @@
                 {/if}
               </div>
             </div>
+            {#if overlapError}
+              <p class="text-amber-600 dark:text-amber-400 text-sm mt-2 font-medium">{overlapError}</p>
+            {/if}
             
-            {#if fromTime && toTime && !fromTimeError && !toTimeError && !workPlanConflictError}
+            {#if fromTime && toTime && !fromTimeError && !toTimeError && !overlapError && !workPlanConflictError}
               <div class="mt-3 p-3 bg-green-50 dark:bg-green-900/20 rounded-lg">
                 <p class="theme-text-primary text-sm">
                   <strong>Reassignment Period:</strong> {formatTime(fromTime)} - {formatTime(toTime)}
@@ -565,7 +576,7 @@
             variant="primary" 
             size="md"
             on:click={handleSubmit}
-            disabled={isSubmitting || !selectedStage || !fromTime || !toTime || selectedStage === employee.current_stage || !!fromTimeError || !!toTimeError || !!workPlanConflictError}
+            disabled={isSubmitting || !selectedStage || !fromTime || !toTime || selectedStage === (employee.original_stage || employee.current_stage) || !!fromTimeError || !!toTimeError || !!overlapError || !!workPlanConflictError}
           >
             {isSubmitting ? 'Reassigning...' : 'Reassign Employee'}
           </Button>

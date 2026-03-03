@@ -18,6 +18,8 @@
   export let onClearAll: () => void = () => {};
   export let allSelected: boolean = false;
   export let eligibleCount: number = 0;
+  /** Current tab's stage. Reassign is only allowed when this equals the employee's home stage (original_stage). */
+  export let stageCode: string = '';
 </script>
 
 <thead class="theme-bg-secondary">
@@ -60,6 +62,7 @@
         {employee}
         isSelected={selectedEmployees.has(employee.emp_id)}
         {reportingSubmissionStatus}
+        parentStageCode={stageCode}
         onToggleSelection={() => onToggleSelection(employee)}
         onAttendanceToggle={() => onAttendanceToggle(employee)}
         onStageReassignment={() => onStageReassignment(employee)}

@@ -8,6 +8,7 @@
   export let selectedDate: string = '';
   export let reportingSubmissionStatus: any = null;
   export let shiftCode: string = '';
+  export let stageCode: string = '';
 
   const dispatch = createEventDispatcher();
 
@@ -29,6 +30,10 @@
 
   function handleExport(event: CustomEvent) {
     dispatch('export', event.detail);
+  }
+
+  function handleStageJourneyDelete(event: CustomEvent) {
+    dispatch('stageJourneyDelete', event.detail);
   }
 </script>
 
@@ -55,10 +60,12 @@
       selectedDate={selectedDate}
       {reportingSubmissionStatus}
       {shiftCode}
+      stageCode={stageCode}
       on:refresh={handleRefresh}
       on:attendanceMarked={handleAttendanceMarked}
       on:bulkAttendanceMarked={handleBulkAttendanceMarked}
       on:stageReassigned={handleStageReassigned}
+      on:stageJourneyDelete={handleStageJourneyDelete}
       on:export={handleExport} 
     />
   {/if}

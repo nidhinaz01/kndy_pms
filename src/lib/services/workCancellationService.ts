@@ -12,7 +12,7 @@ import { getCurrentUsername, getCurrentTimestamp } from '$lib/utils/userUtils';
 export async function cancelWorkPlans(
   planningIds: number[],
   reason: string
-): Promise<{ success: boolean; error?: string }> {
+): Promise<{ success: boolean; cancelledCount?: number; skippedCount?: number; error?: string }> {
   try {
     if (!planningIds || planningIds.length === 0) {
       return { success: false, error: 'No planning IDs provided' };

@@ -303,16 +303,15 @@ export async function fetchProductionEmployees(
       if (mode === 'planning') {
         // For planning mode, query prdn_planning_manpower with planning_date
         // Include draft, pending_approval, and approved statuses (all should show attendance)
-        // Note: Removed stage_code filter to support employees reassigned between stages
-        // Attendance is per employee per date, not per stage
+        // Include created_dt so we keep the most recent record when deduping (latest has planned_hours)
         attendanceQuery = supabase
           .from('prdn_planning_manpower')
-          .select('emp_id, attendance_status, planned_hours, from_time, to_time, notes')
+          .select('emp_id, attendance_status, planned_hours, from_time, to_time, notes, created_dt')
           .in('emp_id', employeeIds)
           .eq('planning_date', date)
-          // .eq('stage_code', stage) // Removed: attendance is per employee, not per stage
           .in('status', ['draft', 'pending_approval', 'approved'])
-          .eq('is_deleted', false);
+          .eq('is_deleted', false)
+          .order('created_dt', { ascending: false });
       } else if (mode === 'reporting') {
         // For reporting mode, query prdn_reporting_manpower with reporting_date
         // Include draft, pending_approval, and approved statuses (all should show attendance)
@@ -391,7 +390,7 @@ export async function fetchProductionEmployees(
         // Include draft, pending_approval, and approved reassignments (all should show in Manpower Plan tab)
         reassignmentQuery = supabase
           .from('prdn_planning_stage_reassignment')
-          .select('emp_id, from_stage_code, to_stage_code, planning_date, from_time, to_time, reason, created_by, created_dt')
+          .select('id, emp_id, from_stage_code, to_stage_code, planning_date, from_time, to_time, reason, created_by, created_dt, reporting_reassignment_id, status')
           .in('emp_id', employeeIds)
           .eq('planning_date', date)
           .in('status', ['draft', 'pending_approval', 'approved'])
@@ -401,19 +400,67 @@ export async function fetchProductionEmployees(
         // For 'reporting' and 'current' modes, use reporting table
         reassignmentQuery = supabase
           .from('prdn_reporting_stage_reassignment')
-          .select('emp_id, from_stage_code, to_stage_code, reassignment_date, from_time, to_time, reason, created_by, created_dt')
+          .select('reassignment_id, emp_id, from_stage_code, to_stage_code, reassignment_date, from_time, to_time, reason, created_by, created_dt, planning_reassignment_id, status')
           .in('emp_id', employeeIds)
           .eq('reassignment_date', date)
           .eq('is_deleted', false)
           .order('created_dt', { ascending: true });
       }
       
-      const { data: reassignmentDataResult, error: reassignmentError } = await reassignmentQuery;
+      // Fetch reassignment data in chunks to avoid overly-long GET URLs (Supabase REST limitation).
+      const CHUNK_SIZE = 80;
+      const table = mode === 'planning' ? 'prdn_planning_stage_reassignment' : 'prdn_reporting_stage_reassignment';
+      const dateField = mode === 'planning' ? 'planning_date' : 'reassignment_date';
+      const baseSelectPlanning = 'id, emp_id, from_stage_code, to_stage_code, planning_date, from_time, to_time, reason, created_by, created_dt, reporting_reassignment_id, status';
+      const baseSelectReporting = 'reassignment_id, emp_id, from_stage_code, to_stage_code, reassignment_date, from_time, to_time, reason, created_by, created_dt, planning_reassignment_id, status';
 
-      if (reassignmentError) {
-        console.error('Error fetching stage reassignment data:', reassignmentError);
+      async function runChunkedQuery(selectStr: string) {
+        const results: any[] = [];
+        for (let i = 0; i < employeeIds.length; i += CHUNK_SIZE) {
+          const chunk = employeeIds.slice(i, i + CHUNK_SIZE);
+          const q = supabase
+            .from(table)
+            .select(selectStr)
+            .in('emp_id', chunk)
+            .eq(dateField, date)
+            .eq('is_deleted', false)
+            .order('created_dt', { ascending: true });
+          const { data, error } = await q;
+          if (error) {
+            return { error, data: results.concat(data || []) };
+          }
+          results.push(...(data || []));
+        }
+        return { data: results, error: null };
+      }
+
+      // Try with status field first
+      let selectStr = mode === 'planning' ? baseSelectPlanning : baseSelectReporting;
+      let { data: fetched, error: fetchErr } = await runChunkedQuery(selectStr);
+
+      // If error mentions missing status column, retry without status
+      if (fetchErr) {
+        const msg = (fetchErr && fetchErr.message) || String(fetchErr);
+        console.warn('Error fetching reassignment data:', fetchErr);
+        if (msg.includes('status') && msg.includes('does not exist')) {
+          console.warn('Status column not found on reassignment table, retrying query without status field.');
+          selectStr = mode === 'planning'
+            ? 'id, emp_id, from_stage_code, to_stage_code, planning_date, from_time, to_time, reason, created_by, created_dt, reporting_reassignment_id'
+            : 'reassignment_id, emp_id, from_stage_code, to_stage_code, reassignment_date, from_time, to_time, reason, created_by, created_dt, planning_reassignment_id';
+          const retry = await runChunkedQuery(selectStr);
+          fetched = retry.data || [];
+          fetchErr = retry.error;
+          if (fetchErr) {
+            console.error('Retry failed fetching reassignment data:', fetchErr);
+          }
+        }
+      }
+
+      if (fetchErr) {
+        // If still error, fall back to empty
+        reassignmentData = fetched || [];
       } else {
-        reassignmentData = reassignmentDataResult || [];
+        reassignmentData = fetched || [];
       }
 
       // Query 7: Reporting manpower data (for LTP/LTNP hours) - only for reporting mode
@@ -602,11 +649,18 @@ export async function fetchProductionEmployees(
       }
       
       // Find reassignments for this employee
-      // Normalize date field name (could be planning_date or reassignment_date)
-      const reassignments = (reassignmentData || []).filter(r => r.emp_id === emp.emp_id).map(r => ({
-        ...r,
-        reassignment_date: r.planning_date || r.reassignment_date || date
-      }));
+      // Normalize date field name (planning_date or reassignment_date)
+      const reassignments = (reassignmentData || []).filter(r => r.emp_id === emp.emp_id).map(r => {
+        const id = r.id || r.reassignment_id || null;
+        const reassignment_date = r.planning_date || r.reassignment_date || date;
+        const source = mode === 'planning' ? 'planning' : 'reporting';
+        return {
+          ...r,
+          id,
+          reassignment_date,
+          source
+        };
+      });
 
       // Sort reassignments by created_dt to get journey
       const sortedReassignments = reassignments.sort((a, b) => 
@@ -617,19 +671,22 @@ export async function fetchProductionEmployees(
       const latestReassignment = sortedReassignments[sortedReassignments.length - 1];
       const currentStage = latestReassignment?.to_stage_code || stage;
 
-      // Build stage journey
+      // Build stage journey (include id and source so View Journey modal can delete by id)
       const stageJourney = sortedReassignments.map(reassign => ({
+        id: reassign.id,
+        source: reassign.source,
         from_stage: reassign.from_stage_code,
         to_stage: reassign.to_stage_code,
         reassigned_at: reassign.created_dt,
-        from_time: reassign.from_time,
-        to_time: reassign.to_time,
+        from_time: reassign.from_time ? reassign.from_time.substring(0,5) : null,
+        to_time: reassign.to_time ? reassign.to_time.substring(0,5) : null,
         reason: reassign.reason,
         reassigned_by: reassign.created_by || reassign.reassigned_by || 'N/A'
       }));
 
-      // Calculate transfer hours
-      const { toOtherStageHours, fromOtherStageHours } = calculateStageTransferHours(stageJourney, stage);
+      // Calculate transfer hours (deducting shift breaks)
+      const breakTimesForShift = emp.shift_code ? (shiftBreakTimesMap.get(emp.shift_code) || []) : [];
+      const { toOtherStageHours, fromOtherStageHours } = calculateStageTransferHours(stageJourney, stage, breakTimesForShift);
 
       // Get LTP/LTNP hours if in reporting mode
       const ltpHours = mode === 'reporting' ? (ltpMap.get(emp.emp_id) || 0) : 0;
@@ -645,15 +702,15 @@ export async function fetchProductionEmployees(
         current_stage: currentStage,
         original_stage: emp.stage, // Original assigned stage from hr_emp table
         attendance_status: attendance ? (attendance.attendance_status || null) : null,
-        // Attendance details from prdn_planning_manpower or prdn_reporting_manpower
-        planned_hours: mode === 'planning' && attendance 
-          ? (attendance.planned_hours ?? null) 
+        // Attendance details from prdn_planning_manpower or prdn_reporting_manpower (coerce to number for display)
+        planned_hours: mode === 'planning' && attendance
+          ? (attendance.planned_hours != null ? Number(attendance.planned_hours) : null)
           : mode === 'reporting' && plannedAttendance
-          ? (plannedAttendance.planned_hours ?? null)
+          ? (plannedAttendance.planned_hours != null ? Number(plannedAttendance.planned_hours) : null)
           : undefined,
         actual_hours: mode === 'reporting' && attendance ? (attendance.actual_hours ?? null) : undefined,
-        attendance_from_time: attendance ? (attendance.from_time || null) : null,
-        attendance_to_time: attendance ? (attendance.to_time || null) : null,
+        attendance_from_time: attendance ? (attendance.from_time ? attendance.from_time.substring(0,5) : null) : null,
+        attendance_to_time: attendance ? (attendance.to_time ? attendance.to_time.substring(0,5) : null) : null,
         attendance_notes: attendance ? (attendance.notes || null) : null,
         hours_planned: plannedHoursMap.get(emp.emp_id) || 0,
         hours_reported: reportedHoursMap.get(emp.emp_id) || 0,

@@ -13,12 +13,19 @@ export function filterEmployees(
       employee.shift_code.toLowerCase().includes(filters.search.toLowerCase());
     
     const matchesStatus = !filters.selectedStatus || 
-      (filters.selectedStatus === 'present' && employee.hours_reported && employee.hours_reported > 0) ||
-      (filters.selectedStatus === 'absent' && (!employee.hours_reported || employee.hours_reported === 0)) ||
+      (filters.selectedStatus === 'present' && ((employee.attendance_status === 'present') || (employee.hours_reported && employee.hours_reported > 0))) ||
+      (filters.selectedStatus === 'absent' && (employee.attendance_status === 'absent')) ||
+      (filters.selectedStatus === 'not_marked' && (!employee.attendance_status || employee.attendance_status === null)) ||
       (filters.selectedStatus === 'overtime' && employee.ot_hours && employee.ot_hours > 0) ||
       (filters.selectedStatus === 'undertime' && employee.lt_hours && employee.lt_hours > 0);
 
-    return matchesSearch && matchesStatus;
+    // Additional checkbox filters
+    // These advanced checkbox filters should only apply when the 'Present' status filter is active.
+    const matchesPlannedExceeds = !filters.plannedExceedsShift || (filters.selectedStatus === 'present' && ((employee.hours_planned || 0) > 8));
+    const matchesReassignedToOther = !filters.reassignedToOther || (filters.selectedStatus === 'present' && ((employee.to_other_stage_hours || 0) > 0));
+    const matchesReassignedFromOther = !filters.reassignedFromOther || (filters.selectedStatus === 'present' && ((employee.from_other_stage_hours || 0) > 0));
+
+    return matchesSearch && matchesStatus && matchesPlannedExceeds && matchesReassignedToOther && matchesReassignedFromOther;
   });
 }
 
@@ -47,17 +54,13 @@ export function isPlanningAttendanceLocked(employee: ProductionEmployee, plannin
   }
   
   const status = planningSubmissionStatus.status;
-  
-  // Lock attendance only if plan is submitted (pending_approval), approved, or resubmitted
+
+  // Lock attendance only if plan is submitted (pending_approval), resubmitted, or approved
   // Allow editing if status is 'rejected' (can resubmit)
-  if (status === 'pending_approval' || status === 'approved') {
+  if (status === 'pending_approval' || status === 'approved' || status === 'resubmitted') {
     return true;
   }
-  
-  // Check if it's a resubmission (pending_approval with previous rejected submission)
-  // This would be handled by checking if there's a rejected submission in history
-  // For now, we'll rely on the status field
-  
+
   // Don't lock if rejected (user can edit and resubmit)
   if (status === 'rejected') {
     return false;

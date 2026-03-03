@@ -221,6 +221,7 @@
     setShowReportUnplannedWorkModal: (v) => showReportUnplannedWorkModal = v,
     setShowUnplannedWorkReportModal: (v) => showUnplannedWorkReportModal = v,
     setSelectedWorkForUnplannedReporting: (v) => selectedWorkForUnplannedReporting = v,
+    selectedWorksForCancellation,
     setExpandedGroups: (v) => expandedGroups = typeof v === 'function' ? v(expandedGroups) : v,
     setSelectedRows: (v) => selectedRows = typeof v === 'function' ? v(selectedRows) : v,
     setExpandedReportGroups: (v) => expandedReportGroups = typeof v === 'function' ? v(expandedReportGroups) : v,
@@ -486,7 +487,7 @@
         on:attendanceMarked={(e) => eventHandlers.handleAttendanceMarked(eventHandlerContext, e)}
         on:bulkAttendanceMarked={(e) => eventHandlers.handleBulkAttendanceMarked(eventHandlerContext, e)}
         on:stageReassigned={(e) => eventHandlers.handleStageReassigned(eventHandlerContext, e)}
-        on:export={() => eventHandlers.handleManpowerExport(eventHandlerContext)}
+        on:stageJourneyDelete={(e) => eventHandlers.handleDeleteStageReassignment(eventHandlerContext, e)}
       />
     {:else if activeTab === 'draft-plan'}
       <DraftPlanTab 
@@ -544,6 +545,7 @@
         on:bulkAttendanceMarked={(e) => eventHandlers.handleBulkAttendanceMarked(eventHandlerContext, e)}
         on:stageReassigned={(e) => eventHandlers.handleStageReassigned(eventHandlerContext, e)}
         on:export={() => eventHandlers.handleManpowerExport(eventHandlerContext)}
+        on:stageJourneyDelete={(e) => eventHandlers.handleDeleteStageReassignment(eventHandlerContext, e)}
       />
     {:else if activeTab === 'draft-report'}
       <DraftReportTab 
@@ -674,7 +676,7 @@
         {stageCode}
         {selectedDate}
         on:close={() => eventHandlers.handleReportUnplannedWorkModalClose(eventHandlerContext)}
-        on:report={(e) => eventHandlers.handleReportUnplannedWorkSelected(eventHandlerContext, e)}
+        on:report={(e: CustomEvent) => eventHandlers.handleReportUnplannedWorkSelected(eventHandlerContext, e)}
       />
     {:else}
       <div class="fixed inset-0 z-[10000] flex items-center justify-center">
@@ -696,7 +698,7 @@
         showUnplannedWorkReportModal = false;
         selectedWorkForUnplannedReporting = null;
       }}
-      on:save={async (e) => {
+      on:save={async (e: CustomEvent) => {
         if (e.detail.success) {
           showUnplannedWorkReportModal = false;
           selectedWorkForUnplannedReporting = null;

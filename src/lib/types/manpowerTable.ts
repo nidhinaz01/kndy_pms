@@ -3,6 +3,9 @@ import type { ProductionEmployee } from '$lib/api/production';
 export interface ManpowerTableFilters {
   search: string;
   selectedStatus: string;
+  plannedExceedsShift?: boolean;
+  reassignedToOther?: boolean;
+  reassignedFromOther?: boolean;
 }
 
 export interface ManpowerTableState {
@@ -24,6 +27,10 @@ export interface ManpowerTableState {
 export const initialManpowerTableFilters: ManpowerTableFilters = {
   search: '',
   selectedStatus: ''
+  ,
+  plannedExceedsShift: false,
+  reassignedToOther: false,
+  reassignedFromOther: false
 };
 
 export const initialManpowerTableState: ManpowerTableState = {

@@ -496,7 +496,7 @@ export async function handleConvertToDraftReport(context: EventHandlerContext) {
     } else {
       // Load shift break times if not available
       const { loadShiftBreakTimesData } = await import('./pageDataService');
-      const breakTimesData = await loadShiftBreakTimesData(context.stageCode, context.selectedDate);
+      const breakTimesData = await loadShiftBreakTimesData(context.selectedDate);
       shiftBreakTimes = breakTimesData || [];
     }
 
@@ -1174,6 +1174,236 @@ export async function handleStageReassigned(context: EventHandlerContext, event?
   } catch (error) {
     console.error('Error saving stage reassignment:', error);
     alert('Error saving stage reassignment: ' + ((error as Error).message || 'Unknown error'));
+  }
+}
+
+/**
+ * Handle deletion of a stage reassignment (from Stage Journey modal)
+ * event.detail should be { id: number, source: 'planning' | 'reporting' }
+ */
+export async function handleDeleteStageReassignment(context: EventHandlerContext, event?: CustomEvent) {
+  if (!event || !event.detail) {
+    console.error('No event detail provided for stage reassignment deletion');
+    return;
+  }
+
+  const { id, source, journey, empId } = event.detail;
+
+  try {
+    if (source === 'planning') {
+      // If id not provided, attempt to find planning row by journey fields
+      let planningId = id;
+      let reportingId: number | null = null;
+      if (!planningId && journey) {
+        const { from_stage, to_stage, from_time, to_time } = journey;
+        const dateStr = context.selectedDate.split('T')[0];
+        const { data: found, error: findErr } = await supabase
+          .from('prdn_planning_stage_reassignment')
+          .select('id, reporting_reassignment_id, status')
+          .eq('emp_id', empId || journey.emp_id)
+          .eq('planning_date', dateStr)
+          .eq('from_stage_code', from_stage)
+          .eq('to_stage_code', to_stage)
+          .eq('from_time', from_time || null)
+          .eq('to_time', to_time || null)
+          .eq('is_deleted', false)
+          .order('created_dt', { ascending: false })
+          .limit(1);
+        if (findErr) {
+          console.error('Error finding planning reassignment for deletion:', findErr);
+          alert('Error locating planning reassignment');
+          return;
+        }
+        if (found && found.length > 0) {
+          planningId = found[0].id;
+          reportingId = found[0].reporting_reassignment_id;
+          if (found[0].status !== 'draft') {
+            alert('Only draft planning reassignments can be deleted');
+            return;
+          }
+        } else {
+          alert('Could not locate planning reassignment to delete');
+          return;
+        }
+      }
+
+      if (!planningId) {
+        alert('Invalid deletion request');
+        return;
+      }
+
+      // Fetch planning row to verify status and linked reporting id
+      const { data: planningRow, error: planningError } = await supabase
+        .from('prdn_planning_stage_reassignment')
+        .select('id, status, reporting_reassignment_id')
+        .eq('id', planningId)
+        .maybeSingle();
+
+      if (planningError) {
+        console.error('Error fetching planning reassignment:', planningError);
+        alert('Error fetching planning reassignment');
+        return;
+      }
+
+      if (!planningRow) {
+        alert('Planning reassignment not found');
+        return;
+      }
+
+      if (planningRow.status !== 'draft') {
+        alert('Only draft planning reassignments can be deleted');
+        return;
+      }
+
+      reportingId = reportingId || planningRow.reporting_reassignment_id;
+
+      // If linked reporting row exists, ensure it's draft before deleting
+      if (reportingId) {
+        const { data: reportingRow, error: reportingFetchError } = await supabase
+          .from('prdn_reporting_stage_reassignment')
+          .select('reassignment_id, status')
+          .eq('reassignment_id', reportingId)
+          .maybeSingle();
+
+        if (reportingFetchError) {
+          console.error('Error fetching linked reporting reassignment:', reportingFetchError);
+          alert('Error fetching linked reporting reassignment');
+          return;
+        }
+
+        if (reportingRow && reportingRow.status !== 'draft') {
+          alert('Cannot delete planning reassignment because linked reporting reassignment is not in draft status');
+          return;
+        }
+
+        // Delete reporting row first (hard delete)
+        const { error: delRepError } = await supabase
+          .from('prdn_reporting_stage_reassignment')
+          .delete()
+          .eq('reassignment_id', reportingId);
+
+        if (delRepError) {
+          console.error('Error deleting reporting reassignment:', delRepError);
+          alert('Error deleting linked reporting reassignment');
+          return;
+        }
+      }
+
+      // Delete planning row (hard delete)
+      const { error: delPlanError } = await supabase
+        .from('prdn_planning_stage_reassignment')
+        .delete()
+        .eq('id', planningId);
+
+      if (delPlanError) {
+        console.error('Error deleting planning reassignment:', delPlanError);
+        alert('Error deleting planning reassignment');
+        return;
+      }
+
+      // Reload data
+      await Promise.all([
+        context.loadManpowerPlanData(),
+        context.loadManpowerReportData()
+      ]);
+
+      alert('Reassignment deleted successfully');
+    } else if (source === 'reporting') {
+      // Delete reporting row only (only allow draft)
+      let reportingId = id;
+      if (!reportingId && journey) {
+        const { from_stage, to_stage, from_time, to_time } = journey;
+        const dateStr = context.selectedDate.split('T')[0];
+        const { data: found, error: findErr } = await supabase
+          .from('prdn_reporting_stage_reassignment')
+          .select('reassignment_id, status, planning_reassignment_id')
+          .eq('emp_id', empId || journey.emp_id)
+          .eq('reassignment_date', dateStr)
+          .eq('from_stage_code', from_stage)
+          .eq('to_stage_code', to_stage)
+          .eq('from_time', from_time || null)
+          .eq('to_time', to_time || null)
+          .eq('is_deleted', false)
+          .order('created_dt', { ascending: false })
+          .limit(1);
+        if (findErr) {
+          console.error('Error finding reporting reassignment for deletion:', findErr);
+          alert('Error locating reporting reassignment');
+          return;
+        }
+        if (found && found.length > 0) {
+          reportingId = found[0].reassignment_id;
+          if (found[0].status !== 'draft') {
+            alert('Only draft reporting reassignments can be deleted');
+            return;
+          }
+        } else {
+          alert('Could not locate reporting reassignment to delete');
+          return;
+        }
+      }
+
+      if (!reportingId) {
+        alert('Invalid deletion request');
+        return;
+      }
+
+      const { data: reportingRow, error: reportingError } = await supabase
+        .from('prdn_reporting_stage_reassignment')
+        .select('reassignment_id, status, planning_reassignment_id')
+        .eq('reassignment_id', reportingId)
+        .maybeSingle();
+
+      if (reportingError) {
+        console.error('Error fetching reporting reassignment:', reportingError);
+        alert('Error fetching reporting reassignment');
+        return;
+      }
+
+      if (!reportingRow) {
+        alert('Reporting reassignment not found');
+        return;
+      }
+
+      if (reportingRow.status !== 'draft') {
+        alert('Only draft reporting reassignments can be deleted');
+        return;
+      }
+
+      // Unlink planning row from reporting row (set FK to null) so we can delete the reporting row
+      if (reportingRow.planning_reassignment_id) {
+        const { error: updatePlanErr } = await supabase
+          .from('prdn_planning_stage_reassignment')
+          .update({ reporting_reassignment_id: null })
+          .eq('id', reportingRow.planning_reassignment_id);
+        if (updatePlanErr) {
+          console.error('Error unlinking planning reassignment:', updatePlanErr);
+          alert('Error unlinking planning reassignment: ' + (updatePlanErr.message || 'Unknown error'));
+          return;
+        }
+      }
+
+      // Now delete reporting row (no FK from planning references it)
+      const { error: delError } = await supabase
+        .from('prdn_reporting_stage_reassignment')
+        .delete()
+        .eq('reassignment_id', reportingId);
+
+      if (delError) {
+        console.error('Error deleting reporting reassignment:', delError);
+        alert('Error deleting reporting reassignment');
+        return;
+      }
+
+      // Reload report data
+      await context.loadManpowerReportData();
+      alert('Reporting reassignment deleted successfully');
+    } else {
+      alert('Unknown reassignment source');
+    }
+  } catch (error) {
+    console.error('Error deleting stage reassignment:', error);
+    alert('Error deleting stage reassignment: ' + ((error as Error).message || 'Unknown error'));
   }
 }
 

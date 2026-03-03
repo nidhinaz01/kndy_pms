@@ -7,10 +7,14 @@
   export let employee: ProductionEmployee;
   export let isSelected: boolean = false;
   export let reportingSubmissionStatus: any = null;
+  /** Current tab's stage. Reassign is only enabled when this equals the employee's home stage (original_stage). */
+  export let parentStageCode: string = '';
   export let onToggleSelection: () => void = () => {};
   export let onAttendanceToggle: () => void = () => {};
   export let onStageReassignment: () => void = () => {};
   export let onViewJourney: () => void = () => {};
+
+  $: canReassignFromThisStage = !parentStageCode || employee.original_stage === parentStageCode;
 
   // Get shift hours from attendance
   $: shiftHoursPlanned = employee.planned_hours ?? null; // From planning attendance
@@ -84,16 +88,23 @@
   </td>
   <td class="px-6 py-4 whitespace-nowrap">
     <div class="flex items-center space-x-2">
-      <span class="text-sm font-medium theme-text-primary">{employee.current_stage}</span>
-      <Button
-        variant="secondary"
-        size="sm"
-        on:click={onStageReassignment}
-        disabled={employee.attendance_status !== 'present'}
-      >
-        <ArrowRight class="w-3 h-3 mr-1" />
-        Reassign
-      </Button>
+      <div class="flex flex-col">
+        <span class="text-sm font-medium theme-text-primary">{employee.current_stage}</span>
+        {#if employee.original_stage && employee.original_stage !== employee.current_stage}
+          <span class="text-xs theme-text-secondary">(Original: {employee.original_stage})</span>
+        {/if}
+      </div>
+      <span title={!canReassignFromThisStage ? `Reassign from home stage (${employee.original_stage || '—'}) only` : ''}>
+        <Button
+          variant="secondary"
+          size="sm"
+          on:click={onStageReassignment}
+          disabled={!canReassignFromThisStage || employee.attendance_status !== 'present'}
+        >
+          <ArrowRight class="w-3 h-3 mr-1" />
+          Reassign
+        </Button>
+      </span>
     </div>
   </td>
   <td class="px-6 py-4 whitespace-nowrap">

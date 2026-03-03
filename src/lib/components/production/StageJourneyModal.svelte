@@ -5,6 +5,10 @@
   export let showModal: boolean = false;
   export let employee: ProductionEmployee | null = null;
   export let selectedDate: string = '';
+  export let mode: 'planning' | 'reporting' = 'planning';
+  export let parentStage: string = '';
+  /** When true (e.g. plan submitted/approved), Delete buttons for reassignments are disabled */
+  export let disableDeleteButtons: boolean = false;
 
   const dispatch = createEventDispatcher();
 
@@ -12,6 +16,19 @@
   
   function handleClose() {
     dispatch('close');
+  }
+
+  function handleDeleteJourney(journey: any) {
+    if (!journey || !journey.id) {
+      // Dispatch full journey details so handler can attempt lookup if id is missing
+      const confirmed = confirm('Reassignment record missing ID in the UI. Attempt deletion by matching fields? This will try to find the DB row to delete.');
+      if (!confirmed) return;
+      dispatch('deleteJourney', { id: null, source: journey.source || mode, journey, empId: employee?.emp_id });
+      return;
+    }
+    const confirmed = confirm('Are you sure you want to delete this reassignment? This will be permanently removed.');
+    if (!confirmed) return;
+    dispatch('deleteJourney', { id: journey.id, source: journey.source || mode, journey, empId: employee?.emp_id });
   }
 </script>
 
@@ -85,6 +102,18 @@
                          </p>
                        {/if}
                      </div>
+                     {#if mode === 'reporting' || journey.from_stage === parentStage || journey.to_stage === parentStage}
+                       <div style="margin-left: 12px; display: flex; gap: 8px;">
+                         <button
+                           on:click={() => handleDeleteJourney(journey)}
+                           disabled={disableDeleteButtons}
+                           class="theme-border text-red-600 hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+                           style="padding:6px 10px; border-radius:4px; border:1px solid; background: transparent; cursor: pointer;"
+                         >
+                           Delete
+                         </button>
+                       </div>
+                     {/if}
                   </div>
                 </div>
               {/each}

@@ -208,6 +208,75 @@ export async function savePlannedAttendance(
       if (error) throw error;
     }
 
+    // Option A: Mirror plan attendance to prdn_reporting_manpower so Report tab shows it.
+    // When the user later changes attendance in the Report tab, saveReportedManpower overwrites this row.
+    const reportingDate = planningDate;
+    const { data: existingReporting } = await supabase
+      .from('prdn_reporting_manpower')
+      .select('id')
+      .eq('emp_id', empId)
+      .eq('stage_code', stageCode)
+      .eq('reporting_date', reportingDate)
+      .eq('status', 'draft')
+      .eq('is_deleted', false)
+      .maybeSingle();
+
+    const reportingPayload: any = {
+      attendance_status: attendanceStatus,
+      ltp_hours: 0,
+      ltnp_hours: 0,
+      notes: notes?.trim() || null,
+      modified_by: currentUser,
+      modified_dt: now
+    };
+    if (attendanceStatus === 'present') {
+      reportingPayload.actual_hours = plannedHours;
+      reportingPayload.from_time = fromTime || null;
+      reportingPayload.to_time = toTime || null;
+    } else {
+      reportingPayload.actual_hours = null;
+      reportingPayload.from_time = null;
+      reportingPayload.to_time = null;
+    }
+
+    if (existingReporting) {
+      const { error: reportErr } = await supabase
+        .from('prdn_reporting_manpower')
+        .update(reportingPayload)
+        .eq('id', existingReporting.id);
+      if (reportErr) {
+        console.error('Error mirroring planned attendance to reporting:', reportErr);
+        // Do not fail the whole operation; planning was saved
+      }
+    } else {
+      const insertReporting: any = {
+        emp_id: empId,
+        stage_code: stageCode,
+        reporting_date: reportingDate,
+        attendance_status: attendanceStatus,
+        ltp_hours: 0,
+        ltnp_hours: 0,
+        notes: notes?.trim() || null,
+        status: 'draft',
+        created_by: currentUser,
+        created_dt: now,
+        modified_by: currentUser,
+        modified_dt: now
+      };
+      if (attendanceStatus === 'present') {
+        insertReporting.actual_hours = plannedHours;
+        insertReporting.from_time = fromTime || null;
+        insertReporting.to_time = toTime || null;
+      }
+      const { error: reportErr } = await supabase
+        .from('prdn_reporting_manpower')
+        .insert(insertReporting);
+      if (reportErr) {
+        console.error('Error mirroring planned attendance to reporting:', reportErr);
+        // Do not fail the whole operation; planning was saved
+      }
+    }
+
     return { success: true };
   } catch (error) {
     console.error('Error saving planned attendance:', error);
@@ -232,25 +301,95 @@ export async function savePlannedStageReassignment(
     const currentUser = getCurrentUsername();
     const now = getCurrentTimestamp();
 
-    const { error } = await supabase
-      .from('prdn_planning_stage_reassignment')
-      .insert({
-        emp_id: empId,
-        from_stage_code: fromStageCode,
-        to_stage_code: toStageCode,
-        planning_date: planningDate,
-        shift_code: shiftCode,
-        from_time: fromTime,
-        to_time: toTime,
-        reason: reason || null,
-        status: 'draft',
-        created_by: currentUser,
-        created_dt: now,
-        modified_by: currentUser,
-        modified_dt: now
-      });
+    // Insert reporting reassignment first (create reporting row)
+    const reportingInsert = {
+      emp_id: empId,
+      from_stage_code: fromStageCode,
+      to_stage_code: toStageCode,
+      reassignment_date: planningDate,
+      shift_code: shiftCode,
+      from_time: fromTime,
+      to_time: toTime,
+      reason: reason || null,
+      reassigned_by: currentUser,
+      created_by: currentUser,
+      modified_by: currentUser
+    };
 
-    if (error) throw error;
+    const { data: reportingData, error: reportingError } = await supabase
+      .from('prdn_reporting_stage_reassignment')
+      .insert(reportingInsert)
+      .select('reassignment_id')
+      .maybeSingle();
+
+    if (reportingError) {
+      console.error('Error inserting reporting reassignment (pre-plan):', reportingError);
+      throw reportingError;
+    }
+
+    const reportingId = reportingData?.reassignment_id;
+
+    // Insert planning reassignment linking to reporting row
+    const planningInsert: any = {
+      emp_id: empId,
+      from_stage_code: fromStageCode,
+      to_stage_code: toStageCode,
+      planning_date: planningDate,
+      shift_code: shiftCode,
+      from_time: fromTime,
+      to_time: toTime,
+      reason: reason || null,
+      status: 'draft',
+      reporting_reassignment_id: reportingId || null,
+      created_by: currentUser,
+      created_dt: now,
+      modified_by: currentUser,
+      modified_dt: now
+    };
+
+    const { data: planningData, error: planningError } = await supabase
+      .from('prdn_planning_stage_reassignment')
+      .insert(planningInsert)
+      .select('id')
+      .maybeSingle();
+
+    if (planningError) {
+      console.error('Error inserting planning reassignment:', planningError);
+      // Rollback reporting row (hard delete)
+      if (reportingId) {
+        await supabase
+          .from('prdn_reporting_stage_reassignment')
+          .delete()
+          .eq('reassignment_id', reportingId);
+      }
+      throw planningError;
+    }
+
+    const planningId = planningData?.id;
+
+    // Update reporting row to reference planning id
+    const { error: reportingUpdateError } = await supabase
+      .from('prdn_reporting_stage_reassignment')
+      .update({ planning_reassignment_id: planningId })
+      .eq('reassignment_id', reportingId);
+
+    if (reportingUpdateError) {
+      console.error('Error updating reporting reassignment with planning id:', reportingUpdateError);
+      // Rollback both inserted rows
+      if (reportingId) {
+        await supabase
+          .from('prdn_reporting_stage_reassignment')
+          .delete()
+          .eq('reassignment_id', reportingId);
+      }
+      if (planningId) {
+        await supabase
+          .from('prdn_planning_stage_reassignment')
+          .delete()
+          .eq('id', planningId);
+      }
+      throw reportingUpdateError;
+    }
 
     return { success: true };
   } catch (error) {
@@ -435,34 +574,71 @@ export async function saveReportedStageReassignment(
   fromTime: string,
   toTime: string,
   reason?: string
-): Promise<{ success: boolean; error?: string }> {
+): Promise<{ success: boolean; reassignmentId?: number; error?: string }> {
   try {
     const currentUser = getCurrentUsername();
     const now = getCurrentTimestamp();
 
-    const { error } = await supabase
+    const insertData: any = {
+      emp_id: empId,
+      from_stage_code: fromStageCode,
+      to_stage_code: toStageCode,
+      reassignment_date: reportingDate,
+      shift_code: shiftCode,
+      from_time: fromTime || null,
+      to_time: toTime || null,
+      reason: reason || null,
+      status: 'draft',
+      reassigned_by: currentUser,
+      created_by: currentUser,
+      modified_by: currentUser
+    };
+
+    const { data, error } = await supabase
       .from('prdn_reporting_stage_reassignment')
-      .insert({
-        emp_id: empId,
-        from_stage_code: fromStageCode,
-        to_stage_code: toStageCode,
-        reporting_date: reportingDate,
-        shift_code: shiftCode,
-        from_time: fromTime,
-        to_time: toTime,
-        reason: reason || null,
-        status: 'draft',
-        created_by: currentUser,
-        created_dt: now,
-        modified_by: currentUser,
-        modified_dt: now
-      });
+      .insert(insertData)
+      .select('reassignment_id')
+      .maybeSingle();
 
     if (error) throw error;
 
-    return { success: true };
+    return { success: true, reassignmentId: data?.reassignment_id };
   } catch (error) {
     console.error('Error saving reported stage reassignment:', error);
+    return { success: false, error: (error as Error).message };
+  }
+}
+
+/**
+ * Hard delete a planned stage reassignment by id
+ */
+export async function deletePlannedStageReassignment(planningId: number): Promise<{ success: boolean; error?: string }> {
+  try {
+    const { error } = await supabase
+      .from('prdn_planning_stage_reassignment')
+      .delete()
+      .eq('id', planningId);
+    if (error) throw error;
+    return { success: true };
+  } catch (error) {
+    console.error('Error deleting planned stage reassignment:', error);
+    return { success: false, error: (error as Error).message };
+  }
+}
+
+/**
+ * Hard delete a reported stage reassignment by reassignment_id
+ */
+export async function deleteReportedStageReassignment(reassignmentId: number): Promise<{ success: boolean; error?: string }> {
+  try {
+    const { error } = await supabase
+      .from('prdn_reporting_stage_reassignment')
+      .delete()
+      .eq('reassignment_id', reassignmentId);
+    if (error) throw error;
+    return { success: true };
+  } catch (error) {
+    console.error('Error deleting reported stage reassignment:', error);
     return { success: false, error: (error as Error).message };
   }
 }

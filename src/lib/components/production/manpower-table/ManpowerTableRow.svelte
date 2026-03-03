@@ -7,21 +7,26 @@
   export let employee: ProductionEmployee;
   export let isSelected: boolean = false;
   export let planningSubmissionStatus: any = null;
+  /** When true, disable Reassign / Mark Attendance / View Journey (e.g. when multiple rows selected) */
+  export let disableRowActions: boolean = false;
+  /** Current tab's stage. Reassign is only enabled when this equals the employee's home stage (original_stage). */
+  export let parentStageCode: string = '';
   export let onToggleSelection: () => void = () => {};
   export let onAttendanceToggle: () => void = () => {};
   export let onStageReassignment: () => void = () => {};
   export let onViewJourney: () => void = () => {};
 
+  $: canReassignFromThisStage = !parentStageCode || employee.original_stage === parentStageCode;
+
   // Calculate total hours planned (hours_planned + to_other_stage_hours + from_other_stage_hours)
   $: totalHours = (employee.hours_planned || 0) + (employee.to_other_stage_hours || 0) + (employee.from_other_stage_hours || 0);
-  // Get shift hours from attendance (planned_hours from attendance modal)
-  $: shiftHoursPlanned = employee.planned_hours ?? null;
+  // Get shift hours from attendance (planned_hours from attendance modal); coerce to number for display
+  $: shiftHoursPlanned = employee.planned_hours != null ? Number(employee.planned_hours) : null;
   
   // Highlight if employee is present and work hours don't match shift hours planned
-  // This helps identify employees with mismatched work allocation (under or over allocation)
   let hasMismatchedHours = false;
   $: {
-    const workHours = employee.hours_planned || 0;
+    const workHours = Number(employee.hours_planned) || 0;
     const shiftHours = shiftHoursPlanned;
     const isPresent = employee.attendance_status === 'present';
     const hasShiftHours = shiftHours !== null && shiftHours !== undefined;
@@ -45,10 +50,11 @@
     hasMismatchedHours = shouldHighlight;
   }
   
-  // Format hours to show up to 2 decimal places, removing trailing zeros
-  function formatHours(hours: number): string {
-    const formatted = hours.toFixed(2);
-    // Remove trailing zeros and decimal point if not needed
+  // Format hours to show up to 2 decimal places, removing trailing zeros (accepts number or string from API)
+  function formatHours(hours: number | string): string {
+    const n = typeof hours === 'number' ? hours : Number(hours);
+    if (Number.isNaN(n)) return '0';
+    const formatted = n.toFixed(2);
     return formatted.replace(/\.?0+$/, '');
   }
 </script>
@@ -98,20 +104,17 @@
           <span class="text-xs {hasMismatchedHours ? 'text-gray-700 dark:text-yellow-200' : 'theme-text-secondary'}">(Original: {employee.original_stage})</span>
         {/if}
       </div>
-      <Button
-        variant="secondary"
-        size="sm"
-        on:click={onStageReassignment}
-        disabled={employee.attendance_status !== 'present' || !employee.attendance_from_time || !employee.attendance_to_time}
-        title={employee.attendance_status !== 'present' 
-          ? 'Attendance must be marked as Present' 
-          : (!employee.attendance_from_time || !employee.attendance_to_time)
-          ? 'Attendance time must be marked in attendance modal'
-          : 'Reassign employee to another stage'}
-      >
-        <ArrowRight class="w-3 h-3 mr-1" />
-        Reassign
-      </Button>
+      <span title={!canReassignFromThisStage ? `Reassign from home stage (${employee.original_stage || '—'}) only` : ''}>
+        <Button
+          variant="secondary"
+          size="sm"
+          on:click={onStageReassignment}
+          disabled={disableRowActions || !canReassignFromThisStage || isPlanningAttendanceLocked(employee, planningSubmissionStatus) || employee.attendance_status !== 'present' || !employee.attendance_from_time || !employee.attendance_to_time}
+        >
+          <ArrowRight class="w-3 h-3 mr-1" />
+          Reassign
+        </Button>
+      </span>
     </div>
   </td>
   <td class="px-6 py-4 whitespace-nowrap">
@@ -121,10 +124,10 @@
     </div>
   </td>
   <td class="px-6 py-4 whitespace-nowrap text-sm {hasMismatchedHours ? 'text-gray-900 dark:text-yellow-100' : 'theme-text-primary'}">
-    {#if employee.attendance_status === 'present' && shiftHoursPlanned !== null}
-      {formatHours(employee.hours_planned || 0)}h/{formatHours(shiftHoursPlanned)}h
+    {#if employee.attendance_status === 'present' && shiftHoursPlanned != null}
+      {formatHours(employee.hours_planned ?? 0)}h/{formatHours(shiftHoursPlanned)}h
     {:else}
-      {formatHours(employee.hours_planned || 0)}h
+      {formatHours(employee.hours_planned ?? 0)}h
     {/if}
   </td>
   <td class="px-6 py-4 whitespace-nowrap text-sm {hasMismatchedHours ? 'text-gray-900 dark:text-yellow-100' : 'theme-text-primary'}">
@@ -139,7 +142,7 @@
         variant="secondary"
         size="sm"
         on:click={onAttendanceToggle}
-        disabled={isPlanningAttendanceLocked(employee, planningSubmissionStatus)}
+        disabled={disableRowActions || isPlanningAttendanceLocked(employee, planningSubmissionStatus)}
       >
         {isPlanningAttendanceLocked(employee, planningSubmissionStatus) ? 'Attendance Locked' : 'Mark Attendance'}
       </Button>
@@ -147,6 +150,7 @@
         variant="secondary"
         size="sm"
         on:click={onViewJourney}
+        disabled={disableRowActions}
       >
         <Map class="w-3 h-3 mr-1" />
         View Journey

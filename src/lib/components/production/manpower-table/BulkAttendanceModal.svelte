@@ -94,9 +94,9 @@
       
       fullShiftHours = (shiftDurationMinutes - totalBreakMinutes) / 60;
 
-      // Set default times and hours
-      if (!fromTime) fromTime = shiftStartTime;
-      if (!toTime) toTime = shiftEndTime;
+      // Set default times and hours (normalize to HH:MM)
+      if (!fromTime) fromTime = shiftStartTime ? shiftStartTime.substring(0,5) : '';
+      if (!toTime) toTime = shiftEndTime ? shiftEndTime.substring(0,5) : '';
       if (plannedHours === null) plannedHours = fullShiftHours;
     } catch (error) {
       console.error('Error loading shift info:', error);

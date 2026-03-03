@@ -20,6 +20,19 @@
   export let selectedDate: string = '';
   export let planningSubmissionStatus: any = null;
   export let shiftCode: string = ''; // Shift code for bulk operations
+  export let stageCode: string = '';
+  export let showInternalSearch: boolean = true;
+  export let externalSearch: string | null = null;
+  export let externalSelected: Set<string> | null = null;
+  export let parentControlledSort: boolean = false;
+  export let toggleFiltersSignal: number = 0;
+  export let bulkAttendanceSignal: number = 0;
+  export let exportSignal: number = 0;
+  export let hideActions: boolean = false;
+  export let hideHeader: boolean = false;
+  export let hideSummary: boolean = false;
+  /** When set (e.g. by parent with pagination), bulk attendance uses this list for selected IDs instead of data (current page) */
+  export let allEmployeesForBulk: ProductionEmployee[] | null = null;
 
   const dispatch = createEventDispatcher();
 
@@ -29,11 +42,11 @@
 
   $: filteredData = filterEmployees(data, filters);
   // Apply sorting
-  $: sortedFilteredData = sortConfig.column && sortConfig.direction 
-    ? sortTableData(filteredData, sortConfig)
-    : filteredData;
+  $: sortedFilteredData = parentControlledSort
+    ? filteredData
+    : (sortConfig.column && sortConfig.direction ? sortTableData(filteredData, sortConfig) : filteredData);
   $: totals = calculateTotals(sortedFilteredData);
-  $: selectedCount = state.selectedEmployees.size;
+  $: selectedCount = externalSelected ? externalSelected.size : state.selectedEmployees.size;
   $: eligibleEmployeesCount = sortedFilteredData.filter(emp => !isPlanningAttendanceLocked(emp, planningSubmissionStatus)).length;
   $: allSelected = selectedCount > 0 && selectedCount === eligibleEmployeesCount;
 
@@ -41,8 +54,19 @@
     filters.search = value;
   }
 
-  function handleFilterChange(field: keyof ManpowerTableFilters, value: string) {
-    filters[field] = value;
+  $: if (externalSearch !== null && externalSearch !== undefined) {
+    // Keep internal filters.search in sync with parent-controlled external search box
+    filters.search = externalSearch;
+  }
+
+  function handleFilterChange(field: keyof ManpowerTableFilters, value: any) {
+    // Coerce boolean-like flags for advanced filters
+    if (field === 'plannedExceedsShift' || field === 'reassignedToOther' || field === 'reassignedFromOther') {
+      // value may be boolean or string
+      filters[field] = (value === true || value === 'true');
+    } else {
+      filters[field] = value as any;
+    }
   }
 
   function handleClearFilters() {
@@ -65,26 +89,67 @@
     dispatch('refresh');
   }
 
+  // react to external signals
+  let _prevToggleFiltersSignal = toggleFiltersSignal;
+  $: if (toggleFiltersSignal !== _prevToggleFiltersSignal) {
+    _prevToggleFiltersSignal = toggleFiltersSignal;
+    handleToggleFilters();
+  }
+
+  let _prevBulkAttendanceSignal = bulkAttendanceSignal;
+  $: if (bulkAttendanceSignal !== _prevBulkAttendanceSignal) {
+    _prevBulkAttendanceSignal = bulkAttendanceSignal;
+    openBulkAttendanceModal();
+  }
+
+  let _prevExportSignal = exportSignal;
+  $: if (exportSignal !== _prevExportSignal) {
+    _prevExportSignal = exportSignal;
+    handleExport();
+  }
+
   function toggleEmployeeSelection(employee: ProductionEmployee) {
-    if (state.selectedEmployees.has(employee.emp_id)) {
-      state.selectedEmployees.delete(employee.emp_id);
+    if (externalSelected !== null) {
+      const newSet = new Set(externalSelected);
+      if (newSet.has(employee.emp_id)) newSet.delete(employee.emp_id);
+      else newSet.add(employee.emp_id);
+      dispatch('selectionChange', newSet);
     } else {
-      state.selectedEmployees.add(employee.emp_id);
+      if (state.selectedEmployees.has(employee.emp_id)) {
+        state.selectedEmployees.delete(employee.emp_id);
+      } else {
+        state.selectedEmployees.add(employee.emp_id);
+      }
+      state.selectedEmployees = new Set(state.selectedEmployees);
+      dispatch('selectionChange', new Set(state.selectedEmployees));
     }
-    state.selectedEmployees = new Set(state.selectedEmployees);
   }
 
   function selectAllEmployees() {
     const eligibleEmployees = filteredData.filter(emp => !isPlanningAttendanceLocked(emp, planningSubmissionStatus));
-    state.selectedEmployees = new Set(eligibleEmployees.map(emp => emp.emp_id));
+    const ids = eligibleEmployees.map(emp => emp.emp_id);
+    if (externalSelected !== null) {
+      const newSet = new Set(externalSelected);
+      ids.forEach(id => newSet.add(id));
+      dispatch('selectionChange', newSet);
+    } else {
+      state.selectedEmployees = new Set(ids);
+      dispatch('selectionChange', new Set(state.selectedEmployees));
+    }
   }
 
   function clearSelection() {
-    state.selectedEmployees = new Set();
+    if (externalSelected !== null) {
+      dispatch('selectionChange', new Set());
+    } else {
+      state.selectedEmployees = new Set();
+      dispatch('selectionChange', new Set());
+    }
   }
 
   function openBulkAttendanceModal() {
-    if (state.selectedEmployees.size === 0) {
+    const selectedSet = externalSelected !== null ? externalSelected : state.selectedEmployees;
+    if (selectedSet.size === 0) {
       alert('Please select at least one employee to mark attendance.');
       return;
     }
@@ -97,7 +162,8 @@
   }
 
   async function handleBulkAttendanceSubmit() {
-    if (state.selectedEmployees.size === 0) {
+    const selectedSet = externalSelected !== null ? externalSelected : state.selectedEmployees;
+    if (selectedSet.size === 0) {
       alert('No employees selected.');
       return;
     }
@@ -162,8 +228,10 @@
 
     state.isBulkSubmitting = true;
 
-    const employeesToMark = sortedFilteredData.filter(emp => state.selectedEmployees.has(emp.emp_id));
-    
+    // When parent provides full list (e.g. all pages) and controls selection, use it so "Select All" marks everyone
+    const sourceList = (allEmployeesForBulk != null && externalSelected !== null) ? allEmployeesForBulk : sortedFilteredData;
+    const employeesToMark = sourceList.filter(emp => selectedSet.has(emp.emp_id));
+
     const eventData: any = {
       employees: employeesToMark.map(emp => ({
         empId: emp.emp_id,
@@ -188,7 +256,8 @@
       emp.attendance_status = state.bulkAttendanceStatus;
     });
 
-    state.selectedEmployees = new Set();
+    if (externalSelected !== null) dispatch('selectionChange', new Set());
+    else state.selectedEmployees = new Set();
     state.bulkAttendanceStatus = 'present';
     state.bulkNotes = '';
     state.bulkFromTime = '';
@@ -222,6 +291,10 @@
   function handleViewJourney(employee: ProductionEmployee) {
     state.selectedEmployee = { ...employee };
     state.showJourneyModal = true;
+  }
+
+  function handleJourneyDelete(event: CustomEvent) {
+    dispatch('stageJourneyDelete', event.detail);
   }
 
   function handleAttendanceMarked(event: CustomEvent) {
@@ -272,23 +345,29 @@
 </script>
 
 <div class="theme-bg-primary rounded-lg shadow border theme-border">
-  <div class="flex items-center justify-between space-x-2 p-3 border-b theme-bg-primary rounded-t-xl shadow">
-    <ManpowerTableHeader
-      {filters}
-      showFilters={state.showFilters}
-      {selectedCount}
-      onSearchChange={handleSearchChange}
-      onToggleFilters={handleToggleFilters}
-      onExport={handleExport}
-      onBulkAttendance={openBulkAttendanceModal}
-      onSelectAll={selectAllEmployees}
-      {allSelected}
-      eligibleCount={eligibleEmployeesCount}
-    />
-    <Button variant="secondary" size="sm" on:click={handleRefresh} disabled={isLoading}>
-      {isLoading ? 'Loading...' : 'Refresh'}
-    </Button>
-  </div>
+  {#if !hideHeader}
+    <div class="flex items-center justify-between space-x-2 p-3 border-b theme-bg-primary rounded-t-xl shadow">
+      <ManpowerTableHeader
+        {filters}
+        showFilters={state.showFilters}
+        {selectedCount}
+        onSearchChange={handleSearchChange}
+        onToggleFilters={handleToggleFilters}
+        onExport={handleExport}
+        onBulkAttendance={openBulkAttendanceModal}
+        onSelectAll={selectAllEmployees}
+        {allSelected}
+        eligibleCount={eligibleEmployeesCount}
+        hideSearch={!showInternalSearch}
+        hideActions={hideActions}
+      />
+      {#if !hideActions}
+        <Button variant="secondary" size="sm" on:click={handleRefresh} disabled={isLoading}>
+          {isLoading ? 'Loading...' : 'Refresh'}
+        </Button>
+      {/if}
+    </div>
+  {/if}
 
   {#if state.showFilters}
     <div class="p-3 border-b theme-border bg-gray-50 dark:bg-gray-800">
@@ -300,9 +379,11 @@
     </div>
   {/if}
 
-  <div class="p-4 border-b theme-border theme-bg-secondary">
-    <ManpowerTableSummary {totals} />
-  </div>
+  {#if !hideSummary}
+    <div class="p-4 border-b theme-border theme-bg-secondary">
+      <ManpowerTableSummary {totals} />
+    </div>
+  {/if}
 
   {#if isLoading}
     <div class="flex items-center justify-center py-12">
@@ -315,10 +396,12 @@
         <ManpowerTableBody
           filteredData={sortedFilteredData}
           {data}
-          selectedEmployees={state.selectedEmployees}
+          selectedEmployees={externalSelected ? externalSelected : state.selectedEmployees}
           {sortConfig}
           onSort={handleSort}
           {planningSubmissionStatus}
+          disableRowActions={selectedCount > 1}
+          {stageCode}
           onToggleSelection={toggleEmployeeSelection}
           onAttendanceToggle={handleAttendanceToggle}
           onStageReassignment={handleStageReassignment}
@@ -353,7 +436,11 @@
     showModal={state.showJourneyModal}
     employee={state.selectedEmployee}
     {selectedDate}
+    mode="planning"
+    parentStage={stageCode}
+    disableDeleteButtons={planningSubmissionStatus?.status === 'pending_approval' || planningSubmissionStatus?.status === 'approved' || planningSubmissionStatus?.status === 'resubmitted'}
     on:close={handleJourneyModalClose}
+    on:deleteJourney={handleJourneyDelete}
   />
 
   <BulkAttendanceModal

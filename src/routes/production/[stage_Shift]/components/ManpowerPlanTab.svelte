@@ -4,6 +4,8 @@
   import type { ProductionEmployee } from '$lib/api/production';
 
   import { getManpowerLoadMetadata } from '../../services/stageProductionService';
+  import { calculateTotals } from '$lib/utils/manpowerTableUtils';
+  import Button from '$lib/components/common/Button.svelte';
 
   export let data: ProductionEmployee[] = [];
   export let isLoading: boolean = false;
@@ -46,6 +48,9 @@
     return date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' });
   })();
 
+  /** When Draft Plan is submitted, resubmitted, or approved, all edits on Manpower Plan tab are disabled */
+  $: isPlanLocked = planningSubmissionStatus?.status === 'pending_approval' || planningSubmissionStatus?.status === 'approved' || planningSubmissionStatus?.status === 'resubmitted';
+
   function handleRefresh() {
     dispatch('refresh');
   }
@@ -62,9 +67,48 @@
     dispatch('stageReassigned', event.detail);
   }
 
-  function handleExport(event: CustomEvent) {
-    dispatch('export', event.detail);
+  function handleStageJourneyDelete(event: CustomEvent) {
+    dispatch('stageJourneyDelete', event.detail);
   }
+
+  // Search (all employees on a single page; sorting is via column headers in the table)
+  let searchTerm = '';
+  let toggleFiltersSignal = 0;
+  let bulkAttendanceSignal = 0;
+  let filtersVisible = false;
+
+  $: filteredData = data && data.length > 0 && searchTerm
+    ? data.filter(emp => {
+        const q = searchTerm.toLowerCase();
+        return (emp.emp_name || '').toLowerCase().includes(q) || (emp.emp_id || '').toLowerCase().includes(q);
+      })
+    : data || [];
+
+  $: totalEmployees = filteredData.length;
+  // Single page: show all filtered employees (table sorts by Employee / Skill / Status when user clicks column headers)
+  $: pageData = filteredData || [];
+
+  // Selection state (global for filtered set)
+  let selectedIds: Set<string> = new Set();
+
+  function handleSelectionChange(event: CustomEvent) {
+    const newSet = event.detail as Set<string>;
+    selectedIds = new Set(newSet);
+  }
+
+  /** Select all employees on the current page only */
+  function selectAllFiltered() {
+    selectedIds = new Set(pageData.map(emp => emp.emp_id));
+  }
+
+  function deselectAll() {
+    selectedIds = new Set();
+  }
+
+  // Totals: page and overall
+  $: pageTotals = calculateTotals(pageData || []);
+  $: totalTotals = calculateTotals(filteredData || []);
+
 </script>
 
 <div class="theme-bg-primary rounded-lg shadow border theme-border">
@@ -186,17 +230,53 @@
       <span class="theme-text-secondary">Loading manpower data...</span>
     </div>
   {:else}
+    <div class="mb-3 flex items-center justify-between gap-4">
+      <div class="flex items-center gap-3">
+        <label for="manpower-search" class="text-sm theme-text-secondary">Search:</label>
+        <input id="manpower-search" type="text" bind:value={searchTerm} placeholder="Search by name or emp id" class="theme-bg-primary theme-border px-3 py-1 rounded outline-2 outline-offset-1 w-[200px]" disabled={isPlanLocked} />
+        <Button variant="secondary" size="sm" on:click={() => { toggleFiltersSignal++; filtersVisible = !filtersVisible; }}>
+          {filtersVisible ? 'Hide Filters' : 'Show Filters'}
+        </Button>
+        <Button variant="secondary" size="sm" on:click={() => {
+          const pageAllSelected = pageData.length > 0 && pageData.every(emp => selectedIds.has(emp.emp_id));
+          if (pageAllSelected) deselectAll(); else selectAllFiltered();
+        }} disabled={isPlanLocked}>
+          {pageData.length > 0 && pageData.every(emp => selectedIds.has(emp.emp_id)) ? 'Deselect all' : 'Select all'}
+        </Button>
+        <Button variant="secondary" size="sm" on:click={() => { bulkAttendanceSignal++; }} disabled={isPlanLocked}>
+          Mark Attendance
+        </Button>
+        <Button variant="secondary" size="sm" on:click={handleRefresh}>
+          Refresh
+        </Button>
+      </div>
+    </div>
+
+    
+
     <ManpowerTable 
-      data={data} 
+      data={pageData} 
       isLoading={isLoading} 
       selectedDate={selectedDate}
       {planningSubmissionStatus}
       {shiftCode}
+      stageCode={stageCode}
+      showInternalSearch={false}
+      externalSearch={searchTerm}
+      hideActions={true}
+      hideHeader={true}
+      hideSummary={true}
+      parentControlledSort={false}
+      externalSelected={selectedIds}
+      allEmployeesForBulk={filteredData}
+      toggleFiltersSignal={toggleFiltersSignal}
+      bulkAttendanceSignal={bulkAttendanceSignal}
+      on:selectionChange={handleSelectionChange}
       on:refresh={handleRefresh}
       on:attendanceMarked={handleAttendanceMarked}
       on:bulkAttendanceMarked={handleBulkAttendanceMarked}
       on:stageReassigned={handleStageReassigned}
-      on:export={handleExport} 
+      on:stageJourneyDelete={handleStageJourneyDelete}
     />
   {/if}
 </div>

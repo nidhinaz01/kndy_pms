@@ -128,11 +128,11 @@
       // Only set defaults if not editing and times are empty
       if (!isEditingTime && !fromTime) {
         console.log('🔍 [AttendanceModal] fromTime empty, setting to shiftStartTime:', shiftStartTime);
-        fromTime = shiftStartTime;
+        fromTime = shiftStartTime ? shiftStartTime.substring(0,5) : '';
       }
       if (!isEditingTime && !toTime) {
         console.log('🔍 [AttendanceModal] toTime empty, setting to shiftEndTime:', shiftEndTime);
-        toTime = shiftEndTime;
+        toTime = shiftEndTime ? shiftEndTime.substring(0,5) : '';
       }
       
       // Set default hours based on mode
@@ -300,10 +300,10 @@
       formInitialized = true;
       isLoadingSavedData = true; // Prevent recalculation while loading
       attendanceStatus = employee.attendance_status || 'present';
-      // Load saved values if they exist
+      // Load saved values if they exist (normalize to HH:MM)
       notes = employee.attendance_notes || '';
-      fromTime = employee.attendance_from_time || '';
-      toTime = employee.attendance_to_time || '';
+      fromTime = employee.attendance_from_time ? employee.attendance_from_time.substring(0,5) : '';
+      toTime = employee.attendance_to_time ? employee.attendance_to_time.substring(0,5) : '';
       
       console.log('🔍 [AttendanceModal] Loaded times:', { fromTime, toTime });
       

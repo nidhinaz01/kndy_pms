@@ -18,6 +18,10 @@
   export let allSelected: boolean = false;
   export let eligibleCount: number = 0;
   export let planningSubmissionStatus: any = null;
+  /** When true, disable Reassign / Mark Attendance / View Journey in each row (e.g. when multiple rows selected) */
+  export let disableRowActions: boolean = false;
+  /** Current tab's stage (e.g. P2S2). Reassign is only allowed when this equals the employee's home stage (original_stage). */
+  export let stageCode: string = '';
 </script>
 
 <thead class="theme-bg-secondary">
@@ -55,6 +59,8 @@
         {employee}
         isSelected={selectedEmployees.has(employee.emp_id)}
         {planningSubmissionStatus}
+        {disableRowActions}
+        parentStageCode={stageCode}
         onToggleSelection={() => onToggleSelection(employee)}
         onAttendanceToggle={() => onAttendanceToggle(employee)}
         onStageReassignment={() => onStageReassignment(employee)}

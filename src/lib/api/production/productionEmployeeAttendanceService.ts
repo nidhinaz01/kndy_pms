@@ -76,7 +76,7 @@ export async function reassignEmployee(
     const username = reassignedBy || getCurrentUsername();
     const now = getCurrentTimestamp();
     
-    // Use prdn_reporting_stage_reassignment for actual reassignments (real-time operations)
+    // Use prdn_reporting_stage_reassignment for actual reassignments
     const reassignmentData = {
       emp_id: empId,
       from_stage_code: fromStageCode,
@@ -88,9 +88,7 @@ export async function reassignEmployee(
       reason: reason || null,
       reassigned_by: username,
       created_by: username,
-      created_dt: now,
-      modified_by: username,
-      modified_dt: now
+      modified_by: username
     };
 
     const { error } = await supabase
