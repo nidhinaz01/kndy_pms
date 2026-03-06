@@ -8,14 +8,14 @@ export interface ValidationResult {
 }
 
 /**
- * Calculate duration in minutes between two time strings (HH:MM:SS format)
+ * Calculate duration in minutes between two time strings (HH:MM or HH:MM:SS; seconds ignored)
  */
 function calculateDuration(startTime: string, endTime: string): number {
-  const [startHour, startMin, startSec = 0] = startTime.split(':').map(Number);
-  const [endHour, endMin, endSec = 0] = endTime.split(':').map(Number);
+  const [startHour, startMin] = startTime.split(':').map(Number);
+  const [endHour, endMin] = endTime.split(':').map(Number);
   
-  const startMinutes = startHour * 60 + startMin + startSec / 60;
-  let endMinutes = endHour * 60 + endMin + endSec / 60;
+  const startMinutes = startHour * 60 + startMin;
+  let endMinutes = endHour * 60 + endMin;
   
   // Handle overnight shifts
   if (endMinutes < startMinutes) {
@@ -23,6 +23,20 @@ function calculateDuration(startTime: string, endTime: string): number {
   }
   
   return endMinutes - startMinutes;
+}
+
+/**
+ * Compute reassignment hours for one row (Option B: duration minus break overlap)
+ */
+function reassignmentHours(
+  fromTime: string,
+  toTime: string,
+  shiftBreaks: Array<{ start_time: string; end_time: string }>
+): number {
+  if (!fromTime || !toTime) return 0;
+  const totalMinutes = calculateDuration(fromTime, toTime);
+  const breakMinutes = calculateBreakTimeInMinutes(fromTime, toTime, shiftBreaks || []);
+  return Math.max(0, totalMinutes - breakMinutes) / 60;
 }
 
 /**
@@ -103,7 +117,45 @@ export async function validateEmployeeShiftReporting(
       };
     }
 
-    if (!reportedAttendance || reportedAttendance.length === 0) {
+    const presentEmpIds = reportedAttendance?.map(a => a.emp_id) ?? [];
+
+    // 3. Fetch stage reassignments for this stage and date (from or to this stage)
+    const { data: reassignmentRows, error: reassignError } = await supabase
+      .from('prdn_reporting_stage_reassignment')
+      .select('emp_id, from_stage_code, to_stage_code, from_time, to_time')
+      .or(`from_stage_code.eq.${stageCode},to_stage_code.eq.${stageCode}`)
+      .eq('reassignment_date', reportingDate)
+      .eq('is_deleted', false);
+
+    if (reassignError) {
+      return {
+        isValid: false,
+        errors: [`Error fetching stage reassignments: ${reassignError.message}`],
+        warnings: []
+      };
+    }
+
+    const reassignments = reassignmentRows ?? [];
+
+    // Per-employee hours reassigned away from this stage (Option B: duration minus breaks)
+    const hoursReassignedAway = new Map<string, number>();
+    const hoursReassignedInto = new Map<string, number>();
+    const reassignedIntoEmpIds = new Set<string>();
+
+    reassignments.forEach((row: { emp_id: string; from_stage_code: string; to_stage_code: string; from_time: string; to_time: string }) => {
+      const empId = row.emp_id;
+      const hours = reassignmentHours(row.from_time, row.to_time, shiftBreaks || []);
+      if (row.from_stage_code === stageCode) {
+        hoursReassignedAway.set(empId, (hoursReassignedAway.get(empId) ?? 0) + hours);
+      }
+      if (row.to_stage_code === stageCode) {
+        hoursReassignedInto.set(empId, (hoursReassignedInto.get(empId) ?? 0) + hours);
+        reassignedIntoEmpIds.add(empId);
+      }
+    });
+
+    // No home employees and no one reassigned into this stage => nothing to validate
+    if (presentEmpIds.length === 0 && reassignedIntoEmpIds.size === 0) {
       return {
         isValid: true,
         errors: [],
@@ -111,9 +163,9 @@ export async function validateEmployeeShiftReporting(
       };
     }
 
-    // 3. Get all reported work for these employees
-    const presentEmpIds = reportedAttendance.map(a => a.emp_id);
-    
+    // 4. Get reported work for home employees + anyone reassigned into this stage
+    const workerIds = [...new Set([...presentEmpIds, ...reassignedIntoEmpIds])];
+
     const { data: reportedWorks, error: worksError } = await supabase
       .from('prdn_work_reporting')
       .select(`
@@ -124,7 +176,7 @@ export async function validateEmployeeShiftReporting(
         hours_worked_today,
         prdn_work_planning!inner(stage_code)
       `)
-      .in('worker_id', presentEmpIds)
+      .in('worker_id', workerIds)
       .eq('from_date', reportingDate)
       .in('status', ['draft', 'pending_approval', 'approved'])
       .eq('is_deleted', false)
@@ -159,55 +211,66 @@ export async function validateEmployeeShiftReporting(
       reportedHoursByEmployee.set(empId, currentHours + hours);
     });
 
-    // 5. Validate each employee
-    reportedAttendance.forEach(attendance => {
+    // 5. Validate home employees: reported (this stage) + hours reassigned away >= actual hours
+    (reportedAttendance || []).forEach(attendance => {
       const empId = attendance.emp_id;
       const empName = (attendance.hr_emp as any)?.emp_name || empId;
       const actualHours = attendance.actual_hours;
-      
-      // Get reported work hours for this employee
-      const reportedHours = reportedHoursByEmployee.get(empId) || 0;
-      
-      // Check if attendance is marked as present but no work is reported
-      if (reportedHours === 0 && attendance.attendance_status === 'present') {
+      const reportedHours = reportedHoursByEmployee.get(empId) ?? 0;
+      const hoursAway = hoursReassignedAway.get(empId) ?? 0;
+      const reportedPlusAway = reportedHours + hoursAway;
+
+      if (reportedHours === 0 && hoursAway === 0 && attendance.attendance_status === 'present') {
         errors.push(
           `${empName}: Attendance is marked as 'Present' but no work has been reported.`
         );
-        return; // Skip further checks for this employee
+        return;
       }
-      
-      // Check if attendance hours are specified
+
       if (actualHours !== null && actualHours !== undefined && actualHours > 0) {
-        // Check if reported hours < attendance hours
-        if (reportedHours < actualHours) {
-          const deviationHours = actualHours - reportedHours;
-          // Format deviation nicely
+        if (reportedPlusAway < actualHours) {
+          const deviationHours = actualHours - reportedPlusAway;
           const hours = Math.floor(deviationHours);
           const minutes = Math.round((deviationHours % 1) * 60);
-          let deviationText = '';
-          if (hours > 0 && minutes > 0) {
-            deviationText = `${hours}h ${minutes}m`;
-          } else if (hours > 0) {
-            deviationText = `${hours}h`;
-          } else {
-            deviationText = `${minutes}m`;
-          }
-          
-          // Format actual hours nicely
-          const actualHoursFormatted = actualHours >= 1 
+          const deviationText = hours > 0 && minutes > 0 ? `${hours}h ${minutes}m` : hours > 0 ? `${hours}h` : `${minutes}m`;
+          const actualHoursFormatted = actualHours >= 1
             ? `${Math.floor(actualHours)}h ${Math.round((actualHours % 1) * 60)}m`
             : `${Math.round(actualHours * 60)}m`;
-          
-          // Format reported hours nicely
-          const reportedHoursFormatted = reportedHours >= 1 
-            ? `${Math.floor(reportedHours)}h ${Math.round((reportedHours % 1) * 60)}m`
-            : `${Math.round(reportedHours * 60)}m`;
-          
+          const reportedFormatted = reportedPlusAway >= 1
+            ? `${Math.floor(reportedPlusAway)}h ${Math.round((reportedPlusAway % 1) * 60)}m`
+            : `${Math.round(reportedPlusAway * 60)}m`;
           errors.push(
-            `${empName}: Attendance is marked for ${actualHoursFormatted}, but only ${reportedHoursFormatted} of work is reported. ` +
-            `Missing ${deviationText} of work reporting.`
+            `${empName}: Attendance is marked for ${actualHoursFormatted} (reported here ${reportedHours >= 1 ? `${Math.floor(reportedHours)}h ${Math.round((reportedHours % 1) * 60)}m` : `${Math.round(reportedHours * 60)}m`} + ${hoursAway >= 1 ? `${Math.floor(hoursAway)}h ${Math.round((hoursAway % 1) * 60)}m` : `${Math.round(hoursAway * 60)}m`} reassigned away). ` +
+            `Total ${reportedFormatted} is less than required; missing ${deviationText} of work reporting.`
           );
         }
+      }
+    });
+
+    // 6. Validate incoming reassignments: reported (this stage) >= hours reassigned into this stage
+    const empNameByEmpId = new Map<string, string>();
+    (reportedAttendance || []).forEach(a => {
+      const name = (a.hr_emp as any)?.emp_name;
+      if (name) empNameByEmpId.set(a.emp_id, name);
+    });
+    hoursReassignedInto.forEach((hoursIn, empId) => {
+      if (hoursIn <= 0) return;
+      const reportedHours = reportedHoursByEmployee.get(empId) ?? 0;
+      if (reportedHours < hoursIn) {
+        const empName = empNameByEmpId.get(empId) ?? `Employee ${empId}`;
+        const deviationHours = hoursIn - reportedHours;
+        const hours = Math.floor(deviationHours);
+        const minutes = Math.round((deviationHours % 1) * 60);
+        const deviationText = hours > 0 && minutes > 0 ? `${hours}h ${minutes}m` : hours > 0 ? `${hours}h` : `${minutes}m`;
+        const requiredFormatted = hoursIn >= 1
+          ? `${Math.floor(hoursIn)}h ${Math.round((hoursIn % 1) * 60)}m`
+          : `${Math.round(hoursIn * 60)}m`;
+        const reportedFormatted = reportedHours >= 1
+          ? `${Math.floor(reportedHours)}h ${Math.round((reportedHours % 1) * 60)}m`
+          : `${Math.round(reportedHours * 60)}m`;
+        errors.push(
+          `${empName}: Reassigned into this stage for ${requiredFormatted}, but only ${reportedFormatted} of work is reported here. Missing ${deviationText}.`
+        );
       }
     });
 
