@@ -250,7 +250,7 @@ export async function validateEmployeeShiftPlanning(
     const employeesToCheck = (employees || []).filter(emp => presentEmpIds.has(emp.emp_id));
     
     // Add employees reassigned TO this stage (they also need work planned)
-    const reassignedEmployees = (reassignmentsTo || []).map(r => ({
+    const reassignedEmployees = (reassignmentsTo || []).map((r: any) => ({
       emp_id: r.emp_id,
       emp_name: r.hr_emp?.emp_name || r.emp_id,
       skill_short: r.hr_emp?.skill_short || '',
@@ -391,10 +391,10 @@ export async function validateEmployeeShiftPlanning(
         const mergedWorkSlots = mergeTimeSlots(workSlots);
         const mergedAwaySlots = mergeTimeSlots(awaySlots);
 
-        // Calculate work planned hours (raw time for coverage check, effective time for display)
+        // Calculate work planned hours and reassigned away hours (with break deduction if interval overlaps break)
         const workPlannedRawMinutes = calculateTotalCovered(mergedWorkSlots); // Raw time for coverage validation
         const workPlannedEffectiveMinutes = calculateTotalCoveredWithBreaks(mergedWorkSlots, shiftBreaks || []); // Effective time for display
-        const reassignedAwayMinutes = calculateTotalCovered(mergedAwaySlots); // Reassignments don't need break deduction
+        const reassignedAwayMinutes = calculateTotalCoveredWithBreaks(mergedAwaySlots, shiftBreaks || []); // Break deducted if overlap
         
         // For validation, we need to compare effective work time (with breaks deducted) against expected hours
         // Expected hours are already in effective hours (planned_hours is after break deduction)

@@ -22,7 +22,7 @@
   export let onPageChange: (page: number) => void;
   export let onPageSizeChange: (size: number) => void;
 
-  let dataTable: DataTable<WorkOrderSummary>;
+  let dataTable: DataTable<WorkOrderSummary> | undefined;
   let search = '';
   let showFilters = false;
   let filter = {

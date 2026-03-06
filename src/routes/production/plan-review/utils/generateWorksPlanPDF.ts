@@ -110,7 +110,7 @@ export function generateWorksPlanPDF(
     // Get all skills required from std_work_skill_mapping for this work
     // Collect unique skill combinations from all items in the group
     const skillMappings = new Set<string>();
-    group.items.forEach(item => {
+    group.items.forEach((item: any) => {
       // Try to get skill from std_work_skill_mapping first
       if (item.std_work_skill_mapping?.sc_name) {
         skillMappings.add(item.std_work_skill_mapping.sc_name);
@@ -128,7 +128,7 @@ export function generateWorksPlanPDF(
 
     // Calculate total height needed for all skill rows in this group
     const skillRowHeights: number[] = [];
-    group.items.forEach((work) => {
+    group.items.forEach((work: any) => {
       const worker = work.hr_emp?.emp_name || 'N/A';
       const workerSkill = work.hr_emp?.skill_short || 'N/A';
       const fromTime = work.from_time || 'N/A';
@@ -203,7 +203,7 @@ export function generateWorksPlanPDF(
 
     // Draw individual skill rows with skill-specific data
     let skillRowY = groupStartY;
-    group.items.forEach((work, itemIndex) => {
+    group.items.forEach((work: any, itemIndex: number) => {
       const worker = work.hr_emp?.emp_name || 'N/A';
       const workerSkill = work.hr_emp?.skill_short || 'N/A';
       const fromTime = work.from_time || 'N/A';

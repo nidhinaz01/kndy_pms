@@ -19,7 +19,7 @@ export async function saveUnplannedWorkReports(
     const currentUser = getCurrentUsername();
     const now = getCurrentTimestamp();
     
-    const hoursWorkedToday = formData.actualTimeMinutes / 60;
+    const hoursWorkedToday = (formData.actualTimeMinutes ?? 0) / 60;
     
     const hasBreakdown = formData.breakdownData.breakdownItems.length > 0;
     
@@ -305,7 +305,11 @@ export async function saveUnplannedWorkReports(
     // Calculate piece rate for created planning records
     if (createdPlanningRecords.length > 0) {
       try {
-        await calculatePieceRateForPlanning(createdPlanningRecords.map(p => p.id));
+        for (const planRecord of createdPlanningRecords) {
+          if (planRecord.id) {
+            await calculatePieceRateForPlanning(planRecord.id);
+          }
+        }
       } catch (error) {
         console.error('Error calculating piece rate:', error);
         // Don't fail the save if piece rate calculation fails

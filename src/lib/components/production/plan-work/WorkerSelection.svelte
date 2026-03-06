@@ -401,10 +401,11 @@
   
   {#if showTraineeSelector && canAddTrainee}
     <div class="mb-3 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg border theme-border">
-      <label class="block text-sm font-medium theme-text-primary mb-2">
+      <label for="plan-work-trainee-select" class="block text-sm font-medium theme-text-primary mb-2">
         Select Trainee
       </label>
       <select
+        id="plan-work-trainee-select"
         class="w-full px-3 py-2 border theme-border rounded-lg theme-bg-primary theme-text-primary focus:ring-2 focus:ring-blue-500 focus:border-transparent"
         on:change={(e) => {
           const traineeId = (e.target as HTMLSelectElement).value;
@@ -487,10 +488,11 @@
     
     <!-- Deviation Reason Input -->
     <div>
-      <label class="block text-sm font-medium theme-text-primary mb-2">
+      <label for="plan-work-trainee-reason" class="block text-sm font-medium theme-text-primary mb-2">
         Deviation Reason <span class="text-red-500">*</span>
       </label>
       <textarea
+        id="plan-work-trainee-reason"
         class="w-full px-3 py-2 border theme-border rounded-lg theme-bg-primary theme-text-primary focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
         rows="3"
         placeholder="Enter reason for adding trainees..."

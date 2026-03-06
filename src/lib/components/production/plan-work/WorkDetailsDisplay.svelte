@@ -43,7 +43,7 @@
           {#if work.skill_time_standards.isUniform && work.skill_time_standards.values.length > 0}
             {formatTime(work.skill_time_standards.values[0].standard_time_minutes / 60)}
           {:else if work.skill_time_standards.values.length > 0}
-            {formatTime(Math.max(...work.skill_time_standards.values.map(v => v.standard_time_minutes)) / 60)}
+            {formatTime(Math.max(...work.skill_time_standards.values.map((v: any) => v.standard_time_minutes)) / 60)}
           {:else}
             N/A
           {/if}

@@ -34,6 +34,8 @@ export interface MultiSkillReportFormData {
   ltReasonId: string;
   ltComments: string;
   breakdownData: BreakdownData;
+  actualTimeMinutes?: number;
+  showLostTimeSection?: boolean;
 }
 
 export interface MultiSkillReportState {

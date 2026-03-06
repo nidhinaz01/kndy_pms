@@ -17,6 +17,8 @@ export interface SkillMaster {
   created_dt: string;
   is_active: boolean;
   is_deleted: boolean;
+  wef?: string; // Legacy field, use wef_date instead
+  [key: string]: any; // Allow indexing with string keys for dynamic field access
 }
 
 // Fetch skill names from data elements

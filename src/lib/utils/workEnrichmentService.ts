@@ -263,7 +263,7 @@ export function enrichItem(
       }
       // Try all possible keys for this code
       if (!workAdditionData) {
-        const allKeysForCode = Array.from(detailedMap.keys()).filter(k => k.startsWith(`${otherWorkCode}_`));
+        const allKeysForCode = (Array.from(detailedMap.keys()) as string[]).filter(k => k.startsWith(`${otherWorkCode}_`));
         if (allKeysForCode.length > 0) {
           // Use the first match found
           workAdditionData = detailedMap.get(allKeysForCode[0]) || null;

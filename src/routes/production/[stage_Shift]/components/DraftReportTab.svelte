@@ -617,8 +617,8 @@
               </td>
               <td class="px-4 py-2 text-sm">
                 {#if typedGroup.items && typedGroup.items.length > 0}
-                  {@const allCompleted = typedGroup.items.every(item => item.completion_status === 'C')}
-                  {@const anyNotCompleted = typedGroup.items.some(item => item.completion_status === 'NC')}
+                  {@const allCompleted = typedGroup.items.every((item: any) => item.completion_status === 'C')}
+                  {@const anyNotCompleted = typedGroup.items.some((item: any) => item.completion_status === 'NC')}
                   {#if allCompleted}
                     <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-400">Completed</span>
                   {:else if anyNotCompleted}

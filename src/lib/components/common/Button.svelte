@@ -1,11 +1,14 @@
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
 
-  export let variant: 'primary' | 'secondary' | 'danger' = 'primary';
+  export let variant: 'primary' | 'secondary' | 'danger' | 'warning' = 'primary';
   export let size: 'sm' | 'md' | 'lg' = 'md';
   export let fullWidth = false;
   export let disabled = false;
   export let type: 'button' | 'submit' | 'reset' = 'button';
+  let className = '';
+  export { className as class };
+  export let title = '';
 
   const dispatch = createEventDispatcher();
 
@@ -25,11 +28,13 @@
 
 <button 
   {type}
-  class={classes}
+  class="{classes} {className}"
   class:btn-primary={variant === 'primary'}
   class:btn-secondary={variant === 'secondary'}
   class:btn-danger={variant === 'danger'}
+  class:btn-warning={variant === 'warning'}
   {disabled}
+  {title}
   on:click={() => {
     if (!disabled) {
       dispatch('click');
@@ -96,6 +101,26 @@
   
   .btn-danger:focus {
     box-shadow: 0 0 0 2px #ef4444 !important;
+  }
+  
+  .btn-warning {
+    background-color: #f59e0b !important;
+    color: white !important;
+    border: 2px solid #f59e0b !important;
+    cursor: pointer !important;
+  }
+  
+  .btn-warning:hover:not(:disabled) {
+    background-color: #d97706 !important;
+    border-color: #d97706 !important;
+  }
+  
+  .btn-warning:focus {
+    box-shadow: 0 0 0 2px #fbbf24 !important;
+  }
+  
+  .btn-warning:disabled {
+    opacity: 0.6 !important;
   }
   
   /* Dark mode support */

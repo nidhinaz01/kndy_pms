@@ -110,7 +110,7 @@ export interface CreateWorkPlanningData {
   planned_hours: number;
   time_worked_till_date: number;
   remaining_time: number;
-  status?: 'planned' | 'submitted' | 'to_redo' | 'approved';
+  status?: 'draft' | 'planned' | 'submitted' | 'to_redo' | 'approved' | 'pending_approval' | 'rejected';
   notes?: string;
   wsm_id?: number | null;
   other_work_code?: string | null;
@@ -132,6 +132,13 @@ export interface ProductionWork {
   std_work_type_details?: {
     derived_sw_code: string;
     type_description: string;
+    std_work_details?: {
+      sw_name: string;
+    };
+  };
+  prdn_wo_details?: {
+    wo_no: string;
+    pwo_no: string;
   };
   std_vehicle_work_flow?: {
     sequence_order: number;

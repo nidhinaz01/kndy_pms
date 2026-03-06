@@ -427,7 +427,7 @@
         <UsersTab
           {users}
           isLoading={isUsersLoading}
-          {isSavingUser}
+          isSaving={isSavingUser}
           {isEditMode}
           {selectedUser}
           bind:userForm
@@ -444,7 +444,7 @@
         <MenuTab
           {menuItems}
           isLoading={isMenuLoading}
-          {isMenuEditMode}
+          isEditMode={isMenuEditMode}
           {selectedMenu}
           bind:menuForm
           on:edit-menu={handleEditMenu}

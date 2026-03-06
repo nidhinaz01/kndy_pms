@@ -164,6 +164,7 @@
         stageCode,
         selectedWorkOrderId,
         'non-standard',
+        currentUser,
         undefined,
         {
           other_work_code: nextWorkCode,
@@ -171,8 +172,7 @@
           other_work_sc: selectedSkillCombination,
           other_work_est_time_min: estimatedTimeMinutes!,
           addition_reason: nonStandardAdditionReason.trim()
-        },
-        currentUser
+        }
       );
 
       if (result.success) {

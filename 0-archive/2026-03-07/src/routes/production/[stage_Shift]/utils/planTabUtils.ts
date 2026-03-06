@@ -1,0 +1,386 @@
+/**
+ * Get skill order from skillMapping for sorting
+ */
+function getSkillOrderMap(skillMapping: any): Map<string, number> {
+  const skillOrderMap = new Map<string, number>();
+  
+  if (!skillMapping) return skillOrderMap;
+  
+  // Try to get order from skill_combination array (preferred method)
+  const skillCombination = skillMapping.std_skill_combinations;
+  const combination = skillCombination
+    ? (Array.isArray(skillCombination)
+      ? skillCombination[0]?.skill_combination
+      : skillCombination?.skill_combination)
+    : null;
+  
+  if (combination && Array.isArray(combination)) {
+    // Sort by skill_order to maintain the hierarchy
+    const sortedCombination = [...combination].sort((a, b) => {
+      const orderA = a.skill_order ?? 999;
+      const orderB = b.skill_order ?? 999;
+      return orderA - orderB;
+    });
+    
+    // Create a map of skill_name and skill_short -> index (order)
+    // This handles cases where sc_required might be either skill_name or skill_short
+    sortedCombination.forEach((skill, index) => {
+      if (skill.skill_name) {
+        skillOrderMap.set(skill.skill_name, index);
+      }
+      if (skill.skill_short) {
+        skillOrderMap.set(skill.skill_short, index);
+      }
+      // Also map skill_id if available (for completeness)
+      if (skill.skill_id) {
+        skillOrderMap.set(String(skill.skill_id), index);
+      }
+    });
+  }
+  
+  // Fallback: parse from sc_name if skill_combination is not available
+  if (skillOrderMap.size === 0 && skillMapping.sc_name && typeof skillMapping.sc_name === 'string') {
+    const scName = skillMapping.sc_name.trim();
+    if (scName.includes(' + ')) {
+      const individualSkills = scName.split(' + ').map((s: string) => s.trim()).filter(Boolean);
+      individualSkills.forEach((skill: string, index: number) => {
+        skillOrderMap.set(skill, index);
+      });
+    } else {
+      // Single skill
+      skillOrderMap.set(scName, 0);
+    }
+  }
+  
+  return skillOrderMap;
+}
+
+/**
+ * Group planned works by work code and sort items by skill order
+ */
+export function groupPlannedWorks(plannedWorks: any[]): Record<string, any> {
+  
+  const groups = (plannedWorks || []).reduce((groups, work) => {
+    if (!work) return groups;
+    
+    // Check work code from multiple sources (handle cases where joins might fail)
+    const workCode = work.other_work_code || 
+                     work.derived_sw_code ||  // Direct field on planning record
+                     work.std_work_type_details?.derived_sw_code || 
+                     work.std_work_type_details?.sw_code || 
+                     'unknown';
+    
+        // Log if work code is 'unknown' (for any work, not just P0141A)
+        if (workCode === 'unknown') {
+          console.warn(`⚠️ groupPlannedWorks: Record ID ${work.id} has workCode 'unknown' - derived_sw_code: ${work.derived_sw_code}, std_work_type_details: ${!!work.std_work_type_details}`);
+        }
+    
+    let workName = '';
+    if (work.other_work_code) {
+      // Check for workAdditionData on the work item itself (after enrichment)
+      if (work.workAdditionData?.other_work_desc) {
+        workName = work.workAdditionData.other_work_desc;
+      } else {
+        workName = work.other_work_code;
+      }
+    } else {
+      workName = work.std_work_type_details?.std_work_details?.sw_name || '';
+    }
+    
+    const typeDescription = work.std_work_type_details?.type_description || '';
+    const fullWorkName = workName + (typeDescription ? (workName ? ' - ' : '') + typeDescription : '');
+    
+    // Get work order details - handle multiple work orders with same work code
+    const woDetailsId = work.wo_details_id || work.prdn_wo_details?.id;
+    const woNo = work.prdn_wo_details?.wo_no || (woDetailsId ? `WO-${woDetailsId}` : 'N/A');
+    const pwoNo = work.prdn_wo_details?.pwo_no || 'N/A';
+    
+    // Create unique key for work code + work order combination
+    // This ensures different work orders with same work code are grouped separately
+    const groupKey = `${workCode}_${woDetailsId || 'unknown'}`;
+    
+    if (!groups[groupKey]) {
+      groups[groupKey] = {
+        workCode,
+        workName: fullWorkName,
+        woNo: woNo,
+        pwoNo: pwoNo,
+        woDetailsId: woDetailsId,  // Store for reference
+        items: []
+      };
+    }
+    groups[groupKey].items.push(work);
+    return groups;
+  }, {});
+  
+  
+  // Sort items within each group by skill order
+  Object.values(groups).forEach((group: any) => {
+    if (!group.items || group.items.length === 0) return;
+    
+    // Get skill order from the first item's skillMapping
+    const firstItem = group.items[0];
+    const skillMapping = firstItem?.skillMapping || firstItem?.std_work_skill_mapping;
+    const skillOrderMap = getSkillOrderMap(skillMapping);
+    
+    if (skillOrderMap.size > 0) {
+      // Sort items by their sc_required skill order
+      group.items.sort((a: any, b: any) => {
+        const skillA = a.sc_required || '';
+        const skillB = b.sc_required || '';
+        
+        // Try to get order for skillA
+        let orderA = skillOrderMap.get(skillA);
+        if (orderA === undefined) {
+          // Try to find by matching with skill_short from hr_emp
+          const empSkillA = a.hr_emp?.skill_short;
+          if (empSkillA) {
+            orderA = skillOrderMap.get(empSkillA);
+          }
+        }
+        orderA = orderA ?? 999;
+        
+        // Try to get order for skillB
+        let orderB = skillOrderMap.get(skillB);
+        if (orderB === undefined) {
+          // Try to find by matching with skill_short from hr_emp
+          const empSkillB = b.hr_emp?.skill_short;
+          if (empSkillB) {
+            orderB = skillOrderMap.get(empSkillB);
+          }
+        }
+        orderB = orderB ?? 999;
+        
+        // If same order, maintain original order
+        if (orderA === orderB) {
+          return 0;
+        }
+        
+        return orderA - orderB;
+      });
+    }
+  });
+  
+  // ---------- Order groups by category (Parent P, Mother M, Child C, Other O), then by workCode, then by earliest from_time ----------
+  const categoryOrderMap: Record<string, number> = { P: 0, M: 1, C: 2, O: 3 };
+
+  function getCategoryIndex(workCode: string | undefined): number {
+    if (!workCode || typeof workCode !== 'string' || workCode.length === 0) return categoryOrderMap.O;
+    const firstChar = workCode.trim().charAt(0).toUpperCase();
+    if (firstChar === 'P') return categoryOrderMap.P;
+    if (firstChar === 'M') return categoryOrderMap.M;
+    if (firstChar === 'C') return categoryOrderMap.C;
+    return categoryOrderMap.O;
+  }
+
+  function parseWorkCode(workCode: string | undefined): { prefix: string; num: number | null; suffix: string } {
+    if (!workCode || typeof workCode !== 'string') return { prefix: '', num: null, suffix: '' };
+    const m = workCode.match(/^([A-Za-z]+)?0*([0-9]+)?([A-Za-z0-9-]*)$/);
+    if (!m) return { prefix: workCode, num: null, suffix: '' };
+    const prefix = (m[1] || '').toUpperCase();
+    const num = m[2] ? parseInt(m[2], 10) : null;
+    const suffix = (m[3] || '').toUpperCase();
+    return { prefix, num, suffix };
+  }
+
+  function timeToMinutes(timeStr: string | undefined): number {
+    if (!timeStr || typeof timeStr !== 'string') return Number.MAX_SAFE_INTEGER;
+    const parts = timeStr.split(':').map(Number);
+    if (parts.length < 2) return Number.MAX_SAFE_INTEGER;
+    const [h, m] = parts;
+    return (h || 0) * 60 + (m || 0);
+  }
+
+  const groupEntries = Object.entries(groups);
+  groupEntries.sort((a, b) => {
+    const [, ga] = a;
+    const [, gb] = b;
+
+    const codeA: string = ga.workCode || '';
+    const codeB: string = gb.workCode || '';
+
+    const catA = getCategoryIndex(codeA);
+    const catB = getCategoryIndex(codeB);
+    if (catA !== catB) return catA - catB;
+
+    const pa = parseWorkCode(codeA);
+    const pb = parseWorkCode(codeB);
+    if (pa.num !== null && pb.num !== null) {
+      if (pa.num !== pb.num) return pa.num - pb.num;
+      if (pa.suffix !== pb.suffix) return pa.suffix.localeCompare(pb.suffix);
+    } else {
+      const cmp = codeA.localeCompare(codeB);
+      if (cmp !== 0) return cmp;
+    }
+
+    const earliestA = Math.min(...(ga.items || []).map((it: any) => timeToMinutes(it.from_time)));
+    const earliestB = Math.min(...(gb.items || []).map((it: any) => timeToMinutes(it.from_time)));
+    return earliestA - earliestB;
+  });
+
+  const orderedGroups: Record<string, any> = {};
+  for (const [key, value] of groupEntries) {
+    orderedGroups[key] = value;
+  }
+
+  return orderedGroups;
+}
+
+/**
+ * Group report works by work code
+ */
+export function groupReportWorks(reportData: any[]): Record<string, any> {
+  const groups = (reportData || []).reduce((groups, report) => {
+    const planning = report.prdn_work_planning;
+    const workCode = planning?.other_work_code || 
+                     planning?.std_work_type_details?.derived_sw_code || 
+                     planning?.std_work_type_details?.sw_code || 'unknown';
+    
+    // Include wo_details_id (work order identity) in grouping key to match Plan grouping.
+    const woDetailsId = planning?.wo_details_id || planning?.prdn_wo_details?.id || null;
+    const groupKey = `${workCode}_${woDetailsId || 'unknown'}`;
+    
+    let workName = '';
+    if (planning?.other_work_code) {
+      if (report.workAdditionData?.other_work_desc) {
+        workName = report.workAdditionData.other_work_desc;
+      } else if (planning.workAdditionData?.other_work_desc) {
+        workName = planning.workAdditionData.other_work_desc;
+      } else {
+        workName = planning.other_work_code;
+      }
+    } else {
+      workName = planning?.std_work_type_details?.std_work_details?.sw_name || '';
+    }
+    const typeDescription = planning?.std_work_type_details?.type_description || '';
+    const fullWorkName = workName + (typeDescription ? (workName ? ' - ' : '') + typeDescription : '');
+    
+    if (!groups[groupKey]) {
+      groups[groupKey] = {
+        workCode,
+        workName: fullWorkName,
+        woNo: planning?.prdn_wo_details?.wo_no || 'N/A',
+        pwoNo: planning?.prdn_wo_details?.pwo_no || 'N/A',
+        woDetailsId: woDetailsId,
+        items: [],
+        hasLostTime: false,
+        totalLostTime: 0
+      };
+    }
+    
+    const lostTime = report.lt_minutes_total || 0;
+    if (lostTime > 0) {
+      groups[groupKey].hasLostTime = true;
+      groups[groupKey].totalLostTime += lostTime;
+    }
+    
+    groups[groupKey].items.push(report);
+    return groups;
+  }, {});
+
+  // Sort items within each report group by skill order (reuse logic from planned grouping)
+  Object.values(groups).forEach((group: any) => {
+    if (!group.items || group.items.length === 0) return;
+    const firstItem = group.items[0];
+    const skillMapping = firstItem?.skillMapping || firstItem?.prdn_work_planning?.std_work_skill_mapping;
+    const skillOrderMap = getSkillOrderMap(skillMapping);
+    if (skillOrderMap.size > 0) {
+      group.items.sort((a: any, b: any) => {
+        const skillA = a.skillMapping?.sc_name || a.prdn_work_planning?.sc_required || '';
+        const skillB = b.skillMapping?.sc_name || b.prdn_work_planning?.sc_required || '';
+        let orderA = skillOrderMap.get(skillA);
+        if (orderA === undefined) {
+          const empSkillA = a.prdn_work_planning?.hr_emp?.skill_short || a.hr_emp?.skill_short;
+          if (empSkillA) orderA = skillOrderMap.get(empSkillA);
+        }
+        orderA = orderA ?? 999;
+        let orderB = skillOrderMap.get(skillB);
+        if (orderB === undefined) {
+          const empSkillB = b.prdn_work_planning?.hr_emp?.skill_short || b.hr_emp?.skill_short;
+          if (empSkillB) orderB = skillOrderMap.get(empSkillB);
+        }
+        orderB = orderB ?? 999;
+        if (orderA === orderB) return 0;
+        return orderA - orderB;
+      });
+    }
+  });
+
+  // Order groups by same rules as planned grouping: category, workCode numeric, earliest from_time
+  const categoryOrderMap: Record<string, number> = { P: 0, M: 1, C: 2, O: 3 };
+  function getCategoryIndex(workCode: string | undefined): number {
+    if (!workCode || typeof workCode !== 'string' || workCode.length === 0) return categoryOrderMap.O;
+    const firstChar = workCode.trim().charAt(0).toUpperCase();
+    if (firstChar === 'P') return categoryOrderMap.P;
+    if (firstChar === 'M') return categoryOrderMap.M;
+    if (firstChar === 'C') return categoryOrderMap.C;
+    return categoryOrderMap.O;
+  }
+  function parseWorkCode(workCode: string | undefined): { prefix: string; num: number | null; suffix: string } {
+    if (!workCode || typeof workCode !== 'string') return { prefix: '', num: null, suffix: '' };
+    const m = workCode.match(/^([A-Za-z]+)?0*([0-9]+)?([A-Za-z0-9-]*)$/);
+    if (!m) return { prefix: workCode, num: null, suffix: '' };
+    const prefix = (m[1] || '').toUpperCase();
+    const num = m[2] ? parseInt(m[2], 10) : null;
+    const suffix = (m[3] || '').toUpperCase();
+    return { prefix, num, suffix };
+  }
+  function timeToMinutes(timeStr: string | undefined): number {
+    if (!timeStr || typeof timeStr !== 'string') return Number.MAX_SAFE_INTEGER;
+    const parts = timeStr.split(':').map(Number);
+    if (parts.length < 2) return Number.MAX_SAFE_INTEGER;
+    const [h, m] = parts;
+    return (h || 0) * 60 + (m || 0);
+  }
+  const groupEntries = Object.entries(groups);
+  groupEntries.sort((a, b) => {
+    const [, ga] = a; const [, gb] = b;
+    const codeA: string = ga.workCode || '';
+    const codeB: string = gb.workCode || '';
+    const catA = getCategoryIndex(codeA); const catB = getCategoryIndex(codeB);
+    if (catA !== catB) return catA - catB;
+    const pa = parseWorkCode(codeA); const pb = parseWorkCode(codeB);
+    if (pa.num !== null && pb.num !== null) {
+      if (pa.num !== pb.num) return pa.num - pb.num;
+      if (pa.suffix !== pb.suffix) return pa.suffix.localeCompare(pb.suffix);
+    } else {
+      const cmp = codeA.localeCompare(codeB);
+      if (cmp !== 0) return cmp;
+    }
+    const earliestA = Math.min(...(ga.items || []).map((it: any) => timeToMinutes(it.from_time)));
+    const earliestB = Math.min(...(gb.items || []).map((it: any) => timeToMinutes(it.from_time)));
+    return earliestA - earliestB;
+  });
+  const orderedGroups: Record<string, any> = {};
+  for (const [key, value] of groupEntries) orderedGroups[key] = value;
+  return orderedGroups;
+}
+
+/**
+ * Check if all skill competencies for a work are reported
+ */
+export function areAllSkillsReported(workCode: string, plannedWorks: any[]): boolean {
+  const allWorksForThisCode = plannedWorks.filter(work => {
+    const code = work.std_work_type_details?.derived_sw_code || work.std_work_type_details?.sw_code;
+    return code === workCode;
+  });
+
+  if (allWorksForThisCode.length === 0) return false;
+
+  return allWorksForThisCode.every(work => 
+    work.workLifecycleStatus && work.workLifecycleStatus !== 'Planned'
+  );
+}
+
+/**
+ * Check if any selected works are already reported
+ */
+export function hasReportedSkillsSelected(selectedRows: Set<string>, plannedWorks: any[]): boolean {
+  if (selectedRows.size === 0) return false;
+  
+  const selectedWorks = plannedWorks.filter(work => selectedRows.has(work.id));
+  return selectedWorks.some(work => 
+    work.workLifecycleStatus && work.workLifecycleStatus !== 'Planned'
+  );
+}
+

@@ -22,6 +22,7 @@ export interface ReportWorkFormData {
   lostTimeChunks: LostTimeChunk[];
   totalLostTimeMinutes: number;
   currentChunkIndex: number;
+  currentStage?: 1 | 2 | 3;
 }
 
 export interface ReportWorkState {

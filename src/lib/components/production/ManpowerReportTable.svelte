@@ -42,8 +42,8 @@
     filters.search = value;
   }
 
-  function handleFilterChange(field: keyof ManpowerTableFilters, value: string) {
-    filters[field] = value;
+  function handleFilterChange(field: keyof ManpowerTableFilters, value: any) {
+    (filters as any)[field] = value;
   }
 
   function handleClearFilters() {

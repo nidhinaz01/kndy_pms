@@ -546,10 +546,11 @@
                 <h3 class="text-lg font-semibold {currentTheme === 'dark' ? 'text-white' : 'text-gray-900'}">Available Entry Slots</h3>
                 <!-- Toggle Switch -->
                 <div class="flex items-center gap-2">
-                  <label class="text-sm font-medium {currentTheme === 'dark' ? 'text-gray-300' : 'text-gray-700'}">
+                  <span id="past-entry-label" class="text-sm font-medium {currentTheme === 'dark' ? 'text-gray-300' : 'text-gray-700'}">
                     Already entered production
-                  </label>
+                  </span>
                   <button
+                    aria-labelledby="past-entry-label"
                     type="button"
                     role="switch"
                     aria-checked={isPastEntryMode}

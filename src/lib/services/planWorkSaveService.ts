@@ -49,8 +49,8 @@ export async function saveWorkPlanning(
     });
   }
   
-  const updatePromises: Promise<any>[] = [];
-  const insertPromises: Promise<any>[] = [];
+  const updatePromises: PromiseLike<any>[] = [];
+  const insertPromises: PromiseLike<any>[] = [];
   const planIdsToKeep = new Set<number>();
   
   if (requiredSkills.length > 0) {
@@ -163,7 +163,7 @@ export async function saveWorkPlanning(
   // Delete plans that are no longer needed (not in the new set)
   if (isEditMode && planIdsToKeep.size > 0) {
     const allExistingPlanIds = work.existingDraftPlans.map((p: any) => p.id).filter(Boolean);
-    const planIdsToDelete = allExistingPlanIds.filter(id => !planIdsToKeep.has(id));
+    const planIdsToDelete = allExistingPlanIds.filter((id: any) => !planIdsToKeep.has(id));
     
     if (planIdsToDelete.length > 0) {
       const { error: deleteError } = await supabase

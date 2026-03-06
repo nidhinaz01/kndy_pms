@@ -2,21 +2,29 @@ import { supabase } from '$lib/supabaseClient';
 import { getCurrentUsername, getCurrentTimestamp } from '$lib/utils/userUtils';
 import type { Holiday, HolidayFormData, HolidayStats } from './planningTypes';
 
+const PAGE_SIZE = 1000;
+
 export async function fetchHolidays(year?: number): Promise<Holiday[]> {
   try {
-    let query = supabase
-      .from('plan_holidays')
-      .select('*')
-      .eq('is_deleted', false);
-    
-    if (year) {
-      query = query.eq('dt_year', year);
+    const allRows: Holiday[] = [];
+    let offset = 0;
+    let hasMore = true;
+    while (hasMore) {
+      let query = supabase
+        .from('plan_holidays')
+        .select('*')
+        .eq('is_deleted', false)
+        .order('dt_value', { ascending: true })
+        .range(offset, offset + PAGE_SIZE - 1);
+      if (year) query = query.eq('dt_year', year);
+      const { data, error } = await query;
+      if (error) throw error;
+      const page = data || [];
+      allRows.push(...(page as Holiday[]));
+      hasMore = page.length === PAGE_SIZE;
+      offset += PAGE_SIZE;
     }
-    
-    const { data, error } = await query.order('dt_value', { ascending: true });
-
-    if (error) throw error;
-    return data || [];
+    return allRows;
   } catch (error) {
     console.error('Error fetching holidays:', error);
     throw error;
@@ -245,23 +253,30 @@ export async function addSundaysForYear(): Promise<{ added: number; skipped: num
       current.setDate(current.getDate() + 7);
     }
     
-    // Check which Sundays already exist (same date AND same description)
+    // Check which Sundays already exist (same date AND same description) (paginated)
     const existingHolidays = new Set<string>();
     if (sundays.length > 0) {
       const dateValues = sundays.map(s => s.dt_value).filter(Boolean) as string[];
-      const { data: existing } = await supabase
-        .from('plan_holidays')
-        .select('dt_value, description')
-        .in('dt_value', dateValues)
-        .eq('description', 'Sunday')
-        .eq('is_deleted', false);
-      
-      if (existing) {
-        existing.forEach(h => {
-          if (h.dt_value) {
-            existingHolidays.add(`${h.dt_value}|${h.description}`);
-          }
-        });
+      let offset = 0;
+      let hasMore = true;
+      while (hasMore) {
+        const { data: existing } = await supabase
+          .from('plan_holidays')
+          .select('dt_value, description')
+          .in('dt_value', dateValues)
+          .eq('description', 'Sunday')
+          .eq('is_deleted', false)
+          .order('dt_value')
+          .range(offset, offset + PAGE_SIZE - 1);
+        if (existing) {
+          existing.forEach((h: { dt_value?: string; description?: string }) => {
+            if (h.dt_value) {
+              existingHolidays.add(`${h.dt_value}|${h.description}`);
+            }
+          });
+        }
+        hasMore = (existing?.length ?? 0) === PAGE_SIZE;
+        offset += PAGE_SIZE;
       }
     }
     
@@ -326,18 +341,25 @@ export async function importHolidays(holidays: HolidayFormData[]): Promise<{ add
     const dateValues = validHolidays.map(h => h.dt_value).filter(Boolean) as string[];
     
     if (dateValues.length > 0) {
-      const { data: existing } = await supabase
-        .from('plan_holidays')
-        .select('dt_value, description')
-        .in('dt_value', dateValues)
-        .eq('is_deleted', false);
-      
-      if (existing) {
-        existing.forEach(h => {
-          if (h.dt_value && h.description) {
-            existingHolidays.add(`${h.dt_value}|${h.description}`);
-          }
-        });
+      let offset = 0;
+      let hasMore = true;
+      while (hasMore) {
+        const { data: existing } = await supabase
+          .from('plan_holidays')
+          .select('dt_value, description')
+          .in('dt_value', dateValues)
+          .eq('is_deleted', false)
+          .order('dt_value')
+          .range(offset, offset + PAGE_SIZE - 1);
+        if (existing) {
+          existing.forEach((h: { dt_value?: string; description?: string }) => {
+            if (h.dt_value && h.description) {
+              existingHolidays.add(`${h.dt_value}|${h.description}`);
+            }
+          });
+        }
+        hasMore = (existing?.length ?? 0) === PAGE_SIZE;
+        offset += PAGE_SIZE;
       }
     }
     
@@ -349,7 +371,7 @@ export async function importHolidays(holidays: HolidayFormData[]): Promise<{ add
     });
     
     if (newHolidays.length === 0) {
-      return { added: 0, skipped: existingDates.size, errors };
+      return { added: 0, skipped: existingHolidays.size, errors };
     }
     
     // Insert only new holidays

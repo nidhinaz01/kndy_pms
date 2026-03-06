@@ -98,8 +98,9 @@ export async function copyTemplate(
 
   if (templateError) throw templateError;
 
-  if (originalTemplate.sys_chassis_receival_template_fields?.length > 0) {
-    const fieldsToInsert = originalTemplate.sys_chassis_receival_template_fields.map((field) => ({
+  const templateFields = originalTemplate.sys_chassis_receival_template_fields;
+  if (templateFields && templateFields.length > 0) {
+    const fieldsToInsert = templateFields.map((field) => ({
       template_id: newTemplate.id,
       field_name: field.field_name,
       field_label: field.field_label,

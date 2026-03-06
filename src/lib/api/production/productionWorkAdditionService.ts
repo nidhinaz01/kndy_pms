@@ -4,6 +4,7 @@ export async function addWorkToProduction(
   stageCode: string,
   woDetailsId: number,
   workType: 'standard' | 'non-standard',
+  addedBy: string,
   standardWorkData?: {
     derived_sw_code: string;
     addition_reason: string;
@@ -14,8 +15,7 @@ export async function addWorkToProduction(
     other_work_sc: string;
     other_work_est_time_min: number;
     addition_reason: string;
-  },
-  addedBy: string
+  }
 ): Promise<{ success: boolean; error?: string }> {
   try {
     const now = new Date().toISOString();

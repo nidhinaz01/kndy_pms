@@ -29,9 +29,9 @@ export async function createWorkPlanning(planningData: CreateWorkPlanningData, c
 }
 
 export async function fetchWorkPlanning(
-  stageCode: string, 
-  date: string, 
-  status?: 'draft' | 'approved' | 'pending_approval' | 'rejected'
+  stageCode: string,
+  date: string,
+  status?: 'draft' | 'planned' | 'approved' | 'pending_approval' | 'rejected'
 ): Promise<WorkPlanning[]> {
   try {
     let query = supabase

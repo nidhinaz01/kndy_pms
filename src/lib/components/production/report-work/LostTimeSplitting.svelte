@@ -90,7 +90,7 @@
             />
           </div>
           <div class="flex-1 text-sm text-gray-900 dark:text-gray-100">
-            {#if formData.currentStage >= 3}
+            {#if (formData.currentStage ?? 0) >= 3}
               {chunk.reasonName || 'No reason assigned'}
               {#if chunk.reasonName}
                 <span class="ml-2 text-xs px-2 py-1 rounded-full bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200">
@@ -102,7 +102,7 @@
             {/if}
           </div>
           <div class="w-20 text-sm text-gray-900 dark:text-gray-100">
-            {#if formData.currentStage >= 3}
+            {#if (formData.currentStage ?? 0) >= 3}
               ₹{chunk.cost.toFixed(2)}
             {:else}
               <span class="text-orange-600 dark:text-orange-400">TBD</span>

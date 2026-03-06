@@ -507,8 +507,8 @@ export async function getDocumentStatuses(
     }
     
     if (requirement?.is_not_required) {
-      statusObj.not_required_comments = requirement.not_required_comments;
-      statusObj.not_required_marked_by = requirement.marked_by;
+      statusObj.not_required_comments = requirement.not_required_comments ?? undefined;
+      statusObj.not_required_marked_by = requirement.marked_by ?? undefined;
       statusObj.not_required_marked_dt = requirement.marked_dt;
     }
     
@@ -731,7 +731,7 @@ export async function getBatchDocumentStatuses(
         // For multi-file types, prefer current document, otherwise first
         const currentDoc = isSingleFileType(documentType) 
           ? documents[0] 
-          : documents.find(d => d.is_current) || documents[0];
+          : documents.find((d: any) => d.is_current) || documents[0];
         
         if (currentDoc) {
           statusObj.document_id = currentDoc.id;

@@ -83,11 +83,16 @@ export function validateStage3(formData: ReportWorkFormData): ValidationResult {
   };
 }
 
-export function validateSave(formData: ReportWorkFormData): ValidationResult {
+export function validateSave(formData: ReportWorkFormData, isNonStandardWork: boolean = false): ValidationResult {
   // Validate stage 1
   const stage1Validation = validateStage1(formData);
   if (!stage1Validation.isValid) {
     return stage1Validation;
+  }
+
+  // For non-standard works, skip lost time validation
+  if (isNonStandardWork) {
+    return { isValid: true, errors: {} };
   }
 
   // If there's lost time, validate stages 2 and 3

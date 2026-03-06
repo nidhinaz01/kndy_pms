@@ -401,7 +401,7 @@
                 <!-- Uploaded Documents -->
                 {#if isSingle}
                   <!-- Single file - show current document -->
-                  {@const doc = status.documents[0]}
+                  {@const doc = status.documents?.[0]}
                   {#if doc}
                     <div class="mb-3 p-3 theme-bg-secondary rounded">
                       <div class="flex items-center justify-between">
@@ -621,10 +621,11 @@
         Document Type: <strong>{selectedTypeForNotRequired}</strong>
       </p>
       <div class="mb-4">
-        <label class="block text-sm font-medium theme-text-primary mb-2">
+        <label for="doc-not-required-comments" class="block text-sm font-medium theme-text-primary mb-2">
           Comments <span class="text-red-500">*</span>
         </label>
         <textarea
+          id="doc-not-required-comments"
           bind:value={notRequiredComments}
           placeholder="Please provide a reason why this document is not required..."
           class="w-full px-3 py-2 theme-bg-secondary theme-text-primary theme-border border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"

@@ -3,6 +3,8 @@ import { canPlanWork } from '$lib/api/production';
 import type { WorkPlanningStatus, WorkStatus } from '$lib/types/worksTable';
 import { parseUTCDate } from '$lib/utils/formatDate';
 
+const PAGE_SIZE = 1000;
+
 /**
  * Optimized batched version that groups works by work code and fetches all data in minimal queries
  */
@@ -136,29 +138,31 @@ export async function checkWorkStatus(
     if (orConditions.length > 0 && uniqueWoDetailsIds.size > 0) {
       // Fetch plans for selected date (filter by wo_details_id as well)
       if (dateStr) {
-        // Build query with wo_details_id filter and work code conditions
-        let query = supabase
-          .from('prdn_work_planning')
-          .select('id, derived_sw_code, other_work_code, wo_details_id, status, from_date, created_dt')
-          .eq('stage_code', stageCode)
-          .eq('from_date', dateStr)
-          .eq('is_deleted', false)
-          .eq('is_active', true)
-          .in('wo_details_id', Array.from(uniqueWoDetailsIds));
-        
-        // Apply work code filter
-        if (orConditions.length > 0) {
-          query = query.or(orConditions.join(','));
-        }
-        
-        const { data: datePlanningData, error: dateError } = await query;
+        let dateOffset = 0;
+        let dateHasMore = true;
+        while (dateHasMore) {
+          let query = supabase
+            .from('prdn_work_planning')
+            .select('id, derived_sw_code, other_work_code, wo_details_id, status, from_date, created_dt')
+            .eq('stage_code', stageCode)
+            .eq('from_date', dateStr)
+            .eq('is_deleted', false)
+            .eq('is_active', true)
+            .in('wo_details_id', Array.from(uniqueWoDetailsIds))
+            .order('id')
+            .range(dateOffset, dateOffset + PAGE_SIZE - 1);
+          if (orConditions.length > 0) {
+            query = query.or(orConditions.join(','));
+          }
+          const { data: datePlanningData, error: dateError } = await query;
 
-        if (dateError) {
-          console.error('Error fetching planning data for date:', dateError);
-        }
+          if (dateError) {
+            console.error('Error fetching planning data for date:', dateError);
+            break;
+          }
 
-        if (datePlanningData) {
-          datePlanningData.forEach(plan => {
+          if (datePlanningData && datePlanningData.length > 0) {
+            datePlanningData.forEach(plan => {
             const code = plan.derived_sw_code || plan.other_work_code;
             const woId = plan.wo_details_id;
             if (code && woId) {
@@ -170,31 +174,37 @@ export async function checkWorkStatus(
               planningDataMap.get(key)!.push(plan);
             }
           });
+          }
+          dateHasMore = (datePlanningData?.length ?? 0) === PAGE_SIZE;
+          dateOffset += PAGE_SIZE;
         }
       }
 
-      // Fetch plans for any date (filter by wo_details_id as well)
-      let anyDateQuery = supabase
-        .from('prdn_work_planning')
-        .select('id, derived_sw_code, other_work_code, wo_details_id, status, from_date, created_dt')
-        .eq('stage_code', stageCode)
-        .eq('is_deleted', false)
-        .eq('is_active', true)
-        .in('wo_details_id', Array.from(uniqueWoDetailsIds));
-      
-      // Apply work code filter
-      if (orConditions.length > 0) {
-        anyDateQuery = anyDateQuery.or(orConditions.join(','));
-      }
-      
-      const { data: anyDatePlanningData, error: anyDateError } = await anyDateQuery;
+      // Fetch plans for any date (paginated)
+      let anyDateOffset = 0;
+      let anyDateHasMore = true;
+      while (anyDateHasMore) {
+        let anyDateQuery = supabase
+          .from('prdn_work_planning')
+          .select('id, derived_sw_code, other_work_code, wo_details_id, status, from_date, created_dt')
+          .eq('stage_code', stageCode)
+          .eq('is_deleted', false)
+          .eq('is_active', true)
+          .in('wo_details_id', Array.from(uniqueWoDetailsIds))
+          .order('id')
+          .range(anyDateOffset, anyDateOffset + PAGE_SIZE - 1);
+        if (orConditions.length > 0) {
+          anyDateQuery = anyDateQuery.or(orConditions.join(','));
+        }
+        const { data: anyDatePlanningData, error: anyDateError } = await anyDateQuery;
 
-      if (anyDateError) {
-        console.error('Error fetching any date planning data:', anyDateError);
-      }
+        if (anyDateError) {
+          console.error('Error fetching any date planning data:', anyDateError);
+          break;
+        }
 
-      if (anyDatePlanningData) {
-        anyDatePlanningData.forEach(plan => {
+        if (anyDatePlanningData && anyDatePlanningData.length > 0) {
+          anyDatePlanningData.forEach(plan => {
           const code = plan.derived_sw_code || plan.other_work_code;
           const woId = plan.wo_details_id;
           if (code && woId) {
@@ -206,13 +216,16 @@ export async function checkWorkStatus(
             anyDatePlanningDataMap.get(key)!.push(plan);
           }
         });
+        }
+        anyDateHasMore = (anyDatePlanningData?.length ?? 0) === PAGE_SIZE;
+        anyDateOffset += PAGE_SIZE;
       }
     }
   } catch (error) {
     console.error('Error batch fetching planning data:', error);
   }
 
-  // Step 4: Batch fetch reporting data for all planning IDs
+  // Step 4: Batch fetch reporting data for all planning IDs (paginated)
   const allPlanningIds = Array.from(planningDataMap.values())
     .flat()
     .map(p => p.id)
@@ -221,14 +234,26 @@ export async function checkWorkStatus(
   let reportingDataMap = new Map<number, any[]>();
   if (allPlanningIds.length > 0) {
     try {
-      const { data: reportingData } = await supabase
-        .from('prdn_work_reporting')
-        .select('id, planning_id, created_dt, completion_status')
-        .in('planning_id', allPlanningIds)
-        .eq('is_deleted', false);
+      const allReportingData: any[] = [];
+      let reportOffset = 0;
+      let reportHasMore = true;
+      while (reportHasMore) {
+        const { data: reportingData } = await supabase
+          .from('prdn_work_reporting')
+          .select('id, planning_id, created_dt, completion_status')
+          .in('planning_id', allPlanningIds)
+          .eq('is_deleted', false)
+          .order('id')
+          .range(reportOffset, reportOffset + PAGE_SIZE - 1);
 
-      if (reportingData) {
-        reportingData.forEach(report => {
+        if (reportingData && reportingData.length > 0) {
+          allReportingData.push(...reportingData);
+        }
+        reportHasMore = (reportingData?.length ?? 0) === PAGE_SIZE;
+        reportOffset += PAGE_SIZE;
+      }
+      if (allReportingData.length > 0) {
+        allReportingData.forEach(report => {
           const planningId = report.planning_id;
           if (planningId) {
             if (!reportingDataMap.has(planningId)) {
@@ -407,7 +432,7 @@ export async function checkWorkStatus(
       }
     } catch (error) {
       console.error(`Error checking work status for ${workCode} (WO: ${woDetailsId}):`, error);
-      workStatus[workKey] = 'Yet to be planned';
+      workStatus[workKey] = 'To be planned';
     }
   }
 
@@ -528,31 +553,36 @@ export async function checkPlanningStatus(
     }
 
     if (orConditions.length > 0 && uniqueWoDetailsIds.size > 0) {
-      // Fetch the latest plan for each work code AND wo_details_id combination
-      const { data: planningData } = await supabase
-        .from('prdn_work_planning')
-        .select('id, derived_sw_code, other_work_code, wo_details_id, status, from_date, created_dt')
-        .eq('stage_code', stageCode)
-        .eq('is_active', true)
-        .eq('is_deleted', false)
-        .in('wo_details_id', Array.from(uniqueWoDetailsIds))
-        .or(orConditions.join(','))
-        .order('created_dt', { ascending: false });
+      const seenKeys = new Set<string>();
+      let lastOffset = 0;
+      let lastHasMore = true;
+      while (lastHasMore) {
+        const { data: planningData } = await supabase
+          .from('prdn_work_planning')
+          .select('id, derived_sw_code, other_work_code, wo_details_id, status, from_date, created_dt')
+          .eq('stage_code', stageCode)
+          .eq('is_active', true)
+          .eq('is_deleted', false)
+          .in('wo_details_id', Array.from(uniqueWoDetailsIds))
+          .or(orConditions.join(','))
+          .order('created_dt', { ascending: false })
+          .range(lastOffset, lastOffset + PAGE_SIZE - 1);
 
-      if (planningData) {
-        // Group by work code AND wo_details_id and take the first (latest) for each
-        const seenKeys = new Set<string>();
-        planningData.forEach(plan => {
-          const code = plan.derived_sw_code || plan.other_work_code;
-          const woId = plan.wo_details_id;
-          if (code && woId) {
-            const key = `${code}_${woId}`;
-            if (!seenKeys.has(key)) {
-              lastPlanningDataMap.set(key, plan);
-              seenKeys.add(key);
+        if (planningData && planningData.length > 0) {
+          planningData.forEach(plan => {
+            const code = plan.derived_sw_code || plan.other_work_code;
+            const woId = plan.wo_details_id;
+            if (code && woId) {
+              const key = `${code}_${woId}`;
+              if (!seenKeys.has(key)) {
+                lastPlanningDataMap.set(key, plan);
+                seenKeys.add(key);
+              }
             }
-          }
-        });
+          });
+        }
+        lastHasMore = (planningData?.length ?? 0) === PAGE_SIZE;
+        lastOffset += PAGE_SIZE;
       }
     }
   } catch (error) {

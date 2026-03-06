@@ -36,20 +36,32 @@
     showTraineeSelector = false;
   }
 
+  const TRAINEES_PAGE_SIZE = 1000;
+
   async function loadTrainees() {
     if (!stageCode) return;
     
     try {
-      const { data, error } = await supabase
-        .from('hr_emp')
-        .select('emp_id, emp_name, skill_short')
-        .eq('skill_short', 'T')
-        .eq('is_active', true)
-        .eq('is_deleted', false)
-        .order('emp_name');
+      const all: { emp_id: string; emp_name?: string; skill_short?: string }[] = [];
+      let offset = 0;
+      let hasMore = true;
+      while (hasMore) {
+        const { data, error } = await supabase
+          .from('hr_emp')
+          .select('emp_id, emp_name, skill_short')
+          .eq('skill_short', 'T')
+          .eq('is_active', true)
+          .eq('is_deleted', false)
+          .order('emp_name')
+          .range(offset, offset + TRAINEES_PAGE_SIZE - 1);
 
-      if (error) throw error;
-      availableTrainees = data || [];
+        if (error) throw error;
+        const page = data || [];
+        all.push(...page);
+        hasMore = page.length === TRAINEES_PAGE_SIZE;
+        offset += TRAINEES_PAGE_SIZE;
+      }
+      availableTrainees = all;
     } catch (error) {
       console.error('Error loading trainees:', error);
       alert('Error loading trainees');
@@ -269,10 +281,11 @@
             
             {#if showTraineeSelector && canAddTrainee}
               <div class="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg border theme-border">
-                <label class="block text-sm font-medium theme-text-primary mb-2">
+                <label for="add-trainees-modal-select" class="block text-sm font-medium theme-text-primary mb-2">
                   Select Trainee
                 </label>
                 <select
+                  id="add-trainees-modal-select"
                   class="w-full px-3 py-2 border theme-border rounded-lg theme-bg-primary theme-text-primary focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   on:change={(e) => {
                     const traineeId = (e.target as HTMLSelectElement).value;
@@ -341,10 +354,11 @@
               
               <!-- Deviation Reason Input -->
               <div>
-                <label class="block text-sm font-medium theme-text-primary mb-2">
+                <label for="add-trainees-modal-reason" class="block text-sm font-medium theme-text-primary mb-2">
                   Deviation Reason <span class="text-red-500">*</span>
                 </label>
                 <textarea
+                  id="add-trainees-modal-reason"
                   class="w-full px-3 py-2 border theme-border rounded-lg theme-bg-primary theme-text-primary focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
                   rows="3"
                   placeholder="Enter reason for adding trainees..."

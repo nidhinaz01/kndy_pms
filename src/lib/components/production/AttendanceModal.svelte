@@ -536,9 +536,9 @@
                 </div>
                 <!-- Hours Display (Planned for planning, Actual for reporting) -->
                 <div style="margin-bottom: 15px;">
-                  <label class="theme-text-primary" style="display: block; margin-bottom: 5px; font-weight: 500; font-size: 14px;">
+                  <span class="theme-text-primary" style="display: block; margin-bottom: 5px; font-weight: 500; font-size: 14px;">
                     {isPlanningMode ? 'Planned Hours:' : 'Actual Hours:'}
-                  </label>
+                  </span>
                   <div class="theme-bg-secondary theme-border rounded" style="padding: 10px;">
                     <span class="theme-text-primary font-medium">
                       {currentHours !== null ? `${currentHours.toFixed(2)}h` : 'Calculating...'}

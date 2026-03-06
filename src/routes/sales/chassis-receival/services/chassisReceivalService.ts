@@ -1,5 +1,33 @@
 import { supabase } from '$lib/supabaseClient';
 
+const PAGE_SIZE = 1000;
+
+async function fetchAllPages<T>(
+  table: string,
+  select: string,
+  orderBy: { column: string; ascending: boolean },
+  extraFilters?: (q: any) => any
+): Promise<T[]> {
+  const allRows: T[] = [];
+  let offset = 0;
+  let hasMore = true;
+  while (hasMore) {
+    let query: any = supabase
+      .from(table)
+      .select(select)
+      .order(orderBy.column, { ascending: orderBy.ascending });
+    if (extraFilters) query = extraFilters(query);
+    query = query.range(offset, offset + PAGE_SIZE - 1);
+    const { data, error } = await query;
+    if (error) throw error;
+    const page = data || [];
+    allRows.push(...(page as T[]));
+    hasMore = page.length === PAGE_SIZE;
+    offset += PAGE_SIZE;
+  }
+  return allRows;
+}
+
 export interface WorkOrderWithChassisArrival {
   id: string;
   wo_no: string;
@@ -16,54 +44,59 @@ export interface WorkOrderWithChassisArrival {
 
 export async function loadWorkOrders(): Promise<WorkOrderWithChassisArrival[]> {
   try {
-    // Load all work orders
-    const { data: woData, error: woError } = await supabase
-      .from('prdn_wo_details')
-      .select('*')
-      .order('wo_date', { ascending: false });
+    // Load all work orders (paginated to avoid 1000-row limit)
+    const woData = await fetchAllPages<Record<string, unknown>>(
+      'prdn_wo_details',
+      '*',
+      { column: 'wo_date', ascending: false }
+    );
 
-    if (woError) throw woError;
+    // Load all production dates (paginated to avoid 1000-row limit)
+    const datesData = await fetchAllPages<Record<string, unknown>>(
+      'prdn_dates',
+      '*',
+      { column: 'planned_date', ascending: true }
+    );
 
-    // Load all production dates
-    const { data: datesData, error: datesError } = await supabase
-      .from('prdn_dates')
-      .select('*')
-      .order('planned_date', { ascending: true });
-
-    if (datesError) throw datesError;
-
-    // Load existing chassis receival records
-    const { data: inspectionData, error: inspectionError } = await supabase
-      .from('sales_chassis_receival_records')
-      .select('*')
-      .eq('is_deleted', false);
-
-    if (inspectionError) throw inspectionError;
+    // Load existing chassis receival records (paginated to avoid 1000-row limit)
+    const inspectionData = await fetchAllPages<Record<string, unknown>>(
+      'sales_chassis_receival_records',
+      '*',
+      { column: 'id', ascending: true },
+      (q) => q.eq('is_deleted', false)
+    );
 
     // Filter work orders that have planned chassis arrival dates
-    const workOrdersWithChassisArrival = (woData || []).filter(workOrder => {
-      const woDates = (datesData || []).filter(d => d.sales_order_id === workOrder.id);
-      const chassisArrival = woDates.find(d => d.date_type === 'chassis_arrival');
+    const workOrdersWithChassisArrival = (woData || []).filter((workOrder: any) => {
+      const woDates = (datesData || []).filter((d: any) => d.sales_order_id === workOrder.id);
+      const chassisArrival = woDates.find((d: any) => d.date_type === 'chassis_arrival');
       
       // Has planned chassis arrival date
       return chassisArrival?.planned_date;
     });
 
     // Attach chassis arrival date and ongoing inspection status to each work order for display
-    const allWorkOrders = workOrdersWithChassisArrival.map(workOrder => {
-      const woDates = (datesData || []).filter(d => d.sales_order_id === workOrder.id);
-      const chassisArrival = woDates.find(d => d.date_type === 'chassis_arrival');
+    const allWorkOrders: WorkOrderWithChassisArrival[] = workOrdersWithChassisArrival.map((workOrder: any) => {
+      const woDates = (datesData || []).filter((d: any) => d.sales_order_id === workOrder.id);
+      const chassisArrival = woDates.find((d: any) => d.date_type === 'chassis_arrival');
       
       // Check if there's an ongoing inspection for this work order
-      const ongoingInspection = (inspectionData || []).find(ins => 
+      const ongoingInspection = (inspectionData || []).find((ins: any) => 
         ins.sales_order_id === workOrder.id && 
         ins.inspection_status === 'ongoing'
       );
       
       return {
-        ...workOrder,
+        id: workOrder.id,
+        wo_no: workOrder.wo_no,
+        pwo_no: workOrder.pwo_no,
+        wo_type: workOrder.wo_type,
+        wo_model: workOrder.wo_model,
+        wo_chassis: workOrder.wo_chassis,
+        wheel_base: workOrder.wheel_base,
+        customer_name: workOrder.customer_name,
         chassisArrival: chassisArrival,
-        chassisArrivalDate: chassisArrival?.planned_date,
+        chassisArrivalDate: chassisArrival?.planned_date as string | undefined,
         hasOngoingInspection: !!ongoingInspection
       };
     });

@@ -162,11 +162,11 @@
   }
 
   // Auto-adjust adjacent versions when dates change
-  async function handleDateChange(field: 'wef_date' | 'wef_time' | 'wet_date' | 'wet_time', value: string) {
+  async function handleDateChange(field: 'wef_date' | 'wef_time' | 'wet_date' | 'wet_time', value: string | null) {
     if (!editingVersion || !selectedVersion) return;
 
-    const oldValue = editingVersion[field];
-    editingVersion[field] = value;
+    const oldValue = editingVersion[field] as string | null | undefined;
+    editingVersion[field] = value as any;
 
     // Check if we need to auto-adjust
     const currentIndex = versions.findIndex(v => v.id === selectedVersion?.id);
@@ -204,7 +204,7 @@
         }
       } else {
         // Revert change
-        editingVersion[field] = oldValue;
+        editingVersion[field] = oldValue as any;
         return;
       }
     }
@@ -547,9 +547,13 @@
           {:else}
             <div class="space-y-2">
               {#each versions as version (version.id)}
+                <!-- svelte-ignore a11y-click-events-have-key-events a11y-no-static-element-interactions -->
                 <div
                   class="p-3 rounded-lg border theme-border cursor-pointer transition-colors {selectedVersion?.id === version.id ? 'bg-blue-100 dark:bg-blue-900/30 border-blue-300 dark:border-blue-700' : 'hover:bg-gray-50 dark:hover:bg-gray-700/50'}"
+                  role="button"
+                  tabindex="0"
                   on:click={() => selectVersion(version)}
+                  on:keydown={(e) => e.key === 'Enter' && selectVersion(version)}
                 >
                   <div class="flex items-start justify-between">
                     <div class="flex-1">
@@ -603,20 +607,22 @@
               
               <div class="grid grid-cols-2 gap-4">
                 <div>
-                  <label class="block text-sm font-medium theme-text-primary mb-2">
+                  <label for="new-wef-date" class="block text-sm font-medium theme-text-primary mb-2">
                     Start Date *
                   </label>
                   <input
+                    id="new-wef-date"
                     type="date"
                     bind:value={newVersionData.wef_date}
                     class="w-full px-3 py-2 border theme-border rounded-lg theme-bg-primary theme-text-primary"
                   />
                 </div>
                 <div>
-                  <label class="block text-sm font-medium theme-text-primary mb-2">
+                  <label for="new-wef-time" class="block text-sm font-medium theme-text-primary mb-2">
                     Start Time *
                   </label>
                   <input
+                    id="new-wef-time"
                     type="time"
                     step="1"
                     bind:value={newVersionData.wef_time}
@@ -624,10 +630,11 @@
                   />
                 </div>
                 <div>
-                  <label class="block text-sm font-medium theme-text-primary mb-2">
+                  <label for="new-rate-per-hour" class="block text-sm font-medium theme-text-primary mb-2">
                     Rate per Hour (₹) *
                   </label>
                   <input
+                    id="new-rate-per-hour"
                     type="number"
                     bind:value={newVersionData.rate_per_hour}
                     min="0"
@@ -636,10 +643,11 @@
                   />
                 </div>
                 <div>
-                  <label class="block text-sm font-medium theme-text-primary mb-2">
+                  <label for="new-min-salary" class="block text-sm font-medium theme-text-primary mb-2">
                     Min Salary (₹) *
                   </label>
                   <input
+                    id="new-min-salary"
                     type="number"
                     bind:value={newVersionData.min_salary}
                     min="0"
@@ -648,10 +656,11 @@
                   />
                 </div>
                 <div>
-                  <label class="block text-sm font-medium theme-text-primary mb-2">
+                  <label for="new-max-salary" class="block text-sm font-medium theme-text-primary mb-2">
                     Max Salary (₹) *
                   </label>
                   <input
+                    id="new-max-salary"
                     type="number"
                     bind:value={newVersionData.max_salary}
                     min="0"
@@ -687,10 +696,11 @@
               <!-- Read-only fields -->
               <div class="grid grid-cols-2 gap-4">
                 <div>
-                  <label class="block text-sm font-medium theme-text-primary mb-2">
+                  <label for="edit-skill-name" class="block text-sm font-medium theme-text-primary mb-2">
                     Skill Name
                   </label>
                   <input
+                    id="edit-skill-name"
                     type="text"
                     value={skillName}
                     disabled
@@ -698,10 +708,11 @@
                   />
                 </div>
                 <div>
-                  <label class="block text-sm font-medium theme-text-primary mb-2">
+                  <label for="edit-skill-code" class="block text-sm font-medium theme-text-primary mb-2">
                     Skill Code
                   </label>
                   <input
+                    id="edit-skill-code"
                     type="text"
                     value={skillShort}
                     disabled
@@ -713,49 +724,53 @@
               <!-- Date/Time fields -->
               <div class="grid grid-cols-2 gap-4">
                 <div>
-                  <label class="block text-sm font-medium theme-text-primary mb-2">
+                  <label for="edit-wef-date" class="block text-sm font-medium theme-text-primary mb-2">
                     Start Date *
                   </label>
                   <input
+                    id="edit-wef-date"
                     type="date"
                     value={editingVersion.wef_date || ''}
-                    on:change={(e) => handleDateChange('wef_date', e.target.value)}
+                    on:change={(e) => handleDateChange('wef_date', (e.target as HTMLInputElement).value)}
                     class="w-full px-3 py-2 border theme-border rounded-lg theme-bg-primary theme-text-primary"
                   />
                 </div>
                 <div>
-                  <label class="block text-sm font-medium theme-text-primary mb-2">
+                  <label for="edit-wef-time" class="block text-sm font-medium theme-text-primary mb-2">
                     Start Time *
                   </label>
                   <input
+                    id="edit-wef-time"
                     type="time"
                     step="1"
                     value={editingVersion.wef_time || '00:00:00'}
-                    on:change={(e) => handleDateChange('wef_time', e.target.value)}
+                    on:change={(e) => handleDateChange('wef_time', (e.target as HTMLInputElement).value)}
                     class="w-full px-3 py-2 border theme-border rounded-lg theme-bg-primary theme-text-primary"
                   />
                 </div>
                 <div>
-                  <label class="block text-sm font-medium theme-text-primary mb-2">
+                  <label for="edit-wet-date" class="block text-sm font-medium theme-text-primary mb-2">
                     End Date
                   </label>
                   <input
+                    id="edit-wet-date"
                     type="date"
                     value={editingVersion.wet_date || ''}
-                    on:change={(e) => handleDateChange('wet_date', e.target.value || null)}
+                    on:change={(e) => handleDateChange('wet_date', (e.target as HTMLInputElement).value || null)}
                     class="w-full px-3 py-2 border theme-border rounded-lg theme-bg-primary theme-text-primary"
                   />
                   <p class="text-xs theme-text-secondary mt-1">Leave empty for active version</p>
                 </div>
                 <div>
-                  <label class="block text-sm font-medium theme-text-primary mb-2">
+                  <label for="edit-wet-time" class="block text-sm font-medium theme-text-primary mb-2">
                     End Time
                   </label>
                   <input
+                    id="edit-wet-time"
                     type="time"
                     step="1"
                     value={editingVersion.wet_time || '23:59:59'}
-                    on:change={(e) => handleDateChange('wet_time', e.target.value || null)}
+                    on:change={(e) => handleDateChange('wet_time', (e.target as HTMLInputElement).value || null)}
                     disabled={!editingVersion.wet_date}
                     class="w-full px-3 py-2 border theme-border rounded-lg theme-bg-primary theme-text-primary disabled:opacity-50"
                   />
@@ -765,39 +780,42 @@
               <!-- Rate and Salary fields -->
               <div class="grid grid-cols-3 gap-4">
                 <div>
-                  <label class="block text-sm font-medium theme-text-primary mb-2">
+                  <label for="edit-rate-per-hour" class="block text-sm font-medium theme-text-primary mb-2">
                     Rate per Hour (₹) *
                   </label>
                   <input
+                    id="edit-rate-per-hour"
                     type="number"
                     value={editingVersion.rate_per_hour || ''}
-                    on:input={(e) => handleFieldChange('rate_per_hour', Number(e.target.value))}
+                    on:input={(e) => handleFieldChange('rate_per_hour', Number((e.target as HTMLInputElement).value))}
                     min="0"
                     step="0.01"
                     class="w-full px-3 py-2 border theme-border rounded-lg theme-bg-primary theme-text-primary"
                   />
                 </div>
                 <div>
-                  <label class="block text-sm font-medium theme-text-primary mb-2">
+                  <label for="edit-min-salary" class="block text-sm font-medium theme-text-primary mb-2">
                     Min Salary (₹) *
                   </label>
                   <input
+                    id="edit-min-salary"
                     type="number"
                     value={editingVersion.min_salary || ''}
-                    on:input={(e) => handleFieldChange('min_salary', Number(e.target.value))}
+                    on:input={(e) => handleFieldChange('min_salary', Number((e.target as HTMLInputElement).value))}
                     min="0"
                     step="0.01"
                     class="w-full px-3 py-2 border theme-border rounded-lg theme-bg-primary theme-text-primary"
                   />
                 </div>
                 <div>
-                  <label class="block text-sm font-medium theme-text-primary mb-2">
+                  <label for="edit-max-salary" class="block text-sm font-medium theme-text-primary mb-2">
                     Max Salary (₹) *
                   </label>
                   <input
+                    id="edit-max-salary"
                     type="number"
                     value={editingVersion.max_salary || ''}
-                    on:input={(e) => handleFieldChange('max_salary', Number(e.target.value))}
+                    on:input={(e) => handleFieldChange('max_salary', Number((e.target as HTMLInputElement).value))}
                     min="0"
                     step="0.01"
                     class="w-full px-3 py-2 border theme-border rounded-lg theme-bg-primary theme-text-primary"

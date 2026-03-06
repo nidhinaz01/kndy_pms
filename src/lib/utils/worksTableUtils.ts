@@ -102,7 +102,7 @@ export function enrichWorkData(work: any): any {
       duration = work.skill_time_standards.values[0].standard_time_minutes;
     } else if (work.skill_time_standards.values.length > 0) {
       // Different values, use the maximum (or could use sum depending on requirement)
-      duration = Math.max(...work.skill_time_standards.values.map(v => v.standard_time_minutes));
+      duration = Math.max(...work.skill_time_standards.values.map((v: any) => v.standard_time_minutes));
     }
   }
   

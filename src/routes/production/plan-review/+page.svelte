@@ -815,10 +815,11 @@
       
       {#if approvalAction === 'reject'}
         <div class="mb-4">
-          <label class="block text-sm font-medium theme-text-primary mb-2">
+          <label for="plan-review-rejection-reason" class="block text-sm font-medium theme-text-primary mb-2">
             Reason for Rejection <span class="text-red-500">*</span>
           </label>
           <textarea
+            id="plan-review-rejection-reason"
             bind:value={rejectionReason}
             rows="4"
             placeholder="Enter reason for rejection..."

@@ -149,12 +149,12 @@
         selectedStage,
         selectedWorkOrderId,
         'standard',
+        currentUser,
         {
           derived_sw_code: selectedDerivedSwCode,
           addition_reason: additionReason.trim()
         },
-        undefined,
-        currentUser
+        undefined
       );
 
       if (result.success) {

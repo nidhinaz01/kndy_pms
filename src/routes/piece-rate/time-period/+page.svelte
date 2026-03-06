@@ -37,17 +37,29 @@
     await loadEmployees();
   });
 
+  const EMPLOYEES_PAGE_SIZE = 1000;
+
   async function loadEmployees() {
     try {
-      const { data, error } = await supabase
-        .from('hr_emp')
-        .select('emp_id, emp_name, skill_short')
-        .eq('is_deleted', false)
-        .eq('is_active', true)
-        .order('emp_name');
+      const all: { emp_id: string; emp_name?: string; skill_short?: string }[] = [];
+      let offset = 0;
+      let hasMore = true;
+      while (hasMore) {
+        const { data, error } = await supabase
+          .from('hr_emp')
+          .select('emp_id, emp_name, skill_short')
+          .eq('is_deleted', false)
+          .eq('is_active', true)
+          .order('emp_name')
+          .range(offset, offset + EMPLOYEES_PAGE_SIZE - 1);
 
-      if (error) throw error;
-      employees = data || [];
+        if (error) throw error;
+        const page = data || [];
+        all.push(...page);
+        hasMore = page.length === EMPLOYEES_PAGE_SIZE;
+        offset += EMPLOYEES_PAGE_SIZE;
+      }
+      employees = all;
     } catch (error) {
       console.error('Error loading employees:', error);
       alert('Error loading employees');
@@ -221,10 +233,11 @@
       <div class="theme-bg-secondary rounded-lg shadow border theme-border p-6 mb-6">
         <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div>
-            <label class="block text-sm font-medium theme-text-primary mb-2">
+            <label for="piece-rate-employee" class="block text-sm font-medium theme-text-primary mb-2">
               Employee <span class="text-red-500">*</span>
             </label>
             <select
+              id="piece-rate-employee"
               bind:value={selectedEmployeeId}
               class="w-full px-3 py-2 theme-border border rounded-md theme-bg-primary theme-text-primary focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
@@ -239,10 +252,11 @@
           </div>
 
           <div>
-            <label class="block text-sm font-medium theme-text-primary mb-2">
+            <label for="piece-rate-from-date" class="block text-sm font-medium theme-text-primary mb-2">
               From Date <span class="text-red-500">*</span>
             </label>
             <input
+              id="piece-rate-from-date"
               type="date"
               bind:value={fromDate}
               class="w-full px-3 py-2 theme-border border rounded-md theme-bg-primary theme-text-primary focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -250,10 +264,11 @@
           </div>
 
           <div>
-            <label class="block text-sm font-medium theme-text-primary mb-2">
+            <label for="piece-rate-to-date" class="block text-sm font-medium theme-text-primary mb-2">
               To Date <span class="text-red-500">*</span>
             </label>
             <input
+              id="piece-rate-to-date"
               type="date"
               bind:value={toDate}
               class="w-full px-3 py-2 theme-border border rounded-md theme-bg-primary theme-text-primary focus:outline-none focus:ring-2 focus:ring-blue-500"

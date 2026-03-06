@@ -102,9 +102,9 @@ export async function savePlannedAttendance(
 
     // If absent, clear time/hours fields
     if (attendanceStatus === 'absent') {
-      plannedHours = null;
-      fromTime = null;
-      toTime = null;
+      plannedHours = undefined;
+      fromTime = undefined;
+      toTime = undefined;
     } else {
       // For present employees, get full shift hours if not provided
       if (plannedHours === undefined || plannedHours === null) {
@@ -429,9 +429,9 @@ export async function saveReportedManpower(
 
     // If absent, clear time/hours fields
     if (attendanceStatus === 'absent') {
-      actualHours = null;
-      fromTime = null;
-      toTime = null;
+      actualHours = undefined;
+      fromTime = undefined;
+      toTime = undefined;
     } else {
       // For present employees, get full shift hours if not provided
       if (actualHours === undefined || actualHours === null) {

@@ -120,7 +120,7 @@ async function calculateStandardWorkPieceRate(
     // Find the skill mapping that matches this sc_required
     // sc_required is the skill combination name (e.g., "SS", "US", "SS+US")
     // We need to find the skill combination and get the individual skills
-    const skillCombination = skillMapping?.std_skill_combinations?.skill_combination;
+    const skillCombination = (skillMapping as any)?.std_skill_combinations?.skill_combination;
     if (!skillCombination || !Array.isArray(skillCombination)) {
       return { success: false, error: 'Skill combination not found for this work' };
     }

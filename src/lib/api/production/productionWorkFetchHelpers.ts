@@ -41,7 +41,7 @@ export async function getActiveWorkOrders(stage: string) {
 export async function getWorkStatuses(stage: string, activeWorkOrderIds: number[]) {
   try {
     if (activeWorkOrderIds.length === 0) {
-      return { workStatusMap: new Map(), uniqueDerivedSwCodes: new Set(), uniqueOtherWorkCodes: new Set(), uniqueWoModels: new Set(), otherWorkCodeToStatusMap: new Map() };
+      return { workStatusMap: new Map<number, any[]>(), uniqueDerivedSwCodes: new Set<string>(), uniqueOtherWorkCodes: new Set<string>(), uniqueWoModels: new Set<string>(), otherWorkCodeToStatusMap: new Map<string, { woId: number; workStatus: any }>() };
     }
 
     const { data, error } = await supabase.rpc('get_work_statuses_with_codes', {
@@ -56,7 +56,7 @@ export async function getWorkStatuses(stage: string, activeWorkOrderIds: number[
 
     if (!data || !data.workStatuses || data.workStatuses.length === 0) {
       console.log(`📭 No works found in prdn_work_status for stage ${stage}`);
-      return { workStatusMap: new Map(), uniqueDerivedSwCodes: new Set(), uniqueOtherWorkCodes: new Set(), uniqueWoModels: new Set(), otherWorkCodeToStatusMap: new Map() };
+      return { workStatusMap: new Map<number, any[]>(), uniqueDerivedSwCodes: new Set<string>(), uniqueOtherWorkCodes: new Set<string>(), uniqueWoModels: new Set<string>(), otherWorkCodeToStatusMap: new Map<string, { woId: number; workStatus: any }>() };
     }
 
     const workStatuses = data.workStatuses as any[];

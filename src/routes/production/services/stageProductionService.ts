@@ -3,6 +3,8 @@
  */
 
 import { supabase } from '$lib/supabaseClient';
+
+const PAGE_SIZE = 1000;
 import { fetchProductionEmployees, fetchProductionWorks, fetchWorkPlanning } from '$lib/api/production';
 import type { ProductionEmployee, ProductionWork } from '$lib/api/production';
 
@@ -197,34 +199,12 @@ export async function loadStageWorkOrders(
   try {
     console.log(`🔍 Loading work orders for ${stageCode} on date: ${date}`);
     
-    // Get all prdn_dates records for the stage (both entry and exit)
-    const { data: stageDates, error: datesError } = await supabase
-      .from('prdn_dates')
-      .select(`
-        *,
-        prdn_wo_details!inner(
-          id,
-          wo_no,
-          wo_model,
-          customer_name,
-          pwo_no
-        )
-      `)
-      .eq('stage_code', stageCode)
-      .order('planned_date', { ascending: true });
-
-    if (datesError) {
-      console.error('Error loading work orders data:', datesError);
-      throw datesError;
-    }
-
-    // Get unique sales_order_ids from stage dates
-    const salesOrderIds = [...new Set((stageDates || []).map(d => d.sales_order_id))];
-
-    // Fetch rnd_documents dates for these work orders (stage_code = null)
-    let rndDocumentsDates: any[] = [];
-    if (salesOrderIds.length > 0) {
-      const { data: rndDates, error: rndError } = await supabase
+    // Get all prdn_dates records for the stage (paginated to avoid 1000-row limit)
+    const stageDates: any[] = [];
+    let offset = 0;
+    let hasMore = true;
+    while (hasMore) {
+      const { data: page, error: datesError } = await supabase
         .from('prdn_dates')
         .select(`
           *,
@@ -236,19 +216,60 @@ export async function loadStageWorkOrders(
             pwo_no
           )
         `)
-        .eq('date_type', 'rnd_documents')
-        .is('stage_code', null)
-        .in('sales_order_id', salesOrderIds);
+        .eq('stage_code', stageCode)
+        .order('planned_date', { ascending: true })
+        .range(offset, offset + PAGE_SIZE - 1);
 
-      if (rndError) {
-        console.warn('Error loading rnd_documents dates:', rndError);
-      } else {
-        rndDocumentsDates = rndDates || [];
+      if (datesError) {
+        console.error('Error loading work orders data:', datesError);
+        throw datesError;
+      }
+      const rows = page || [];
+      stageDates.push(...rows);
+      hasMore = rows.length === PAGE_SIZE;
+      offset += PAGE_SIZE;
+    }
+
+    // Get unique sales_order_ids from stage dates
+    const salesOrderIds = [...new Set(stageDates.map(d => d.sales_order_id))];
+
+    // Fetch rnd_documents dates for these work orders (paginated to avoid 1000-row limit)
+    let rndDocumentsDates: any[] = [];
+    if (salesOrderIds.length > 0) {
+      let rndOffset = 0;
+      let rndHasMore = true;
+      while (rndHasMore) {
+        const { data: rndDates, error: rndError } = await supabase
+          .from('prdn_dates')
+          .select(`
+            *,
+            prdn_wo_details!inner(
+              id,
+              wo_no,
+              wo_model,
+              customer_name,
+              pwo_no
+            )
+          `)
+          .eq('date_type', 'rnd_documents')
+          .is('stage_code', null)
+          .in('sales_order_id', salesOrderIds)
+          .order('planned_date', { ascending: true })
+          .range(rndOffset, rndOffset + PAGE_SIZE - 1);
+
+        if (rndError) {
+          console.warn('Error loading rnd_documents dates:', rndError);
+          break;
+        }
+        const rows = rndDates || [];
+        rndDocumentsDates.push(...rows);
+        rndHasMore = rows.length === PAGE_SIZE;
+        rndOffset += PAGE_SIZE;
       }
     }
 
     // Combine stage dates and rnd_documents dates
-    const allDates = [...(stageDates || []), ...rndDocumentsDates];
+    const allDates = [...stageDates, ...rndDocumentsDates];
 
     // Group dates by sales_order_id to get complete work order information
     const workOrderMap = new Map();
@@ -402,9 +423,7 @@ export async function loadStagePlannedWorks(
 ): Promise<any[]> {
   try {
     // Ensure date is in YYYY-MM-DD format for the query
-    const dateStr = date instanceof Date 
-      ? date.toISOString().split('T')[0]
-      : date.split('T')[0];
+    const dateStr = date.split('T')[0];
     
     const plannedWorks = await fetchWorkPlanning(stageCode, dateStr, status);
     console.log(`📋 Loaded ${plannedWorks.length} planned works for ${stageCode} on ${dateStr}${status ? ` with status ${status}` : ''}`);

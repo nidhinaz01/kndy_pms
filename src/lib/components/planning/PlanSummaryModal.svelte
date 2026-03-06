@@ -23,6 +23,8 @@
 
   // State
   let isLoading = false;
+  let isSaving = false; // True after insert succeeds, until parent closes modal (prevents closing during loadData)
+  let isAlreadyPlannedError = false; // True when work order already has a plan (show message + Close, not Try Again)
   let error = '';
   let holidays: any[] = [];
   let stageDates: Array<{
@@ -138,6 +140,7 @@
     try {
       isLoading = true;
       error = '';
+      isAlreadyPlannedError = false;
 
       // Validate date-time combination
       if (!validateDateTimeCombination()) {
@@ -151,6 +154,24 @@
         return;
       }
 
+      // Check for existing plan: do not insert again if this work order already has prdn_dates
+      const { data: existingDates, error: fetchError } = await supabase
+        .from('prdn_dates')
+        .select('id')
+        .eq('sales_order_id', workOrder.id)
+        .limit(1);
+
+      if (fetchError) {
+        throw new Error(`Could not check existing plan: ${fetchError.message}`);
+      }
+      if (existingDates && existingDates.length > 0) {
+        error = 'This work order already has a production plan. The list is being updated. Please close this dialog to see the updated list.';
+        isAlreadyPlannedError = true;
+        dispatch('refreshRequested');
+        isLoading = false;
+        return;
+      }
+
       // Get current username (throws error if not found)
       const { getCurrentUsername, getCurrentTimestamp } = await import('$lib/utils/userUtils');
       const username = getCurrentUsername();
@@ -159,7 +180,16 @@
       // Save all dates to prdn_dates table
       // Use productionEntryTime if available (for past entries), otherwise use selectedSlot.time
       const entryTime = calculatedDates.productionEntryTime || selectedSlot?.time;
-      const datesToSave = [
+      const datesToSave: Array<{
+        sales_order_id: number;
+        date_type: string;
+        planned_date: string;
+        stage_code: string | null;
+        created_by: string;
+        created_dt: string;
+        modified_by: string;
+        modified_dt: string;
+      }> = [
         // Chassis arrival - using same time as production entry
         {
           sales_order_id: workOrder.id,
@@ -285,26 +315,29 @@
         throw new Error(`Error saving dates: ${insertError.message}`);
       }
 
-      // Dispatch success event
+      // Keep modal open with "Saving..." until parent runs loadData() and closes us
+      isSaving = true;
       dispatch('saved', {
         workOrder,
         selectedSlot,
         calculatedDates,
         stageDates
       });
-
-      closeModal();
+      // Do not call closeModal() — parent will close after loadData() completes
 
     } catch (err) {
       console.error('Error saving plan:', err as Error);
       error = (err as Error).message || 'Failed to save production plan';
     } finally {
-      isLoading = false;
+      if (!isSaving) {
+        isLoading = false;
+      }
     }
   }
 
   function closeModal() {
     error = '';
+    isAlreadyPlannedError = false;
     dispatch('close');
   }
 
@@ -393,7 +426,9 @@
         <h2 class="text-2xl font-bold {textPrimary}">Production Plan Summary</h2>
         <button
           on:click={closeModal}
-          class="p-2 {isDark ? 'hover:bg-slate-700' : 'hover:bg-gray-100'} rounded-lg transition-colors duration-200"
+          disabled={isSaving}
+          class="p-2 {isDark ? 'hover:bg-slate-700' : 'hover:bg-gray-100'} rounded-lg transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+          title={isSaving ? 'Please wait...' : 'Close'}
         >
           <X class="w-6 h-6 {textSecondary}" />
         </button>
@@ -429,7 +464,15 @@
         </div>
 
         <!-- Loading State -->
-        {#if isLoading}
+        {#if isSaving}
+          <div class="flex items-center justify-center h-64">
+            <div class="text-center">
+              <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+              <p class="{textPrimary} font-medium">Saving your plan and updating the list...</p>
+              <p class="text-sm {textSecondary} mt-2">Please wait. This dialog will close automatically.</p>
+            </div>
+          </div>
+        {:else if isLoading}
           <div class="flex items-center justify-center h-64">
             <div class="text-center">
               <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
@@ -442,9 +485,15 @@
               <AlertCircle class="w-12 h-12 mx-auto mb-2" />
               <p class="text-lg font-medium {textPrimary}">{error}</p>
             </div>
-            <Button variant="primary" on:click={loadStageDates}>
-              Try Again
-            </Button>
+            {#if isAlreadyPlannedError}
+              <Button variant="primary" on:click={closeModal}>
+                Close
+              </Button>
+            {:else}
+              <Button variant="primary" on:click={loadStageDates}>
+                Try Again
+              </Button>
+            {/if}
           </div>
         {:else}
           <!-- Calculated Dates -->
@@ -564,19 +613,25 @@
 
       <!-- Footer -->
       <div class="flex items-center justify-between p-6 border-t {borderColor} {bgPrimary}">
-        <Button variant="secondary" on:click={() => dispatch('back')}>
+        <Button variant="secondary" on:click={() => dispatch('back')} disabled={isSaving}>
           Back
         </Button>
         <div class="flex space-x-3">
-          <Button variant="secondary" on:click={closeModal}>
+          <Button variant="secondary" on:click={closeModal} disabled={isSaving}>
             Cancel
           </Button>
           <Button 
             variant="primary" 
             on:click={handleSave}
-            disabled={isLoading}
+            disabled={isLoading || isSaving}
           >
-            {isLoading ? 'Saving...' : 'Save Production Plan'}
+            {#if isSaving}
+              Saving...
+            {:else if isLoading}
+              Saving...
+            {:else}
+              Save Production Plan
+            {/if}
           </Button>
         </div>
       </div>

@@ -346,7 +346,7 @@ export async function fetchProductionEmployees(
         // Handle potential duplicate attendance records (if employee was marked in multiple stages)
         // Take the most recent one, or first one if created_dt is not available
         const attendanceMap = new Map<string, any>();
-        (attendanceDataResult || []).forEach(record => {
+        (attendanceDataResult || []).forEach((record: any) => {
           if (record.emp_id) {
             const existing = attendanceMap.get(record.emp_id);
             if (!existing) {

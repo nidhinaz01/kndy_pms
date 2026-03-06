@@ -191,7 +191,7 @@ export function groupPlannedWorks(plannedWorks: any[]): Record<string, any> {
     return (h || 0) * 60 + (m || 0);
   }
 
-  const groupEntries = Object.entries(groups);
+  const groupEntries = Object.entries(groups) as [string, any][];
   groupEntries.sort((a, b) => {
     const [, ga] = a;
     const [, gb] = b;
@@ -332,7 +332,7 @@ export function groupReportWorks(reportData: any[]): Record<string, any> {
     const [h, m] = parts;
     return (h || 0) * 60 + (m || 0);
   }
-  const groupEntries = Object.entries(groups);
+  const groupEntries = Object.entries(groups) as [string, any][];
   groupEntries.sort((a, b) => {
     const [, ga] = a; const [, gb] = b;
     const codeA: string = ga.workCode || '';

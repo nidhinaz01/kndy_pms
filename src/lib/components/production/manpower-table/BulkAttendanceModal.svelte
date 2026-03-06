@@ -146,7 +146,8 @@
 </script>
 
 {#if showModal}
-  <div class="fixed inset-0 bg-black bg-opacity-50 z-1000 flex items-center justify-center" on:click={onClose}>
+  <!-- svelte-ignore a11y-click-events-have-key-events a11y-no-static-element-interactions -->
+  <div class="fixed inset-0 bg-black bg-opacity-50 z-1000 flex items-center justify-center" role="dialog" aria-modal="true" tabindex="-1" on:click={onClose}>
     <div class="theme-bg-primary theme-border rounded-lg shadow-lg p-5 min-w-[500px] max-w-[600px]" on:click|stopPropagation>
       <div class="flex items-center mb-5">
         <div class="bg-blue-500 rounded-full w-10 h-10 flex items-center justify-center mr-4">
@@ -234,9 +235,9 @@
             </div>
             <!-- Planned Hours Display -->
             <div class="mb-4">
-              <label class="block text-sm font-medium theme-text-primary mb-2">
+              <span class="block text-sm font-medium theme-text-primary mb-2">
                 Planned Hours:
-              </label>
+              </span>
               <div class="theme-bg-secondary theme-border rounded-lg p-3">
                 <span class="theme-text-primary font-medium">
                   {plannedHours !== null ? `${plannedHours.toFixed(2)}h` : 'Calculating...'}

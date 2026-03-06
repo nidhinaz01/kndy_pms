@@ -3,6 +3,11 @@
 export interface WorkPlanningStatus {
   canPlan: boolean;
   reason?: string;
+  lastPlan?: {
+    status: string;
+    from_date: string;
+    [key: string]: any;
+  };
 }
 
 export type WorkStatus = 'To be planned' | 'Draft Plan' | 'Plan Pending Approval' | 'Planned' | 'In progress' | 'Completed';

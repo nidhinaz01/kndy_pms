@@ -42,9 +42,7 @@ export async function loadWorksData(stageCode: string, selectedDate: string) {
  */
 async function loadStagePlannedWorksWithCancelled(stageCode: string, date: string): Promise<any[]> {
   try {
-    const dateStr = date instanceof Date 
-      ? date.toISOString().split('T')[0]
-      : date.split('T')[0];
+    const dateStr = date.split('T')[0];
     
     // Fetch cancelled works (is_deleted=true, status='cancelled')
     const { data, error } = await supabase

@@ -149,7 +149,7 @@ export function generateReportPDF(
         return Math.max(minHeight, Math.ceil(maxRequiredHeight) + 1);
       });
 
-      const groupHeight = perItemRowHeights.reduce((s, h) => s + h, 0);
+      const groupHeight = perItemRowHeights.reduce((s: number, h: number) => s + h, 0);
 
       // If group doesn't fit, start new page
       if (currentY > maxY - groupHeight) {

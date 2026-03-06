@@ -219,10 +219,21 @@ export async function toggleUserStatus(userId: string, modifiedBy: string): Prom
   try {
     const now = new Date().toISOString();
     
+    // First fetch current status
+    const { data: currentUser, error: fetchError } = await supabase
+      .from('app_users')
+      .select('is_active')
+      .eq('app_user_uuid', userId)
+      .single();
+    
+    if (fetchError) throw fetchError;
+    if (!currentUser) throw new Error('User not found');
+    
+    // Then update with toggled value
     const { data, error } = await supabase
       .from('app_users')
       .update({
-        is_active: supabase.raw('NOT is_active'),
+        is_active: !currentUser.is_active,
         modified_dt: now,
         modified_by: modifiedBy
       })

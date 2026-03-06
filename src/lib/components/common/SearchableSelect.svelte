@@ -178,6 +178,7 @@
       role="combobox"
       aria-expanded={isOpen}
       aria-haspopup="listbox"
+      aria-controls={`${id}-listbox`}
     />
     <div class="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
       {#if selectedOption && !disabled}
@@ -198,6 +199,7 @@
 
   {#if isOpen && !disabled}
     <div
+      id={`${id}-listbox`}
       class="absolute z-50 w-full mt-1 max-h-60 overflow-auto theme-bg-primary theme-border border rounded-lg shadow-lg"
       role="listbox"
     >

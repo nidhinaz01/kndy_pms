@@ -19,6 +19,7 @@ interface PlannedWork {
   time_worked_till_date?: number;
   remaining_time?: number;
   workLifecycleStatus?: string;
+  workAdditionData?: { other_work_desc?: string; other_work_code?: string };
 }
 
 export function generatePlanExcel(

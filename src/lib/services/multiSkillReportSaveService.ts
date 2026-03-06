@@ -13,7 +13,7 @@ export async function saveMultiSkillReports(
     const currentUser = getCurrentUsername();
     const now = getCurrentTimestamp();
     
-    const hoursWorkedToday = formData.actualTimeMinutes / 60;
+    const hoursWorkedToday = (formData.actualTimeMinutes ?? 0) / 60;
     
     const hasBreakdown = formData.breakdownData.breakdownItems.length > 0;
     
