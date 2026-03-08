@@ -1276,7 +1276,18 @@ export async function handleDeleteStageReassignment(context: EventHandlerContext
           return;
         }
 
-        // Delete reporting row first (hard delete)
+        // Unlink planning row from reporting row so we can delete the reporting row (avoids FK violation)
+        const { error: unlinkErr } = await supabase
+          .from('prdn_planning_stage_reassignment')
+          .update({ reporting_reassignment_id: null })
+          .eq('id', planningId);
+        if (unlinkErr) {
+          console.error('Error unlinking planning from reporting reassignment:', unlinkErr);
+          alert('Error unlinking reassignment: ' + (unlinkErr.message || 'Unknown error'));
+          return;
+        }
+
+        // Delete reporting row (hard delete)
         const { error: delRepError } = await supabase
           .from('prdn_reporting_stage_reassignment')
           .delete()

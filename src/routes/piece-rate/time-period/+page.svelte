@@ -1,4 +1,26 @@
 <script lang="ts">
+  /**
+   * Piece Rate - Time Period
+   *
+   * Data flow: Supabase prdn_work_reporting (+ nested prdn_work_planning) -> pieceRateData -> table.
+   *
+   * Column mapping (each row = one element of pieceRateData, i.e. one prdn_work_reporting record):
+   * - Date              -> report.from_date (formatDateLocal)
+   * - Work Code         -> getWorkCode(report) -> planning.derived_sw_code || planning.other_work_code
+   * - Work Name         -> getWorkName(report) -> planning.std_work_type_details?.std_work_details?.sw_name or otherWorkDescMap[planning] or planning.other_work_code
+   * - Hours             -> report.hours_worked_today
+   * - Piece Rate        -> report.pr_amount (set by piece rate calculation; null until calculation runs)
+   * - Rate/Hour         -> report.pr_rate
+   * - Std Time (min)    -> report.pr_std_time
+   * - POW               -> report.pr_pow
+   * - Type              -> report.pr_type ('PR' | 'SL')
+   * - Overtime          -> report.overtime_amount
+   * - Lost Time         -> sum of report.lt_details[].lt_value (or 0)
+   * - Status            -> report.completion_status ('C' = Completed)
+   *
+   * Note: pr_amount, pr_rate, pr_std_time, pr_pow, pr_type are only populated when
+   * pieceRateCalculationService runs (on report completion); otherwise they stay null and show as '-'.
+   */
   import { onMount } from 'svelte';
   import FloatingThemeToggle from '$lib/components/common/FloatingThemeToggle.svelte';
   import Sidebar from '$lib/components/navigation/Sidebar.svelte';
@@ -25,9 +47,13 @@
   let pieceRateData: any[] = [];
   let employees: any[] = [];
   let isDataLoading = false;
+  /** Map key: `${wo_details_id}-${stage_code}-${other_work_code}` -> other_work_desc (from prdn_work_additions) */
+  let otherWorkDescMap: Record<string, string> = {};
   
   // Validation errors
   let errors: { employee?: string; dates?: string } = {};
+
+  const ADDITIONS_KEY_SEP = '\u001f';
 
   onMount(async () => {
     const username = localStorage.getItem('username');
@@ -125,6 +151,8 @@
           lt_details,
           prdn_work_planning!inner(
             id,
+            wo_details_id,
+            stage_code,
             derived_sw_code,
             other_work_code,
             sc_required,
@@ -132,9 +160,6 @@
               std_work_details!left(
                 sw_name
               )
-            ),
-            prdn_work_additions!left(
-              other_work_desc
             )
           )
         `)
@@ -148,7 +173,43 @@
 
       if (error) throw error;
 
-      pieceRateData = data || [];
+      const reports = data || [];
+      pieceRateData = reports;
+
+      // Fetch other_work_desc from prdn_work_additions (no FK from planning to additions, so separate query)
+      const keyTriplets: { wo_details_id: number; stage_code: string; other_work_code: string }[] = [];
+      const seen = new Set<string>();
+      for (const r of reports) {
+        const p = Array.isArray(r.prdn_work_planning) ? r.prdn_work_planning[0] : r.prdn_work_planning;
+        if (p?.other_work_code != null && p.wo_details_id != null && p.stage_code != null) {
+          const k = `${p.wo_details_id}${ADDITIONS_KEY_SEP}${p.stage_code}${ADDITIONS_KEY_SEP}${p.other_work_code}`;
+          if (!seen.has(k)) {
+            seen.add(k);
+            keyTriplets.push({
+              wo_details_id: p.wo_details_id,
+              stage_code: p.stage_code,
+              other_work_code: p.other_work_code
+            });
+          }
+        }
+      }
+      otherWorkDescMap = {};
+      if (keyTriplets.length > 0) {
+        const orParts = keyTriplets.map(
+          (t) =>
+            `and(wo_details_id.eq.${t.wo_details_id},stage_code.eq.${t.stage_code},other_work_code.eq.${t.other_work_code})`
+        );
+        const { data: additions } = await supabase
+          .from('prdn_work_additions')
+          .select('wo_details_id, stage_code, other_work_code, other_work_desc')
+          .or(orParts.join(','));
+        if (additions) {
+          for (const row of additions) {
+            const key = `${row.wo_details_id}${ADDITIONS_KEY_SEP}${row.stage_code}${ADDITIONS_KEY_SEP}${row.other_work_code}`;
+            otherWorkDescMap[key] = row.other_work_desc ?? '';
+          }
+        }
+      }
     } catch (error) {
       console.error('Error loading piece rate data:', error);
       alert('Error loading piece rate data');
@@ -157,18 +218,30 @@
     }
   }
 
+  /** Normalize planning: Supabase may return FK embed as object or as single-element array */
+  function getPlanning(report: any): any {
+    const p = report?.prdn_work_planning;
+    return Array.isArray(p) ? p[0] : p;
+  }
+
   function getWorkName(report: any): string {
-    const planning = report.prdn_work_planning;
-    if (planning?.derived_sw_code) {
-      return planning.std_work_type_details?.std_work_details?.sw_name || planning.derived_sw_code;
-    } else if (planning?.other_work_code) {
-      return planning.prdn_work_additions?.other_work_desc || planning.other_work_code;
+    const planning = getPlanning(report);
+    if (!planning) return 'Unknown';
+    if (planning.derived_sw_code) {
+      const sw = planning.std_work_type_details;
+      const details = sw?.std_work_details;
+      const name = Array.isArray(details) ? details[0]?.sw_name : details?.sw_name;
+      return name || planning.derived_sw_code;
+    }
+    if (planning.other_work_code != null && planning.wo_details_id != null && planning.stage_code != null) {
+      const key = `${planning.wo_details_id}${ADDITIONS_KEY_SEP}${planning.stage_code}${planning.other_work_code}`;
+      return otherWorkDescMap[key] || planning.other_work_code;
     }
     return 'Unknown';
   }
 
   function getWorkCode(report: any): string {
-    const planning = report.prdn_work_planning;
+    const planning = getPlanning(report);
     return planning?.derived_sw_code || planning?.other_work_code || 'N/A';
   }
 
@@ -271,8 +344,11 @@
               id="piece-rate-to-date"
               type="date"
               bind:value={toDate}
+              min={fromDate || undefined}
               class="w-full px-3 py-2 theme-border border rounded-md theme-bg-primary theme-text-primary focus:outline-none focus:ring-2 focus:ring-blue-500"
+              title="Must be on or after From date"
             />
+            <p class="text-xs theme-text-secondary mt-1">Must be on or after From date</p>
           </div>
         </div>
 
@@ -303,6 +379,9 @@
             </h2>
             <p class="text-sm theme-text-secondary mt-1">
               {formatDateLocal(fromDate)} to {formatDateLocal(toDate)}
+            </p>
+            <p class="text-xs theme-text-secondary mt-1">
+              Piece Rate, Rate/Hour, Std Time, POW and Type are filled when piece rate is calculated (on report completion). Blank values mean calculation has not run or prerequisites (e.g. time standards, skill mapping) are missing.
             </p>
           </div>
 
