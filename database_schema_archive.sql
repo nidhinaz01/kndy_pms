@@ -193,7 +193,7 @@ CREATE TABLE archive.prdn_work_reporting (
     completion_status character varying,
     pr_type character varying,
     pr_std_time integer,
-    pr_rate numeric,
+    pr_rate_work numeric,
     pr_pow numeric,
     pr_amount numeric,
     pr_calculated_dt timestamp without time zone,
@@ -208,7 +208,8 @@ CREATE TABLE archive.prdn_work_reporting (
     created_by character varying,
     created_dt timestamp without time zone,
     modified_by character varying,
-    modified_dt timestamp without time zone
+    modified_dt timestamp without time zone,
+    pr_rate_worker numeric(10, 2)
 );
 
 -- -----------------------------------------------------------------------------

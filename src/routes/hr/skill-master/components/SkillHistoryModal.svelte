@@ -322,8 +322,13 @@
       return;
     }
 
-    if (!newVersionData.rate_per_hour || !newVersionData.min_salary || !newVersionData.max_salary) {
-      errorMessage = 'Please fill all required fields';
+    const rateNum = Number(newVersionData.rate_per_hour);
+    const minNum = Number(newVersionData.min_salary);
+    const maxNum = Number(newVersionData.max_salary);
+    if (newVersionData.rate_per_hour === '' || newVersionData.rate_per_hour === undefined || isNaN(rateNum) || rateNum < 0 ||
+        newVersionData.min_salary === '' || newVersionData.min_salary === undefined || isNaN(minNum) || minNum < 0 ||
+        newVersionData.max_salary === '' || newVersionData.max_salary === undefined || isNaN(maxNum) || maxNum < 0) {
+      errorMessage = 'Please fill all required fields (0 is allowed for rate per hour)';
       return;
     }
 

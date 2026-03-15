@@ -5,17 +5,19 @@
 1. [Introduction](#introduction)
 2. [Getting Started](#getting-started)
 3. [Menu Structure](#menu-structure)
-4. [Dashboard](#dashboard)
-5. [Production Module](#production-module)
-6. [Planning Module](#planning-module)
-7. [HR Module](#hr-module)
-8. [Sales Module](#sales-module)
-9. [Standards Module](#standards-module)
-10. [R&D Module](#rnd-module)
-11. [System Admin Module](#system-admin-module)
-12. [Piece Rate Module](#piece-rate-module)
-13. [Common Features](#common-features)
-14. [Troubleshooting](#troubleshooting)
+4. [Process Flow](#process-flow)
+5. [Dashboard](#dashboard)
+6. [Production Module](#production-module)
+7. [Planning Module](#planning-module)
+8. [HR Module](#hr-module)
+9. [Sales Module](#sales-module)
+10. [Standards Module](#standards-module)
+11. [R&D Module](#rnd-module)
+12. [System Admin Module](#system-admin-module)
+13. [Piece Rate Module](#piece-rate-module)
+14. [Common Features](#common-features)
+15. [Frequently Asked Questions (FAQ)](#frequently-asked-questions-faq)
+16. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -40,6 +42,31 @@ The Production Management System is a comprehensive web-based application design
 2. Enter your username and password
 3. Click "Login" to access the system
 4. Upon successful login, you will be redirected to the Dashboard
+
+### First-Time Set Password
+
+If your account was created by an administrator and you are logging in for the first time (or after a password reset), you may be redirected to a **Set Your Password** page.
+
+1. Enter your new password in the "New Password" field
+2. Enter the same password again in "Confirm Password"
+3. Passwords must meet the system's complexity requirements (e.g., minimum length, character mix)
+4. Click "Set Password" or "Reset Password" to save
+5. You will then be able to use the new password to log in
+
+**Note**: The set-password link is valid only for a limited time. If the link has expired, ask your administrator to send a new password reset from System Admin > User Management.
+
+### Password Reset (Forgot Password)
+
+If you need to reset your password (e.g., you forgot it):
+
+1. Ask your system administrator to use **System Admin > User Management** and send you a password reset email (see [Reset Password for a User](#reset-password-for-a-user) below), or
+2. If your organization uses an external "Forgot password" link on the login page, use that to receive a reset link by email
+3. Open the reset link (in the same browser or device when possible)
+4. Enter your new password and confirm it
+5. Click "Reset Password"
+6. Use the new password to log in
+
+**Note**: Reset links can expire. If you see "Invalid or expired reset link", request a new reset from your administrator.
 
 ### Navigation
 
@@ -77,6 +104,204 @@ The application is organized into the following main modules:
 7. **R&D** - Research and development document management
 8. **System Admin** - System administration and configuration
 9. **Piece Rate** - Piece rate calculations and reporting
+
+---
+
+## Process Flow
+
+This section describes the **full end-to-end process flow** of the application—from creating a work order to delivering it and optionally archiving it. Use it to understand how modules connect and in what order to perform tasks.
+
+### Overview
+
+A work order moves through the system in these main phases:
+
+1. **Setup** (one-time or periodic) — Configure master data so work orders can be created and executed.
+2. **Order intake** — Create the work order and complete any pre-production steps (e.g. chassis receival).
+3. **Document release** — Ensure R&D documents are released for the work order, if required.
+4. **Planning** — Schedule when the work order will enter each production stage.
+5. **Production** — At each stage: enter the WO, add/plan works, submit plan, report work, submit report.
+6. **Review & delivery** — Plan/Report Review, inspection, then delivery.
+7. **Archive** (optional) — Move completed work orders to the archive.
+
+The flow is linear at a high level, but some steps (e.g. R&D documents, chassis receival) may be done in parallel or in an order that depends on your process.
+
+---
+
+### Phase 1: Setup and Prerequisites
+
+Before work orders can be planned and produced, the following must be in place. System administrators and relevant roles typically perform these.
+
+| Area | Where in the app | What to do |
+|------|------------------|------------|
+| **Users & access** | System Admin > User Management | Create users, assign menus. See [System Admin Module](#system-admin-module). |
+| **Reference data** | System Admin > Data Elements, Lost Time Reasons, Chassis Receival Template | Configure dropdowns, lost-time reasons, and inspection templates. |
+| **HR** | HR > Employee, Shift Master, Skill Master, Daily Shift | Register employees, define shifts and skills. See [HR Module](#hr-module). |
+| **Standards** | Standards > Works, Work Flow, Skill Combinations | Define standard works, workflow (which works belong to which stage), skill combinations, time standards. See [Standards Module](#standards-module). |
+| **Planning config** | Planning > Lead Times, Order of Stages, Holiday List | Set lead times per stage, stage order, and holidays so Entry Plan can calculate dates. See [Planning Module](#planning-module). |
+| **Models** | Sales > Models | Create product models used when creating work orders. See [Sales Module](#sales-module). |
+
+Without this setup, work orders cannot be created, planned, or executed correctly.
+
+---
+
+### Phase 2: Order Intake
+
+| Step | Where in the app | What happens |
+|------|------------------|---------------|
+| Create work order | Sales > Work Orders | Create a new work order and assign a model (and other details). See [How to Create a New Work Order](#1-how-to-create-a-new-work-order). |
+| Chassis receival (if applicable) | Sales > Chassis Receival | When the chassis arrives, record arrival and complete inspection using a template. Work order can then move from “Chassis to be Received” to “To be Planned” in Planning. See [Chassis Receival](#chassis-receival). |
+
+After this, the work order exists in the system and may appear in **Planning > Entry Plan** under “Chassis to be Received” or “To be Planned” depending on your process.
+
+---
+
+### Phase 3: Document Release (if required)
+
+If your process requires R&D documents before production:
+
+| Step | Where in the app | What happens |
+|------|------------------|---------------|
+| Release documents | R&D > Share Documents | Upload and submit documents for the work order by stage. Work orders waiting for documents appear in Planning > Entry Plan under “Documents to be Released.” See [R&D Module](#rnd-module). |
+
+When all required documents are released, the work order can be planned (Phase 4).
+
+---
+
+### Phase 4: Planning — Schedule the Work Order Through Stages
+
+Planning decides **when** the work order will enter each production stage. This is required before production can “enter” the work order at any stage.
+
+| Step | Where in the app | What happens |
+|------|------------------|---------------|
+| Create entry plan | Planning > Entry Plan | In the “To be Planned” tab (or “Chassis to be Received” / “Documents to be Released” as applicable), select the work order and **Create Plan**. Choose entry date/time for the first stage. The system calculates entry/exit dates for all stages using Lead Times, Order of Stages, and Holiday List. Save the plan. See [How to Create an Entry Plan for a Work Order](#1-how-to-create-an-entry-plan-for-a-work-order). |
+| View schedule | Planning > Schedule | View Plan vs Actual vs Deviation and statistics. See [How to View and Analyze Production Schedule](#2-how-to-view-and-analyze-production-schedule). |
+
+After the entry plan is saved, the work order is scheduled and becomes available for **entry** at each stage on the planned dates.
+
+---
+
+### Phase 5: Production — Execute Work at Each Stage
+
+Production is done **per stage and per shift** (e.g. P1S2-GEN). The same sequence repeats at every stage where the work order is processed.
+
+#### 5.1 Enter work order into the stage
+
+| Step | Where in the app | What happens |
+|------|------------------|---------------|
+| Enter WO to stage | Production > [Stage_Shift] > **Work Orders** tab | On the planned entry date, select the date and click **Entry** for the work order. The system creates work status records for all standard works for that WO at this stage. See [How to Add a Work Order to a Stage](#1-how-to-add-a-work-order-to-a-stage). |
+
+#### 5.2 Add works (if needed)
+
+| Step | Where in the app | What happens |
+|------|------------------|---------------|
+| Add works | Production > [Stage_Shift] > **Works** tab | If the model has no standard works for this stage, or you need extra works, add works to the work order. See [How to Add Works to a Work Order](#2-how-to-add-works-to-a-work-order). |
+
+#### 5.3 Plan works (assign workers and time)
+
+| Step | Where in the app | What happens |
+|------|------------------|---------------|
+| Plan works | Production > [Stage_Shift] > **Works** tab | For each work “To be Planned,” click **Plan**, choose time slot and workers, then save. Works move to “Draft Plan.” See [How to Plan a Work](#3-how-to-plan-a-work). You can modify or delete draft plans before submission. |
+| Submit plan | Production > [Stage_Shift] > **Draft Plan** tab | Review the draft plan, resolve any validation issues, then **Submit Plan**. After approval, the plan is fixed for the day. See [How to Submit a Plan](#6-how-to-submit-a-plan). |
+
+#### 5.4 Report work and submit report
+
+| Step | Where in the app | What happens |
+|------|------------------|---------------|
+| Record attendance | Production > [Stage_Shift] > **Manpower Report** tab | Record entry/exit times for employees. See [Step 7.1: Record Employee Attendance](#step-71-record-employee-attendance-manpower-report). |
+| Report work completion | Production > [Stage_Shift] > **Plan** tab → **Report** on each work | For each completed (or partially completed) work, click **Report** and fill in completion status, times, lost time, etc. See [How to Report a Plan (Report Work Completion)](#7-how-to-report-a-plan-report-work-completion). |
+| Draft report & overtime | Production > [Stage_Shift] > **Draft Report** tab | Review draft report, report overtime if needed (Report OT), then **Submit Report**. See [Step 7.5: Submit Final Report](#step-75-submit-final-report). |
+
+#### 5.5 Review (optional)
+
+| Step | Where in the app | What happens |
+|------|------------------|---------------|
+| Plan Review | Production > Plan Review | View and compare plans (e.g. PDF). |
+| Report Review | Production > Report Review | View and compare submitted reports (e.g. PDF). |
+
+This cycle (Enter → Add works → Plan → Submit plan → Report → Submit report) is repeated at **each production stage** where the work order is processed. At the next stage, use the same Production route for that stage/shift and again start with **Work Orders** tab → **Entry** when the WO is due.
+
+---
+
+### Phase 6: Inspection and Delivery
+
+As the work order completes production stages, its status in **Planning > Entry Plan** reflects progress:
+
+- **WIP** — Work in progress (in production).
+- **To be Inspected** — Ready for inspection.
+- **To be Delivered** — Ready for delivery.
+
+Inspection and delivery are typically recorded or confirmed in your process (in the app or outside it). When the work order is delivered, it is considered closed for production.
+
+---
+
+### Phase 7: Archive (optional)
+
+When a work order is no longer needed in active operations (e.g. after delivery), it can be archived to keep the main database lean.
+
+| Step | Where in the app | What happens |
+|------|------------------|---------------|
+| Archive work order | System Admin > Archive Work Order | Select one or more eligible work orders, confirm the irreversible archive action. Data is moved to the archive schema. See [Archive Work Order](#archive-work-order). |
+
+---
+
+### Process Flow Diagram (high-level)
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│  SETUP (one-time / periodic)                                                     │
+│  System Admin • HR (Employee, Shifts, Skills) • Standards (Works, Work Flow)     │
+│  Planning (Lead Times, Order of Stages, Holiday List) • Sales (Models)           │
+└─────────────────────────────────────────────────────────────────────────────────┘
+                                        │
+                                        ▼
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│  ORDER INTAKE                                                                     │
+│  Sales: Create Work Order → (optional) Chassis Receival                            │
+└─────────────────────────────────────────────────────────────────────────────────┘
+                                        │
+                                        ▼
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│  DOCUMENT RELEASE (if required)                                                    │
+│  R&D: Share Documents for the work order / stages                                 │
+└─────────────────────────────────────────────────────────────────────────────────┘
+                                        │
+                                        ▼
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│  PLANNING                                                                         │
+│  Planning > Entry Plan: Create plan (entry date → calculated dates per stage)     │
+│  Planning > Schedule: View plan vs actual vs deviation                            │
+└─────────────────────────────────────────────────────────────────────────────────┘
+                                        │
+                                        ▼
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│  PRODUCTION (repeat per stage)                                                    │
+│  Enter WO → Add works (if any) → Plan works → Submit plan → Report work →        │
+│  Submit report  (Plan Review / Report Review as needed)                            │
+└─────────────────────────────────────────────────────────────────────────────────┘
+                                        │
+                                        ▼
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│  INSPECTION & DELIVERY                                                            │
+│  To be Inspected → To be Delivered → Delivery confirmed                           │
+└─────────────────────────────────────────────────────────────────────────────────┘
+                                        │
+                                        ▼
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│  ARCHIVE (optional)                                                               │
+│  System Admin > Archive Work Order                                                 │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+### Where to Find Detailed Steps
+
+- **Sales (work order, chassis receival, models):** [Sales Module](#sales-module)
+- **R&D (document release):** [R&D Module](#rnd-module)
+- **Planning (entry plan, schedule, lead times, holidays):** [Planning Module](#planning-module)
+- **Production (enter, add works, plan, submit plan, report, submit report):** [Production Module](#production-module) and [Production Workflows - Step by Step](#production-workflows---step-by-step)
+- **HR and Standards (setup):** [HR Module](#hr-module), [Standards Module](#standards-module)
+- **Archive:** [Archive Work Order](#archive-work-order)
 
 ---
 
@@ -2897,7 +3122,7 @@ View documents submitted for specific document types. Each document type has its
 
 ### Overview
 
-The System Admin module provides administrative functions for user management, system configuration, and data element management.
+The System Admin module provides administrative functions for user management, menu and access control, system configuration, data element management, lost time reasons, chassis receival templates, and work order archiving.
 
 ### Sub-Menus
 
@@ -2929,7 +3154,14 @@ Comprehensive user and menu management system for system administrators.
      - Active status
    - Save the user
 
-2. **Managing Menus**:
+2. **Reset Password for a User** (admin-initiated):
+   - Go to "Users" tab and find the user (or edit an existing user)
+   - Click the **"Reset Password"** button for that user
+   - The system sends a password-reset email to the user's registered email address
+   - The user must open the link and set a new password (see [Password Reset (Forgot Password)](#password-reset-forgot-password) in Getting Started)
+   - Use this when a user has forgotten their password or for first-time account activation
+
+3. **Managing Menus**:
    - Go to "Menu" tab
    - Click "Add Menu" to create new menu item
    - Enter menu details:
@@ -2940,7 +3172,7 @@ Comprehensive user and menu management system for system administrators.
      - Visibility and Enabled status
    - Save the menu
 
-3. **Assigning User Menus**:
+4. **Assigning User Menus**:
    - Go to "User's Menu" tab
    - Select a user
    - Check/uncheck menus to assign access
@@ -3046,6 +3278,46 @@ Manages inspection templates used in chassis receival process.
 **Areas Affected**:
 - Chassis receival inspection process
 - Inspection form structure
+
+#### Archive Work Order
+
+**Path**: `/system-admin/archive-wo`
+
+**Description**: 
+Archives completed or obsolete work orders by moving their data to a separate archive schema. Archiving is irreversible—archived data is removed from the main database and stored in the archive for historical reference.
+
+**Features**:
+- View list of work orders available to archive (e.g., delivered or otherwise eligible)
+- Select one or more work orders to archive
+- Confirm archive action (with warning that archiving is irreversible)
+- View list of already archived work orders (WO No, WO Type, WO Model, WO Date, WO Delivery, Archived by, Archived at)
+
+**How to Use**:
+
+1. **Archiving Work Orders**:
+   - Navigate to System Admin > Archive Work Order
+   - Click the **"Archive work order"** button (with + icon)
+   - In the **Select work order(s) to archive** modal, review the list of work orders available for archive
+   - Select one or more work orders (checkboxes)
+   - Click **Confirm** or **OK**
+   - In the **Confirm archive** modal, review the warning that archiving is irreversible and data will be moved to the archive schema
+   - Confirm to start the archive process
+   - The page shows status lines for each work order (e.g., "Archiving WO-xxx... Done." or "Failed: ...")
+   - When finished, the archived work orders table refreshes to include the newly archived items
+
+2. **Viewing Archived Work Orders**:
+   - On the Archive Work Order page, the main table shows **Archived work orders**
+   - Columns include: WO No, WO Type, WO Model, WO Date, WO Delivery, Archived by, Archived at
+   - Use the table to sort, filter, or search archived records
+
+**Prerequisites**:
+- Admin or appropriate role with access to System Admin > Archive Work Order
+- Archive schema and archive function must be set up in the database (see database documentation)
+- Work orders must be in a state eligible for archive (e.g., delivered or as per business rules)
+
+**Areas Affected**:
+- Work order and related data moved from main database to archive schema
+- Archived work orders are no longer available in Production, Planning, or Sales for normal operations
 
 ---
 
@@ -3277,6 +3549,247 @@ This section provides quick reference for the most common tasks. For detailed in
 - Skill: Select from HR > Skill Master
 - Model: Select from Sales > Models
 - Category: Select from configured categories
+
+---
+
+## Frequently Asked Questions (FAQ)
+
+This section answers common questions in one place. For step-by-step instructions, follow the links to the relevant sections.
+
+---
+
+### Getting Started & Access
+
+**Q: How do I log in?**  
+A: Go to the application URL, enter your username and password, and click Login. You will be redirected to the Dashboard. See [Login](#login).
+
+**Q: I forgot my password. What do I do?**  
+A: Ask your system administrator to send you a password reset from **System Admin > User Management** (Users tab → Reset Password for your user). You will receive an email with a link to set a new password. See [Password Reset (Forgot Password)](#password-reset-forgot-password).
+
+**Q: I was asked to set my password when I first logged in. Is that normal?**  
+A: Yes. New accounts or password resets require you to set your password via the Set Your Password page. See [First-Time Set Password](#first-time-set-password).
+
+**Q: How do I open the user manual or help?**  
+A: Click the **"Help Doc."** button in the sidebar (above the logout button). The manual opens in a new browser tab. See [Help Documentation](#help-documentation).
+
+**Q: How do I switch between light and dark theme?**  
+A: Use the floating theme toggle button on the screen. See [Navigation](#navigation).
+
+**Q: I don’t see some menu items. Why?**  
+A: Menu access is controlled by your administrator. Only menus assigned to your user account are visible. Contact your admin to request access. See [User Management](#user-management).
+
+---
+
+### Work Orders & Sales
+
+**Q: How do I add a work order?**  
+A: Go to **Sales > Work Orders**, click **Add Work Order** (or equivalent), fill in the details (including model), and save. See [How to Create a New Work Order](#1-how-to-create-a-new-work-order).
+
+**Q: How do I view or filter work orders?**  
+A: Go to **Sales > Work Orders**. Use the period dropdown, search box, and filters to find work orders. See [How to View and Filter Work Orders](#2-how-to-view-and-filter-work-orders).
+
+**Q: How do I add a new model?**  
+A: Go to **Sales > Models**, click Add Model, enter model code and name, and save. Models are used when creating work orders. See [Models](#models).
+
+**Q: What is chassis receival and when do I use it?**  
+A: Chassis receival is the process of recording when the chassis arrives and completing an inspection. Use **Sales > Chassis Receival** when the chassis is received; this can be a prerequisite before the work order can be planned. See [Chassis Receival](#chassis-receival).
+
+**Q: How do I record chassis arrival or complete chassis inspection?**  
+A: Go to **Sales > Chassis Receival**, open the Pending tab, select the work order, and use **Record Arrival** or **Start Inspection**. Select a template and fill in the inspection form. See [Chassis Receival](#chassis-receival).
+
+---
+
+### Planning
+
+**Q: How do I schedule a work order through production (create an entry plan)?**  
+A: Go to **Planning > Entry Plan**, open the **"To be Planned"** tab (or **Chassis to be Received** / **Documents to be Released** if applicable), click **Create Plan** for the work order, choose the first-stage entry date and time, review the calculated dates for all stages, and save. See [How to Create an Entry Plan for a Work Order](#1-how-to-create-an-entry-plan-for-a-work-order).
+
+**Q: How do I view the production schedule (plan vs actual)?**  
+A: Go to **Planning > Schedule**. Select the date range and use the **Plan**, **Actual**, **Deviation**, and **Statistics** tabs. See [How to View and Analyze Production Schedule](#2-how-to-view-and-analyze-production-schedule).
+
+**Q: How do I add a holiday to the calendar?**  
+A: Go to **Planning > Holiday List**, click **Add Holiday**, enter the date and description, and save. Holidays are excluded from schedule date calculations. See [Holiday List](#holiday-list).
+
+**Q: How do I set or change lead times for stages?**  
+A: Go to **Planning > Lead Times** and configure the lead time (e.g. in days) for each stage. Entry Plan uses these to calculate entry/exit dates. See [Lead Times](#lead-times).
+
+**Q: How do I set the order of production stages?**  
+A: Go to **Planning > Order of Stages** and define the sequence of stages. This order is used when calculating dates in Entry Plan. See [Order of Stages](#order-of-stages).
+
+**Q: What are Entry Per Day and Entry Per Shift?**  
+A: These planning views show planned or actual work order entries by day or by shift. Use them to see when work orders are scheduled to enter stages. See the Planning section for paths and usage.
+
+---
+
+### Production — Entering & Adding Work
+
+**Q: How do I add a work order to my stage (enter a work order)?**  
+A: Go to **Production > [Your Stage/Shift]** (e.g. P1S2-GEN), open the **Work Orders** tab, select the date, find the work order in the waiting list, and click **Entry**. Confirm in the modal. See [How to Add a Work Order to a Stage](#1-how-to-add-a-work-order-to-a-stage).
+
+**Q: The Entry button is not visible for a work order. Why?**  
+A: The work order may not be scheduled to enter your stage yet. Check **Planning > Entry Plan** (and Schedule) to see the planned entry date. Entry is only available when the work order is due to enter your stage on the selected date.
+
+**Q: How do I add works to a work order?**  
+A: Go to **Production > [Stage/Shift] > Works** tab, click **Add Work**, select the work order, choose the work (and skill combination if needed), fill in details, and save. Use this when the model has no standard works for your stage or you need extra works. See [How to Add Works to a Work Order](#2-how-to-add-works-to-a-work-order).
+
+---
+
+### Production — Planning Work
+
+**Q: How do I plan a work (assign workers and time)?**  
+A: In **Production > [Stage/Shift] > Works** tab, find the work with status **To be Planned**, click **Plan**, choose the time slot (Step 1), then select workers (Step 2), and save. See [How to Plan a Work](#3-how-to-plan-a-work).
+
+**Q: How do I modify a planned work?**  
+A: Go to **Draft Plan** tab, find the work, click **Edit**, change time slot or workers, and save. You can only edit before submitting the plan. See [How to Modify a Planned Work](#4-how-to-modify-a-planned-work).
+
+**Q: How do I delete a planned work?**  
+A: In **Draft Plan** tab, find the work and click **Delete**, then confirm. The work returns to **To be Planned**. See [How to Delete a Planned Work](#5-how-to-delete-a-planned-work).
+
+**Q: How do I submit the plan for the day?**  
+A: Go to **Production > [Stage/Shift] > Draft Plan** tab, review all plans, fix any validation issues, then click **Submit Plan** and confirm. After approval, the plan is fixed. See [How to Submit a Plan](#6-how-to-submit-a-plan).
+
+**Q: What is the difference between Plan, Draft Plan, and Works tabs?**  
+A: **Works** shows all works for the stage; you plan works here (they move to Draft Plan). **Draft Plan** shows planned works before submission; you can edit or delete here, then submit. **Plan** shows the approved/submitted plan for the day (read-only for reporting).
+
+---
+
+### Production — Reporting
+
+**Q: How do I report work completion?**  
+A: In **Production > [Stage/Shift] > Plan** tab, find the completed work and click **Report**. In the modal, enter completion status (C/NC), from/to times, hours, lost time if any, and save. Then go to **Draft Report** and **Submit Report** when all reports are done. See [How to Report a Plan (Report Work Completion)](#7-how-to-report-a-plan-report-work-completion).
+
+**Q: How do I report overtime?**  
+A: Go to **Draft Report** tab. If overtime is calculated, the **Report OT** button is enabled. Click it, review the overtime details, and save. Do this before submitting the daily report. See [Detailed Overtime Reporting](#detailed-overtime-reporting).
+
+**Q: How do I submit the daily report?**  
+A: Go to **Draft Report** tab, ensure all work is reported (and overtime if needed), then click **Submit Report** and confirm. See [Step 7.5: Submit Final Report](#step-75-submit-final-report).
+
+**Q: How do I report unplanned work (work that wasn’t in the plan)?**  
+A: In **Draft Report** tab, click **Report Unplanned Work**, select the unplanned work, then click **Report** and fill in the same details as for planned work. See the Production section on reporting unplanned work.
+
+**Q: How do I record employee entry and exit times?**  
+A: Go to **Manpower Report** tab, select the date, then use **Entry** to record when an employee started and **Exit** to record when they left. This is required before reporting work. See [Step 7.1: Record Employee Attendance](#step-71-record-employee-attendance-manpower-report).
+
+**Q: The Report OT button is disabled. Why?**  
+A: It is disabled when there is no overtime, overtime is already reported, or the report is already submitted or approved. Check that you have saved actual times and that the report is still in draft.
+
+---
+
+### Production — Other
+
+**Q: How do I cancel a planned work?**  
+A: In **Plan** tab, find the work, click **Cancel**, enter the cancellation reason, and confirm. See the Production module section on cancelling work.
+
+**Q: What are Plan Review and Report Review?**  
+A: **Plan Review** and **Report Review** (under Production) let you view and compare plans and reports, often as PDFs. They are read-only review tools. See [Plan Review](#plan-review) and [Report Review](#report-review).
+
+---
+
+### HR & Employees
+
+**Q: How do I add an employee?**  
+A: Go to **HR > Employee**, click **Add Employee**, fill in details (name, code, shift, skills, etc.), and save. See [How to Add a New Employee](#1-how-to-add-a-new-employee).
+
+**Q: How do I edit an employee?**  
+A: Go to **HR > Employee**, find the employee, click the edit icon, update the fields, and save. See [How to Edit an Employee](#2-how-to-edit-an-employee).
+
+**Q: How do I import employees from Excel?**  
+A: Go to **HR > Employee**, use the Import option, download the template if needed, fill it in, upload the file, and follow the import steps. See [How to Import Employees from Excel](#3-how-to-import-employees-from-excel).
+
+**Q: How do I bulk update employees?**  
+A: Go to **HR > Employee** and use the bulk update feature (e.g. select multiple employees and apply changes). See [How to Bulk Update Employees](#4-how-to-bulk-update-employees).
+
+**Q: How do I add a shift (e.g. morning shift)?**  
+A: Go to **HR > Shift Master**, click Add, enter shift code and name (and times if applicable), and save. See [Shift Master](#shift-master).
+
+**Q: How do I add a skill?**  
+A: Go to **HR > Skill Master**, click Add, enter skill code and name, and save. See [Skill Master](#skill-master).
+
+**Q: What is Daily Shift used for?**  
+A: **HR > Daily Shift** is for viewing and managing daily shift assignments and operations. See [Daily Shift](#daily-shift).
+
+**Q: What is “Add Std Work to WO”?**  
+A: **HR > Add Std Work to WO** is used to add standard works to work orders in a bulk or dedicated way, depending on your setup. See [Add Std Work to WO](#add-std-work-to-wo).
+
+---
+
+### Standards
+
+**Q: How do I add a standard work?**  
+A: Go to **Standards > Works**, open the **Standard Works** tab, click **Add Work**, enter work code, name, description, and other fields, then save. See [Works](#works).
+
+**Q: How do I define which works belong to which stage (work flow)?**  
+A: Go to **Standards > Work Flow** and configure the workflow so that each work is assigned to the correct stage(s). This determines which works appear when a work order enters a stage. See [Work Flow](#work-flow).
+
+**Q: How do I add skill combinations?**  
+A: Go to **Standards > Skill Combinations**, add a new combination, and assign the required skills. These are used when planning and reporting multi-skill works. See [Skill Combinations](#skill-combinations).
+
+**Q: How do I set time standards for works?**  
+A: In **Standards > Works**, use the **Time Standards** tab to define standard times for work–skill combinations. See [Works](#works).
+
+---
+
+### R&D Documents
+
+**Q: How do I upload or submit documents for a work order?**  
+A: Go to **R&D > Share Documents**, open the Pending tab (or similar), find the work order, click **Upload Documents**, select stages, upload files, add notes, and submit. See [Share Documents](#share-documents).
+
+**Q: How do I view documents by type (e.g. BOM, drawings)?**  
+A: Go to **R&D > View Documents**, choose the document type (e.g. Bill of Material, Structure Drawing), and use the list to search, view, and download. See [View Documents](#view-documents).
+
+**Q: What document types are supported?**  
+A: The system supports BOM, Cutting Profile, General, Material Checklist, Platform Drawing, Seat Layout, and Structure Drawing. Some are single-file per work order, others allow multiple files. See [R&D Module](#rnd-module).
+
+---
+
+### System Admin
+
+**Q: How do I add a new user?**  
+A: Go to **System Admin > User Management**, open the **Users** tab, click **Add User**, enter username, email, password, role, and other details, then save. See [User Management](#user-management).
+
+**Q: How do I assign menu access to a user?**  
+A: Go to **System Admin > User Management**, open the **User's Menu** tab, select the user, check the menus they should see, and save. See [Assigning User Menus](#4-assigning-user-menus).
+
+**Q: How do I reset a user’s password?**  
+A: In **System Admin > User Management**, **Users** tab, find the user and click **Reset Password**. The user receives an email with a link to set a new password. See [Reset Password for a User](#2-reset-password-for-a-user-admin-initiated).
+
+**Q: How do I add a new menu item?**  
+A: In **System Admin > User Management**, go to the **Menu** tab, click **Add Menu**, enter menu name, path, parent, and order, then save. See [Managing Menus](#3-managing-menus).
+
+**Q: How do I add lost time reasons?**  
+A: Go to **System Admin > Lost Time Reasons**, click **Add Reason**, enter code and description, and save. These appear when reporting lost time in Production. See [Lost Time Reasons](#lost-time-reasons).
+
+**Q: How do I create a chassis receival inspection template?**  
+A: Go to **System Admin > Chassis Receival Template**, click **Add Template**, define name, description, and fields, and save. The template is then used in **Sales > Chassis Receival**. See [Chassis Receival Template](#chassis-receival-template).
+
+**Q: How do I archive a work order?**  
+A: Go to **System Admin > Archive Work Order**, click **Archive work order**, select one or more work orders, confirm the irreversible archive action, and complete the process. See [Archive Work Order](#archive-work-order).
+
+---
+
+### Piece Rate
+
+**Q: How do I view piece rate for an employee?**  
+A: Go to **Piece Rate > Time Period (1 Emp)**, select the employee and date range (within the same month/year), click **Load Data**, and view the piece rate calculations. See [Time Period (1 Emp)](#time-period-1-emp).
+
+---
+
+### Troubleshooting & Errors
+
+**Q: “No lead times configured” when creating an entry plan. What do I do?**  
+A: Configure lead times in **Planning > Lead Times** for each stage. Entry Plan needs these to calculate dates. See [Lead Times](#lead-times).
+
+**Q: Dates are wrong or not calculating in Entry Plan. Why?**  
+A: Check that **Planning > Lead Times**, **Order of Stages**, and **Holiday List** are set up correctly. Dates are calculated from these. See [How to Create an Entry Plan for a Work Order](#1-how-to-create-an-entry-plan-for-a-work-order).
+
+**Q: Work order does not appear in Production. What should I check?**  
+A: Ensure (1) the work order exists in **Sales > Work Orders**, (2) an entry plan was created in **Planning > Entry Plan**, and (3) the selected date in Production is the planned entry date for your stage. See [Process Flow](#process-flow).
+
+**Q: I get “Model not found” or “Skill not found” when creating a work order or planning. What does this mean?**  
+A: Create the missing master data: add the model in **Sales > Models** or the skill in **HR > Skill Master**. The system only allows values that exist in these masters.
+
+**Q: Where can I see a full overview of the process from order to delivery?**  
+A: See the [Process Flow](#process-flow) section for the end-to-end flow and links to each step.
 
 ---
 

@@ -41,16 +41,21 @@ export function calculateHoursWorkedToday(actualTimeMinutes: number): number {
   return actualTimeMinutes / 60;
 }
 
+/**
+ * @param timeWorkedTillDateMinutes Optional. Cumulative time already spent on this work before today (minutes). When provided, total time = till date + actual today is compared to standard.
+ */
 export function calculateLostTime(
   standardTimeMinutes: number,
   actualTimeMinutes: number,
-  completionStatus: 'C' | 'NC'
+  completionStatus: 'C' | 'NC',
+  timeWorkedTillDateMinutes: number = 0
 ): number {
   if (completionStatus === 'C') {
-    // For completed work, lost time = actual - standard (if actual > standard)
-    return Math.max(0, actualTimeMinutes - standardTimeMinutes);
+    // For completed work: compare total time (till date + today) to standard
+    const totalTimeMinutes = timeWorkedTillDateMinutes + actualTimeMinutes;
+    return Math.max(0, totalTimeMinutes - standardTimeMinutes);
   } else {
-    // For not completed work, lost time = actual (all time is lost)
+    // For not completed work, lost time = actual today (all time today is lost)
     return actualTimeMinutes;
   }
 }

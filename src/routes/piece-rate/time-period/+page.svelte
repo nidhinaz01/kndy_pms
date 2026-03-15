@@ -6,19 +6,29 @@
    *
    * Column mapping (each row = one element of pieceRateData, i.e. one prdn_work_reporting record):
    * - Date              -> report.from_date (formatDateLocal)
+   * - Stage             -> planning.stage_code
+   * - WO No             -> getWoNo(report) -> planning.prdn_wo_details.wo_no
    * - Work Code         -> getWorkCode(report) -> planning.derived_sw_code || planning.other_work_code
-   * - Work Name         -> getWorkName(report) -> planning.std_work_type_details?.std_work_details?.sw_name or otherWorkDescMap[planning] or planning.other_work_code
-   * - Hours             -> report.hours_worked_today
-   * - Piece Rate        -> report.pr_amount (set by piece rate calculation; null until calculation runs)
-   * - Rate/Hour         -> report.pr_rate
-   * - Std Time (min)    -> report.pr_std_time
-   * - POW               -> report.pr_pow
+   * - Work Name         -> getWorkName(report)
+   * - Std. SC           -> std_work_skill_mapping.sc_name (via planning.wsm_id)
+   * - Std. Time         -> report.pr_std_time (formatStdTimeHrMin)
+   * - Start Time        -> formatDateTimeDDMMYYYYHHMM(from_date, from_time)
+   * - End Time          -> formatDateTimeDDMMYYYYHHMM(to_date, to_time)
+   * - Hours Worked Till Date -> report.hours_worked_till_date
+   * - Hours Worked on Date   -> report.hours_worked_today
+   * - SC Required       -> planning.sc_required
+   * - SC of Emp         -> hr_emp.skill_short (worker)
    * - Type              -> report.pr_type ('PR' | 'SL')
+   * - Rate of Work      -> report.pr_rate_work
+   * - Rate of Worker    -> report.pr_rate_worker
+   * - POW               -> report.pr_pow
+   * - Piece Rate        -> report.pr_amount
    * - Overtime          -> report.overtime_amount
-   * - Lost Time         -> sum of report.lt_details[].lt_value (or 0)
+   * - Lost Time Details -> report.lt_details formatted (formatLostTimeDetails)
+   * - Lost Time Amount  -> sum of report.lt_details[].lt_value (total payable for that record)
    * - Status            -> report.completion_status ('C' = Completed)
    *
-   * Note: pr_amount, pr_rate, pr_std_time, pr_pow, pr_type are only populated when
+   * Note: pr_amount, pr_rate_work, pr_rate_worker, pr_std_time, pr_pow, pr_type are only populated when
    * pieceRateCalculationService runs (on report completion); otherwise they stay null and show as '-'.
    */
   import { onMount } from 'svelte';
@@ -28,7 +38,9 @@
   import Button from '$lib/components/common/Button.svelte';
   import { fetchUserMenus } from '$lib/services/menuService';
   import { supabase } from '$lib/supabaseClient';
-  import { formatDateLocal } from '$lib/utils/formatDate';
+  import { formatDateLocal, formatDateTimeDDMMYYYYHHMM } from '$lib/utils/formatDate';
+  import { formatLostTimeDetails } from '$lib/utils/formatLostTime';
+  import * as XLSX from 'xlsx';
 
   let showSidebar = false;
   let menus: any[] = [];
@@ -136,12 +148,16 @@
           planning_id,
           worker_id,
           from_date,
+          from_time,
           to_date,
+          to_time,
+          hours_worked_till_date,
           hours_worked_today,
           completion_status,
           pr_amount,
           pr_calculated_dt,
-          pr_rate,
+          pr_rate_work,
+          pr_rate_worker,
           pr_std_time,
           pr_pow,
           pr_type,
@@ -156,10 +172,17 @@
             derived_sw_code,
             other_work_code,
             sc_required,
+            wsm_id,
             std_work_type_details!left(
               std_work_details!left(
                 sw_name
               )
+            ),
+            std_work_skill_mapping!left(
+              sc_name
+            ),
+            prdn_wo_details(
+              wo_no
             )
           )
         `)
@@ -245,6 +268,27 @@
     return planning?.derived_sw_code || planning?.other_work_code || 'N/A';
   }
 
+  /** Std. SC from std_work_skill_mapping.sc_name (via planning.wsm_id) */
+  function getStdScName(report: any): string {
+    const planning = getPlanning(report);
+    const wsm = planning?.std_work_skill_mapping;
+    const row = Array.isArray(wsm) ? wsm[0] : wsm;
+    return row?.sc_name ?? '-';
+  }
+
+  /** SC of Emp = hr_emp.skill_short for report.worker_id */
+  function getScOfEmp(report: any): string {
+    const emp = employees.find((e: any) => e.emp_id === report.worker_id);
+    return emp?.skill_short ?? '-';
+  }
+
+  function getWoNo(report: any): string {
+    const planning = getPlanning(report);
+    const woDetails = planning?.prdn_wo_details;
+    const wo = Array.isArray(woDetails) ? woDetails[0] : woDetails;
+    return wo?.wo_no ?? '-';
+  }
+
   function formatCurrency(amount: number | null | undefined): string {
     if (amount === null || amount === undefined) return '-';
     return `₹${amount.toFixed(2)}`;
@@ -253,6 +297,81 @@
   function formatPercentage(value: number | null | undefined): string {
     if (value === null || value === undefined) return '-';
     return `${(value * 100).toFixed(2)}%`;
+  }
+
+  /** Format minutes as "x Hr y Min" (e.g. 90 -> "1 Hr 30 Min", 45 -> "0 Hr 45 Min") */
+  function formatStdTimeHrMin(minutes: number | null | undefined): string {
+    if (minutes === null || minutes === undefined) return '-';
+    const m = Math.floor(Number(minutes));
+    if (isNaN(m) || m < 0) return '-';
+    const hours = Math.floor(m / 60);
+    const mins = m % 60;
+    if (hours === 0) return `${mins} Min`;
+    if (mins === 0) return `${hours} Hr`;
+    return `${hours} Hr ${mins} Min`;
+  }
+
+  function getLostTimeAmount(report: any): number {
+    if (!report.lt_details || !Array.isArray(report.lt_details)) return 0;
+    return report.lt_details.reduce((sum: number, lt: any) => sum + (lt.lt_value || 0), 0);
+  }
+
+  function exportToExcel(): void {
+    if (pieceRateData.length === 0) return;
+    try {
+      const rows = pieceRateData.map((report) => {
+        const planning = getPlanning(report);
+        return {
+          Date: formatDateLocal(report.from_date),
+          Stage: planning?.stage_code ?? '',
+          'WO No': getWoNo(report),
+          'Work Code': getWorkCode(report),
+          'Work Name': getWorkName(report),
+          'Std. SC': getStdScName(report),
+          'Std. Time': formatStdTimeHrMin(report.pr_std_time),
+          'Start Time': formatDateTimeDDMMYYYYHHMM(report.from_date, report.from_time),
+          'End Time': formatDateTimeDDMMYYYYHHMM(report.to_date, report.to_time),
+          'Hours Worked Till Date': report.hours_worked_till_date != null ? Number(report.hours_worked_till_date) : '',
+          'Hours Worked on Date': report.hours_worked_today ?? '',
+          'Total Hours': (Number(report.hours_worked_till_date) || 0) + (Number(report.hours_worked_today) || 0),
+          'SC Required': planning?.sc_required ?? '',
+          'SC of Emp': getScOfEmp(report),
+          Type: report.pr_type ?? '',
+          'Rate of Work': report.pr_rate_work ?? '',
+          'Rate of Worker': report.pr_rate_worker ?? '',
+          POW: report.pr_pow ?? '',
+          'Piece Rate': report.pr_amount ?? '',
+          Overtime: report.overtime_amount ?? '',
+          'Lost Time Details': formatLostTimeDetails(report.lt_details),
+          'Lost Time Amount': getLostTimeAmount(report),
+          Status: report.completion_status === 'C' ? 'Completed' : 'Not Completed'
+        };
+      });
+      const ws = XLSX.utils.json_to_sheet(rows);
+      const ACCOUNTING_FORMAT = '_(* #,##0.00_);_(* (#,##0.00);_(* "-"??_);_(@_)';
+      const rateAmountCols = ['J', 'K', 'L', 'P', 'Q', 'R', 'S', 'T', 'V']; // J=Hours Till, K=Hours On, L=Total Hours, P–S=rates/POW/Piece, T=Overtime, V=Lost Time Amount
+      const range = XLSX.utils.decode_range(ws['!ref'] || 'A1');
+      for (let R = range.s.r + 1; R <= range.e.r; R++) {
+        for (const C of rateAmountCols) {
+          const ref = `${C}${R + 1}`;
+          if (ws[ref] != null && typeof ws[ref].v === 'number') {
+            ws[ref].z = ACCOUNTING_FORMAT;
+          }
+        }
+      }
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'PR Report');
+      const sanitize = (s: string) => String(s || '').replace(/[\s\/\\:<>?"|*]/g, '-').replace(/-+/g, '-').trim();
+      const empLabel = selectedEmployee ? sanitize(selectedEmployee.emp_name || selectedEmployeeId) : sanitize(selectedEmployeeId) || 'All';
+      const generatedAt = new Date();
+      const pad = (n: number) => String(n).padStart(2, '0');
+      const generatedTimestamp = `${generatedAt.getFullYear()}-${pad(generatedAt.getMonth() + 1)}-${pad(generatedAt.getDate())}_${pad(generatedAt.getHours())}-${pad(generatedAt.getMinutes())}-${pad(generatedAt.getSeconds())}`;
+      const filename = `PR Report-${empLabel}-${fromDate}-${toDate}-${generatedTimestamp}.xlsx`;
+      XLSX.writeFile(wb, filename);
+    } catch (err) {
+      console.error('Export Excel error:', err);
+      alert('Failed to export Excel. Please try again.');
+    }
   }
 
   // Calculate totals
@@ -264,7 +383,10 @@
     }
     return sum;
   }, 0);
-  $: totalHours = pieceRateData.reduce((sum, r) => sum + (r.hours_worked_today || 0), 0);
+  $: totalHours = pieceRateData.reduce(
+    (sum, r) => sum + (Number(r.hours_worked_till_date) || 0) + (Number(r.hours_worked_today) || 0),
+    0
+  );
 
   const selectedEmployee = employees.find(e => e.emp_id === selectedEmployeeId);
 </script>
@@ -356,13 +478,21 @@
           <p class="text-red-500 text-xs mt-2">{errors.dates}</p>
         {/if}
 
-        <div class="mt-4">
+        <div class="mt-4 flex flex-wrap gap-2">
           <Button
             on:click={loadPieceRateData}
             disabled={isDataLoading}
             class="px-6 py-2"
           >
             {isDataLoading ? 'Loading...' : 'Load Data'}
+          </Button>
+          <Button
+            variant="secondary"
+            on:click={exportToExcel}
+            disabled={pieceRateData.length === 0}
+            class="px-6 py-2"
+          >
+            Export Excel
           </Button>
         </div>
       </div>
@@ -381,47 +511,57 @@
               {formatDateLocal(fromDate)} to {formatDateLocal(toDate)}
             </p>
             <p class="text-xs theme-text-secondary mt-1">
-              Piece Rate, Rate/Hour, Std Time, POW and Type are filled when piece rate is calculated (on report completion). Blank values mean calculation has not run or prerequisites (e.g. time standards, skill mapping) are missing.
+              Type, Rate of Work, Rate of Worker, Std Time, POW and Piece Rate are filled when piece rate is calculated (on report completion). Blank values mean calculation has not run or prerequisites (e.g. time standards, skill mapping) are missing.
             </p>
           </div>
 
           <div class="overflow-x-auto">
-            <table class="w-full">
+            <table class="w-full min-w-max">
               <thead class="theme-bg-secondary border-b theme-border">
                 <tr>
                   <th class="px-4 py-3 text-left text-xs font-medium theme-text-primary uppercase">Date</th>
+                  <th class="px-4 py-3 text-left text-xs font-medium theme-text-primary uppercase">Stage</th>
+                  <th class="px-4 py-3 text-left text-xs font-medium theme-text-primary uppercase">WO No</th>
                   <th class="px-4 py-3 text-left text-xs font-medium theme-text-primary uppercase">Work Code</th>
                   <th class="px-4 py-3 text-left text-xs font-medium theme-text-primary uppercase">Work Name</th>
-                  <th class="px-4 py-3 text-left text-xs font-medium theme-text-primary uppercase">Hours</th>
-                  <th class="px-4 py-3 text-right text-xs font-medium theme-text-primary uppercase">Piece Rate</th>
-                  <th class="px-4 py-3 text-right text-xs font-medium theme-text-primary uppercase">Rate/Hour</th>
-                  <th class="px-4 py-3 text-right text-xs font-medium theme-text-primary uppercase">Std Time (min)</th>
-                  <th class="px-4 py-3 text-right text-xs font-medium theme-text-primary uppercase">POW</th>
+                  <th class="px-4 py-3 text-left text-xs font-medium theme-text-primary uppercase">Std. SC</th>
+                  <th class="px-4 py-3 text-right text-xs font-medium theme-text-primary uppercase">Std. Time</th>
+                  <th class="px-4 py-3 text-left text-xs font-medium theme-text-primary uppercase">Start Time</th>
+                  <th class="px-4 py-3 text-left text-xs font-medium theme-text-primary uppercase">End Time</th>
+                  <th class="px-4 py-3 text-right text-xs font-medium theme-text-primary uppercase">Hours Worked Till Date</th>
+                  <th class="px-4 py-3 text-right text-xs font-medium theme-text-primary uppercase">Hours Worked on Date</th>
+                  <th class="px-4 py-3 text-right text-xs font-medium theme-text-primary uppercase">Total Hours</th>
+                  <th class="px-4 py-3 text-center text-xs font-medium theme-text-primary uppercase">SC Required</th>
+                  <th class="px-4 py-3 text-center text-xs font-medium theme-text-primary uppercase">SC of Emp</th>
                   <th class="px-4 py-3 text-center text-xs font-medium theme-text-primary uppercase">Type</th>
+                  <th class="px-4 py-3 text-right text-xs font-medium theme-text-primary uppercase">Rate of Work</th>
+                  <th class="px-4 py-3 text-right text-xs font-medium theme-text-primary uppercase">Rate of Worker</th>
+                  <th class="px-4 py-3 text-right text-xs font-medium theme-text-primary uppercase">POW</th>
+                  <th class="px-4 py-3 text-right text-xs font-medium theme-text-primary uppercase">Piece Rate</th>
                   <th class="px-4 py-3 text-right text-xs font-medium theme-text-primary uppercase">Overtime</th>
-                  <th class="px-4 py-3 text-right text-xs font-medium theme-text-primary uppercase">Lost Time</th>
+                  <th class="px-4 py-3 text-left text-xs font-medium theme-text-primary uppercase">Lost Time Details</th>
+                  <th class="px-4 py-3 text-right text-xs font-medium theme-text-primary uppercase">Lost Time Amount</th>
                   <th class="px-4 py-3 text-center text-xs font-medium theme-text-primary uppercase">Status</th>
                 </tr>
               </thead>
               <tbody class="divide-y theme-border">
                 {#each pieceRateData as report}
+                  {@const planning = getPlanning(report)}
                   <tr class="hover:theme-bg-secondary transition-colors">
                     <td class="px-4 py-3 text-sm theme-text-primary">{formatDateLocal(report.from_date)}</td>
+                    <td class="px-4 py-3 text-sm theme-text-primary">{planning?.stage_code ?? '-'}</td>
+                    <td class="px-4 py-3 text-sm theme-text-primary">{getWoNo(report)}</td>
                     <td class="px-4 py-3 text-sm theme-text-primary">{getWorkCode(report)}</td>
                     <td class="px-4 py-3 text-sm theme-text-primary">{getWorkName(report)}</td>
-                    <td class="px-4 py-3 text-sm theme-text-primary">{report.hours_worked_today?.toFixed(2) || '-'}</td>
-                    <td class="px-4 py-3 text-sm text-right theme-text-primary font-medium">
-                      {formatCurrency(report.pr_amount)}
-                    </td>
-                    <td class="px-4 py-3 text-sm text-right theme-text-primary">
-                      {formatCurrency(report.pr_rate)}
-                    </td>
-                    <td class="px-4 py-3 text-sm text-right theme-text-primary">
-                      {report.pr_std_time || '-'}
-                    </td>
-                    <td class="px-4 py-3 text-sm text-right theme-text-primary">
-                      {formatPercentage(report.pr_pow)}
-                    </td>
+                    <td class="px-4 py-3 text-sm theme-text-primary">{getStdScName(report)}</td>
+                    <td class="px-4 py-3 text-sm text-right theme-text-primary">{formatStdTimeHrMin(report.pr_std_time)}</td>
+                    <td class="px-4 py-3 text-sm theme-text-primary">{formatDateTimeDDMMYYYYHHMM(report.from_date, report.from_time)}</td>
+                    <td class="px-4 py-3 text-sm theme-text-primary">{formatDateTimeDDMMYYYYHHMM(report.to_date, report.to_time)}</td>
+                    <td class="px-4 py-3 text-sm text-right theme-text-primary">{(report.hours_worked_till_date != null ? Number(report.hours_worked_till_date) : 0).toFixed(2)}</td>
+                    <td class="px-4 py-3 text-sm text-right theme-text-primary">{report.hours_worked_today != null ? Number(report.hours_worked_today).toFixed(2) : '-'}</td>
+                    <td class="px-4 py-3 text-sm text-right theme-text-primary">{((Number(report.hours_worked_till_date) || 0) + (Number(report.hours_worked_today) || 0)).toFixed(2)}</td>
+                    <td class="px-4 py-3 text-sm text-center theme-text-primary">{planning?.sc_required ?? '-'}</td>
+                    <td class="px-4 py-3 text-sm text-center theme-text-primary">{getScOfEmp(report)}</td>
                     <td class="px-4 py-3 text-sm text-center">
                       <span class="px-2 py-1 rounded text-xs {
                         report.pr_type === 'PR' 
@@ -433,8 +573,13 @@
                         {report.pr_type || '-'}
                       </span>
                     </td>
-                    <td class="px-4 py-3 text-sm text-right theme-text-primary">
-                      {formatCurrency(report.overtime_amount)}
+                    <td class="px-4 py-3 text-sm text-right theme-text-primary">{formatCurrency(report.pr_rate_work)}</td>
+                    <td class="px-4 py-3 text-sm text-right theme-text-primary">{formatCurrency(report.pr_rate_worker)}</td>
+                    <td class="px-4 py-3 text-sm text-right theme-text-primary">{formatPercentage(report.pr_pow)}</td>
+                    <td class="px-4 py-3 text-sm text-right theme-text-primary font-medium">{formatCurrency(report.pr_amount)}</td>
+                    <td class="px-4 py-3 text-sm text-right theme-text-primary">{formatCurrency(report.overtime_amount)}</td>
+                    <td class="px-4 py-3 text-sm text-left theme-text-primary max-w-xs truncate" title={formatLostTimeDetails(report.lt_details)}>
+                      {formatLostTimeDetails(report.lt_details) || '-'}
                     </td>
                     <td class="px-4 py-3 text-sm text-right theme-text-primary">
                       {formatCurrency(
@@ -457,11 +602,16 @@
               </tbody>
               <tfoot class="theme-bg-secondary border-t theme-border font-semibold">
                 <tr>
-                  <td colspan="3" class="px-4 py-3 text-sm theme-text-primary">Total</td>
-                  <td class="px-4 py-3 text-sm theme-text-primary">{totalHours.toFixed(2)}</td>
-                  <td class="px-4 py-3 text-sm text-right theme-text-primary">{formatCurrency(totalPieceRate)}</td>
+                  <td colspan="7" class="px-4 py-3 text-sm theme-text-primary">Total</td>
+                  <td colspan="2"></td>
+                  <td class="px-4 py-3 text-sm text-right theme-text-primary">{pieceRateData.reduce((s, r) => s + (Number(r.hours_worked_till_date) || 0), 0).toFixed(2)}</td>
+                  <td class="px-4 py-3 text-sm text-right theme-text-primary">{pieceRateData.reduce((s, r) => s + (Number(r.hours_worked_today) || 0), 0).toFixed(2)}</td>
+                  <td class="px-4 py-3 text-sm text-right theme-text-primary">{totalHours.toFixed(2)}</td>
                   <td colspan="5"></td>
+                  <td></td>
+                  <td class="px-4 py-3 text-sm text-right theme-text-primary">{formatCurrency(totalPieceRate)}</td>
                   <td class="px-4 py-3 text-sm text-right theme-text-primary">{formatCurrency(totalOvertime)}</td>
+                  <td></td>
                   <td class="px-4 py-3 text-sm text-right theme-text-primary">{formatCurrency(totalLostTime)}</td>
                   <td></td>
                 </tr>

@@ -42,12 +42,17 @@ export function calculateActualTime(
 // Re-export standard function
 export const calculateBreakTimeInPeriod = calculateBreakTimeInMinutes;
 
+/**
+ * @param timeWorkedTillDateMinutes Optional. Cumulative time already spent on this work before today (minutes). When provided, total time = till date + actual today is compared to standard.
+ */
 export function calculateLostTime(
   standardTimeMinutes: number,
-  actualTimeMinutes: number
+  actualTimeMinutes: number,
+  timeWorkedTillDateMinutes: number = 0
 ): number {
-  return actualTimeMinutes > standardTimeMinutes
-    ? Math.max(0, actualTimeMinutes - standardTimeMinutes)
+  const totalTimeMinutes = timeWorkedTillDateMinutes + actualTimeMinutes;
+  return totalTimeMinutes > standardTimeMinutes
+    ? Math.max(0, totalTimeMinutes - standardTimeMinutes)
     : 0;
 }
 

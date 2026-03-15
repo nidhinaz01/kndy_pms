@@ -228,6 +228,47 @@ export function formatDateTime(dateStr: string | Date, timeStr?: string): string
   }
 }
 
+/**
+ * Parse date and time as stored in the database (no timezone conversion).
+ * Treats the values as local time so they display as-is (e.g. 09:00 stays 09:00).
+ */
+function parseLocalDateTime(dateStr: string | Date, timeStr?: string): Date {
+  if (dateStr instanceof Date) return dateStr;
+  const dateStrOnly = String(dateStr).trim().split('T')[0].split(' ')[0];
+  if (!dateStrOnly || !/^\d{4}-\d{2}-\d{2}$/.test(dateStrOnly)) return new Date(NaN);
+  if (!timeStr) return new Date(dateStrOnly + 'T00:00:00');
+  const t = String(timeStr).trim().replace(/\s+/g, '');
+  const withSecs = t.match(/^(\d{2}:\d{2}:\d{2})(\.\d+)?$/);
+  const withMins = t.match(/^(\d{2}:\d{2})$/);
+  const timeNormalized = withSecs ? withSecs[1] : withMins ? withMins[1] + ':00' : null;
+  if (!timeNormalized) return new Date(dateStrOnly + 'T00:00:00');
+  return new Date(dateStrOnly + 'T' + timeNormalized);
+}
+
+/**
+ * Format date and time as dd-mm-yyyy hh:mm AM/PM (e.g. 08-03-2026 09:30 AM).
+ * Uses database values as-is (no UTC conversion) so stored times display correctly.
+ */
+export function formatDateTimeDDMMYYYYHHMM(dateStr: string | Date, timeStr?: string): string {
+  if (!dateStr) return '-';
+  try {
+    const dateTime = parseLocalDateTime(dateStr, timeStr);
+    if (isNaN(dateTime.getTime())) return '-';
+    const day = dateTime.getDate().toString().padStart(2, '0');
+    const month = (dateTime.getMonth() + 1).toString().padStart(2, '0');
+    const year = dateTime.getFullYear();
+    const hours = dateTime.getHours();
+    const minutes = dateTime.getMinutes();
+    const ampm = hours >= 12 ? 'PM' : 'AM';
+    const h12 = hours % 12 || 12;
+    const mm = minutes.toString().padStart(2, '0');
+    return `${day}-${month}-${year} ${h12}:${mm} ${ampm}`;
+  } catch (error) {
+    console.error('Error formatting date time:', error);
+    return '-';
+  }
+}
+
 export function formatTimeBreakdown(breakdown: any[], isUniform: boolean, totalMinutes?: number): string {
   if (!breakdown || breakdown.length === 0) {
     return 'No time standards available';

@@ -102,7 +102,7 @@
                          </p>
                        {/if}
                      </div>
-                     {#if mode === 'reporting' || journey.from_stage === parentStage || journey.to_stage === parentStage}
+                     {#if journey.from_stage === parentStage}
                        <div style="margin-left: 12px; display: flex; gap: 8px;">
                          <button
                            on:click={() => handleDeleteJourney(journey)}

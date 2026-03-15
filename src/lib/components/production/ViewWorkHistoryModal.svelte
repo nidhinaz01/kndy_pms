@@ -20,49 +20,60 @@
   let totalTimeTaken = 0;
   let skillBreakdown: { [key: string]: number } = {};
 
-  // Watch for work changes
+  // Watch for work changes: clear previous data immediately, then load for current work
   $: if (work && isOpen) {
-    // Fix 2: Validate work object to ensure it has required fields
-    // This prevents using stale data from previous modal opens
-    if (work.std_work_type_details?.derived_sw_code || work.sw_code) {
+    if (work.wo_details_id != null && (work.std_work_type_details?.derived_sw_code || work.sw_code || work.other_work_code)) {
+      workHistory = [];
+      totalTimeTaken = 0;
+      skillBreakdown = {};
       loadWorkHistory();
     } else {
-      console.warn('ViewWorkHistoryModal: Work object missing work code');
+      console.warn('ViewWorkHistoryModal: Work object missing wo_details_id or work code');
     }
   }
 
   async function loadWorkHistory() {
     if (!work) return;
 
+    const woDetailsId = work.wo_details_id;
+    const workCode = work.std_work_type_details?.derived_sw_code || work.sw_code || work.other_work_code || '';
+    if (woDetailsId == null || !workCode) {
+      workHistory = [];
+      totalTimeTaken = 0;
+      skillBreakdown = {};
+      return;
+    }
+
     isLoading = true;
     try {
-      const derivedSwCode = work.std_work_type_details?.derived_sw_code || work.sw_code;
-      
-      // Fetch all planning records for this work
-      const { data: planningData, error: planningError } = await supabase
+      // Get planning IDs for this work order + work code (avoids PostgREST nested .or() parse error).
+      const { data: planningRows, error: planningError } = await supabase
         .from('prdn_work_planning')
-        .select('id, from_date, from_time, to_time, stage_code')
-        .eq('derived_sw_code', derivedSwCode)
+        .select('id')
+        .eq('wo_details_id', woDetailsId)
         .eq('stage_code', stageCode)
         .eq('is_deleted', false)
-        .order('from_date', { ascending: true })
-        .order('from_time', { ascending: true });
+        .or(`derived_sw_code.eq.${workCode},other_work_code.eq.${workCode}`);
 
       if (planningError) {
-        console.error('Error loading planning data:', planningError);
+        console.error('Error loading planning IDs:', planningError);
         alert('Error loading work history. Please try again.');
         return;
       }
 
-      if (!planningData || planningData.length === 0) {
-        workHistory = [];
-        totalTimeTaken = 0;
-        skillBreakdown = {};
+      const planningIds = (planningRows || []).map((p: { id: number }) => p.id);
+      if (planningIds.length === 0) {
+        if (work && work.wo_details_id === woDetailsId && (work.std_work_type_details?.derived_sw_code || work.sw_code || work.other_work_code) === workCode) {
+          workHistory = [];
+          totalTimeTaken = 0;
+          skillBreakdown = {};
+        }
         isLoading = false;
         return;
       }
 
-      // Fetch all reporting records for these planning records
+      // Base table: prdn_work_reporting; get related data from prdn_work_planning.
+      // Only reporting rows for this work order + work code.
       const { data: reportingData, error: reportingError } = await supabase
         .from('prdn_work_reporting')
         .select(`
@@ -73,14 +84,16 @@
             from_time,
             to_time,
             derived_sw_code,
-            stage_code
+            other_work_code,
+            stage_code,
+            wo_details_id
           ),
           hr_emp!inner(
             emp_name,
             skill_short
           )
         `)
-        .in('planning_id', planningData.map(p => p.id))
+        .in('planning_id', planningIds)
         .eq('is_deleted', false)
         .order('created_dt', { ascending: true });
 
@@ -90,8 +103,14 @@
         return;
       }
 
+      // Race guard: only apply result if this is still the work the modal is showing
+      const currentCode = work?.std_work_type_details?.derived_sw_code || work?.sw_code || work?.other_work_code || '';
+      if (!work || work.wo_details_id !== woDetailsId || currentCode !== workCode) {
+        return;
+      }
+
       // Process and organize history
-      workHistory = (reportingData || []).map(report => {
+      workHistory = (reportingData || []).map((report: any) => {
         const planning = report.prdn_work_planning;
         const worker = report.hr_emp;
         
@@ -120,11 +139,11 @@
       totalTimeTaken = workHistory.reduce((sum, record) => sum + record.hoursWorkedToday, 0);
       
       // Calculate skill breakdown
-      skillBreakdown = workHistory.reduce((breakdown, record) => {
+      skillBreakdown = workHistory.reduce((breakdown: { [key: string]: number }, record) => {
         const skill = record.skill;
         breakdown[skill] = (breakdown[skill] || 0) + record.hoursWorkedToday;
         return breakdown;
-      }, {} as { [key: string]: number });
+      }, {});
 
     } catch (error) {
       console.error('Error loading work history:', error);
@@ -175,7 +194,10 @@
         <div class="flex items-center justify-between p-6 border-b theme-border">
           <div>
             <h2 class="text-2xl font-semibold theme-text-primary">
-              Work History - {work?.std_work_type_details?.derived_sw_code || work?.sw_code || 'Unknown'}
+              Work History - {work?.std_work_type_details?.derived_sw_code || work?.sw_code || work?.other_work_code || 'Unknown'}
+              {#if work?.wo_no || work?.prdn_wo_details?.wo_no}
+                <span class="text-lg font-normal theme-text-secondary">(WO: {work?.wo_no || work?.prdn_wo_details?.wo_no})</span>
+              {/if}
             </h2>
             <p class="text-sm theme-text-secondary mt-1">
               {work?.sw_name || work?.std_work_type_details?.std_work_details?.sw_name || 'Work details'}

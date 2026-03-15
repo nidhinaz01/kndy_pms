@@ -85,7 +85,16 @@
       
       // Only calculate lost time for standard works (not non-standard works starting with OW)
       if (!isNonStandardWork && state.standardTimeMinutes > 0) {
-        formData.ltMinutes = calculateLostTime(state.standardTimeMinutes, state.actualTimeMinutes);
+        // Use max time_worked_till_date across selected works (hours -> minutes)
+        const timeWorkedTillDateMinutes =
+          selectedWorks.length > 0
+            ? Math.max(...selectedWorks.map((w: any) => (w.time_worked_till_date || 0) * 60))
+            : 0;
+        formData.ltMinutes = calculateLostTime(
+          state.standardTimeMinutes,
+          state.actualTimeMinutes,
+          timeWorkedTillDateMinutes
+        );
         state.showLostTimeSection = formData.ltMinutes > 0;
       } else {
         // For non-standard works, set lost time to 0 and don't show lost time section

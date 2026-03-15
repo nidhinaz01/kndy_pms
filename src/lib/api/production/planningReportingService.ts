@@ -597,88 +597,32 @@ export async function submitReporting(
 
     console.log('Updated manpower reports:', updatedManpower?.length || 0);
 
-    // Update all draft stage reassignment reports (if table exists and has records)
-    // This is optional - if the table/column doesn't exist, we'll log but not fail
+    // Update all draft stage reassignment reports (table uses reassignment_date, no reporting_submission_id)
     try {
-      let reassignmentError: any = null;
-      let updatedReassignments: any[] = [];
-      
-      // First try with reporting_submission_id (if column exists)
-      try {
-        const { data, error } = await supabase
-          .from('prdn_reporting_stage_reassignment')
-          .update({
-            reporting_submission_id: submissionId,
-            status: 'pending_approval',
-            modified_by: currentUser,
-            modified_dt: now
-          })
-          .eq('to_stage_code', stageCode)
-          .eq('reporting_date', dateStr)
-          .eq('status', 'draft')
-          .eq('is_deleted', false)
-          .select();
-        
-        updatedReassignments = data || [];
-        reassignmentError = error;
-      } catch (err: any) {
-        // If reporting_submission_id column doesn't exist, use fallback
-        if (err?.code === '42703' || 
-            err?.code === 'PGRST204' ||
-            err?.message?.includes('reporting_submission_id') ||
-            err?.message?.includes('Could not find')) {
-          console.warn('reporting_submission_id column not found in prdn_reporting_stage_reassignment, using fallback update');
-          
-          // Fallback: Update using reporting_date and to_stage_code only
-          try {
-            const updateData: any = {
-              status: 'pending_approval',
-              modified_by: currentUser,
-              modified_dt: now
-            };
-            
-            // Only include status if column exists
-            const { data: fallbackData, error: fallbackError } = await supabase
-              .from('prdn_reporting_stage_reassignment')
-              .update(updateData)
-              .eq('to_stage_code', stageCode)
-              .eq('reporting_date', dateStr)
-              .eq('is_deleted', false)
-              .select();
-            
-            updatedReassignments = fallbackData || [];
-            reassignmentError = fallbackError;
-            
-            // If fallback also fails due to missing status column, log and continue
-            if (fallbackError && (fallbackError.code === '42703' || 
-                fallbackError.message?.includes('status') ||
-                fallbackError.message?.includes('Could not find'))) {
-              console.warn('Status column may not exist in prdn_reporting_stage_reassignment, skipping update');
-              reassignmentError = null; // Clear error to allow submission to continue
-            }
-          } catch (fallbackErr: any) {
-            reassignmentError = fallbackErr;
-          }
-        } else {
-          reassignmentError = err;
-        }
-      }
+      const { data: updatedReassignments, error: reassignmentError } = await supabase
+        .from('prdn_reporting_stage_reassignment')
+        .update({
+          status: 'pending_approval',
+          modified_by: currentUser,
+          modified_dt: now
+        })
+        .eq('to_stage_code', stageCode)
+        .eq('reassignment_date', dateStr)
+        .eq('status', 'draft')
+        .eq('is_deleted', false)
+        .select();
 
       if (reassignmentError) {
-        // Check if error is due to missing column/table - if so, log and continue
-        if (reassignmentError.code === 'PGRST204' || 
-            reassignmentError.code === '42703' ||
+        if (reassignmentError.code === 'PGRST204' || reassignmentError.code === '42703' ||
             reassignmentError.message?.includes('Could not find')) {
           console.warn('Stage reassignment table or column not found - skipping update. This is expected if stage reassignments are not used.');
         } else {
           console.error('Error updating stage reassignments:', reassignmentError);
-          // Don't throw - allow submission to succeed even if reassignments fail
         }
       } else {
         console.log('Updated stage reassignments:', updatedReassignments?.length || 0);
       }
     } catch (error) {
-      // Catch any unexpected errors and log, but don't fail the submission
       console.warn('Unexpected error updating stage reassignments (non-blocking):', error);
     }
 

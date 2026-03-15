@@ -87,8 +87,8 @@ SELECT d.id, d.planning_id, d.deviation_type, d.reason, d.is_active, d.is_delete
 FROM archive.prdn_work_planning_deviations d
 JOIN archive.prdn_work_planning p ON p.id = d.planning_id AND p.wo_details_id = 12345;
 
-INSERT INTO public.prdn_work_reporting (id, reporting_submission_id, planning_id, worker_id, from_date, from_time, to_date, to_time, hours_worked_today, hours_worked_till_date, status, completion_status, pr_type, pr_std_time, pr_rate, pr_pow, pr_amount, pr_calculated_dt, overtime_minutes, overtime_amount, lt_minutes_total, lt_details, lt_comments, remarks, is_active, is_deleted, created_by, created_dt, modified_by, modified_dt)
-SELECT id, reporting_submission_id, planning_id, worker_id, from_date, from_time, to_date, to_time, hours_worked_today, hours_worked_till_date, status, completion_status, pr_type, pr_std_time, pr_rate, pr_pow, pr_amount, pr_calculated_dt, overtime_minutes, overtime_amount, lt_minutes_total, lt_details, lt_comments, remarks, is_active, is_deleted, created_by, created_dt, modified_by, modified_dt
+INSERT INTO public.prdn_work_reporting (id, reporting_submission_id, planning_id, worker_id, from_date, from_time, to_date, to_time, hours_worked_today, hours_worked_till_date, status, completion_status, pr_type, pr_std_time, pr_rate_work, pr_pow, pr_amount, pr_calculated_dt, overtime_minutes, overtime_amount, lt_minutes_total, lt_details, lt_comments, remarks, is_active, is_deleted, created_by, created_dt, modified_by, modified_dt, pr_rate_worker)
+SELECT r.id, r.reporting_submission_id, r.planning_id, r.worker_id, r.from_date, r.from_time, r.to_date, r.to_time, r.hours_worked_today, r.hours_worked_till_date, r.status, r.completion_status, r.pr_type, r.pr_std_time, r.pr_rate_work, r.pr_pow, r.pr_amount, r.pr_calculated_dt, r.overtime_minutes, r.overtime_amount, r.lt_minutes_total, r.lt_details, r.lt_comments, r.remarks, r.is_active, r.is_deleted, r.created_by, r.created_dt, r.modified_by, r.modified_dt, r.pr_rate_worker
 FROM archive.prdn_work_reporting r
 JOIN archive.prdn_work_planning p ON p.id = r.planning_id AND p.wo_details_id = 12345;
 

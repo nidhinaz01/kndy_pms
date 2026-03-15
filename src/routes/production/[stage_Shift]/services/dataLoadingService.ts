@@ -1,6 +1,7 @@
 import { loadWorkOrdersData as loadWorkOrdersDataService, loadWorksData as loadWorksDataService, loadPlannedWorksData as loadPlannedWorksDataService, loadManpowerPlanData as loadManpowerPlanDataService, loadDraftPlanData as loadDraftPlanDataService, loadManpowerReportData as loadManpowerReportDataService, loadDraftReportData as loadDraftReportDataService, loadShiftBreakTimesData } from './pageDataService';
 import { loadReportData as loadReportDataService, calculatePlannedWorksStatus } from './reportDataService';
 import { requestDeduplicator } from './requestDeduplication';
+import { submissionStatusCache } from './submissionStatusCache';
 
 export interface DataLoadingContext {
   // State setters
@@ -115,6 +116,7 @@ export async function loadManpowerPlanData(context: DataLoadingContext) {
  */
 export async function loadDraftPlanData(context: DataLoadingContext) {
   context.setIsDraftPlanLoading(true);
+  submissionStatusCache.clearForStageDate(context.stageCode, context.selectedDate);
   const result = await loadDraftPlanDataService(context.stageCode, context.selectedDate);
   context.setDraftPlanData(result.workPlans);
   context.setDraftManpowerPlanData(result.manpowerPlans);
@@ -155,6 +157,7 @@ export async function loadManpowerReportData(context: DataLoadingContext) {
 export async function loadDraftReportData(context: DataLoadingContext) {
   try {
     context.setIsDraftReportLoading(true);
+    submissionStatusCache.clearForStageDate(context.stageCode, context.selectedDate);
     const result = await loadDraftReportDataService(context.stageCode, context.selectedDate);
     context.setDraftReportData(result.workReports);
     context.setDraftManpowerReportData(result.manpowerReports);

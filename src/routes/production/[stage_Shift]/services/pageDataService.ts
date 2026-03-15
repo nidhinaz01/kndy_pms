@@ -38,6 +38,75 @@ export async function loadWorksData(stageCode: string, selectedDate: string) {
  * Load planned works data
  */
 /**
+ * Fetch cumulative "time worked till date" from prdn_work_reporting for the same work (wo_details_id + work_code)
+ * on prior dates, and return a map keyed by `${wo_details_id}_${workCode}` with total hours (decimal).
+ * Used to show correct time worked on Plan tab and in Report modal when the plan row has no prior report.
+ */
+async function fetchReportingTimeWorkedTillDate(
+  stageCode: string,
+  dateStr: string,
+  plannedWorks: any[]
+): Promise<Map<string, number>> {
+  const map = new Map<string, number>();
+  if (!plannedWorks?.length) return map;
+
+  const woDetailsIds = [...new Set(plannedWorks.map((p: any) => p.wo_details_id).filter(Boolean))];
+  if (woDetailsIds.length === 0) return map;
+
+  try {
+    const { data: reports, error } = await supabase
+      .from('prdn_work_reporting')
+      .select(`
+        from_date,
+        hours_worked_till_date,
+        hours_worked_today,
+        prdn_work_planning!inner(
+          wo_details_id,
+          derived_sw_code,
+          other_work_code,
+          from_date,
+          stage_code
+        )
+      `)
+      .eq('prdn_work_planning.stage_code', stageCode)
+      .lt('prdn_work_planning.from_date', dateStr)
+      .eq('is_active', true)
+      .eq('is_deleted', false)
+      .in('prdn_work_planning.wo_details_id', woDetailsIds)
+      .order('from_date', { ascending: false });
+
+    if (error) {
+      console.warn('fetchReportingTimeWorkedTillDate:', error.message);
+      return map;
+    }
+
+    const list = reports || [];
+    const byKey = new Map<string, { from_date: string; hours_worked_till_date: number; hours_worked_today: number }>();
+    for (const r of list) {
+      const planning = r.prdn_work_planning as any;
+      if (!planning) continue;
+      const workCode = planning.derived_sw_code || planning.other_work_code;
+      if (!workCode) continue;
+      const key = `${planning.wo_details_id}_${workCode}`;
+      if (!byKey.has(key)) {
+        const totalHours = (Number(r.hours_worked_till_date) || 0) + (Number(r.hours_worked_today) || 0);
+        byKey.set(key, {
+          from_date: r.from_date,
+          hours_worked_till_date: Number(r.hours_worked_till_date) || 0,
+          hours_worked_today: Number(r.hours_worked_today) || 0
+        });
+      }
+    }
+    byKey.forEach((v, key) => {
+      map.set(key, v.hours_worked_till_date + v.hours_worked_today);
+    });
+  } catch (e) {
+    console.warn('fetchReportingTimeWorkedTillDate error:', e);
+  }
+  return map;
+}
+
+/**
  * Load cancelled works for Plan tab (they should still be visible)
  */
 async function loadStagePlannedWorksWithCancelled(stageCode: string, date: string): Promise<any[]> {
@@ -114,7 +183,21 @@ export async function loadPlannedWorksData(stageCode: string, selectedDate: stri
     
     // Enrich with skill-specific time standards and vehicle work flow using batch queries
     const { batchEnrichItems } = await import('$lib/utils/workEnrichmentService');
-    const enrichedPlannedWorks = await batchEnrichItems(data || [], stageCode);
+    let enrichedPlannedWorks = await batchEnrichItems(data || [], stageCode);
+
+    // Enrich time_worked_till_date from prdn_work_reporting (cumulative hours from prior reports for same work)
+    const reportingTillDateMap = await fetchReportingTimeWorkedTillDate(stageCode, dateStr, enrichedPlannedWorks);
+    if (reportingTillDateMap.size > 0) {
+      enrichedPlannedWorks = enrichedPlannedWorks.map((p: any) => {
+        const workCode = p.derived_sw_code || p.other_work_code;
+        const key = workCode ? `${p.wo_details_id}_${workCode}` : null;
+        const fromReporting = key ? reportingTillDateMap.get(key) : undefined;
+        if (fromReporting !== undefined) {
+          return { ...p, time_worked_till_date: fromReporting };
+        }
+        return p;
+      });
+    }
 
     console.log(`✅ Enriched ${enrichedPlannedWorks.length} planned works with skill-specific data`);
     return enrichedPlannedWorks;

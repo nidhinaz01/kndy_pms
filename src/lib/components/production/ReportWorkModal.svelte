@@ -76,10 +76,12 @@
       
       // Only calculate lost time for standard works (not non-standard works starting with OW)
       if (!isNonStandardWork && state.standardTimeMinutes > 0) {
+        const timeWorkedTillDateMinutes = (formData.hoursWorkedTillDate || 0) * 60;
         formData.ltMinutes = calculateLostTime(
           state.standardTimeMinutes,
           state.actualTimeMinutes,
-          formData.completionStatus
+          formData.completionStatus,
+          timeWorkedTillDateMinutes
         );
         state.showLostTimeSection = formData.ltMinutes > 0;
       } else {

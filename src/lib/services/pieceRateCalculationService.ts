@@ -199,7 +199,8 @@ async function calculateStandardWorkPieceRate(
         .update({
           pr_amount: Math.round(prAmount * 100) / 100,
           pr_calculated_dt: now,
-          pr_rate: Math.round(avgRate * 100) / 100,
+          pr_rate_work: null, // Work-required skill rate; procedure may set it
+          pr_rate_worker: Math.round(avgRate * 100) / 100,
           pr_std_time: totalStandardTimeMinutes,
           pr_pow: Math.round(prPow * 10000) / 10000, // Round to 4 decimal places
           pr_type: 'PR', // Piece Rate for standard work
@@ -285,7 +286,8 @@ async function calculateNonStandardWorkPieceRate(
         .update({
           pr_amount: Math.round(prAmount * 100) / 100,
           pr_calculated_dt: now,
-          pr_rate: Math.round(prRate * 100) / 100,
+          pr_rate_work: 0, // SL type: 0 for work rate
+          pr_rate_worker: Math.round(prRate * 100) / 100,
           pr_std_time: null, // No standard time for non-standard work
           pr_pow: 1.0, // Each worker gets full amount for non-standard work
           pr_type: 'SL', // Salary for non-standard work
@@ -396,7 +398,8 @@ async function clearPieceRateForPlanning(planningId: number): Promise<void> {
       .update({
         pr_amount: null,
         pr_calculated_dt: null,
-        pr_rate: null,
+        pr_rate_work: null,
+        pr_rate_worker: null,
         pr_std_time: null,
         pr_pow: null,
         pr_type: null,

@@ -99,7 +99,7 @@
     ratePerHour = skill.rate_per_hour.toString();
     minSalary = skill.min_salary.toString();
     maxSalary = skill.max_salary.toString();
-    wef = formatWefDate(skill.wef);
+    wef = formatWefDate(skill.wef_date);
     isActive = skill.is_active;
   }
 
@@ -391,7 +391,7 @@
           { key: 'rate_per_hour', label: 'Rate/Hour', sortable: true, filterable: true, type: 'number' },
           { key: 'min_salary', label: 'Min Salary', sortable: true, filterable: true, type: 'number' },
           { key: 'max_salary', label: 'Max Salary', sortable: true, filterable: true, type: 'number' },
-          { key: 'wef', label: 'WEF', sortable: true, filterable: true, type: 'date' },
+          { key: 'wef_date', label: 'WEF', sortable: true, filterable: true, type: 'date' },
           { key: 'is_active', label: 'Status', sortable: true, filterable: true, type: 'status' }
         ]}
         actions={[
