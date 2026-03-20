@@ -28,7 +28,7 @@
 
   // Watch for data changes and apply filters
   $: {
-    const filtered = applyFilters(data, filters);
+    const filtered = applyFilters(data, filters, state.workStatus, stageCode);
     filteredData = filtered.map(enrichWorkData);
   }
 

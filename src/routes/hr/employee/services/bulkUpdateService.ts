@@ -146,84 +146,105 @@ export async function processBulkUpdate(csvText: string, username: string): Prom
           continue;
         }
 
-        // Validate Employee Category
-        if (!employeeCategories.includes(empCat)) {
-          errors.push(`Row ${i + 1}: Invalid employee category "${empCat}". Must be one of: ${employeeCategories.join(', ')}`);
-          continue;
+        // Build a partial update. Any CSV cell left empty means "do not change" that field.
+        const updateData: any = {};
+
+        // Basic DA validity depends on the resulting employee category.
+        const resultingEmpCat = empCat || existingEmployee.emp_cat;
+        const categoryLower = resultingEmpCat?.toLowerCase() || '';
+        const isApprenticeOrTrainee = categoryLower.includes('apprentice') || categoryLower.includes('trainee');
+
+        // Validate each provided field; skip validation for empty cells.
+        if (empCat) {
+          if (!employeeCategories.includes(empCat)) {
+            errors.push(`Row ${i + 1}: Invalid employee category "${empCat}". Must be one of: ${employeeCategories.join(', ')}`);
+            continue;
+          }
+          updateData.emp_cat = empCat;
         }
 
-        // Validate Skill
-        if (!skillShorts.includes(skillShort)) {
-          errors.push(`Row ${i + 1}: Invalid skill code "${skillShort}". Must be one of: ${skillShorts.join(', ')}`);
-          continue;
-        }
-
-        // Validate Stage
-        if (!stages.includes(stage)) {
-          errors.push(`Row ${i + 1}: Invalid stage "${stage}". Must be one of: ${stages.join(', ')}`);
-          continue;
-        }
-
-        // Validate Shift Code
-        if (!shifts.includes(shiftCode)) {
-          errors.push(`Row ${i + 1}: Invalid shift code "${shiftCode}". Must be one of: ${shifts.join(', ')}`);
-          continue;
+        if (skillShort) {
+          if (!skillShorts.includes(skillShort)) {
+            errors.push(`Row ${i + 1}: Invalid skill code "${skillShort}". Must be one of: ${skillShorts.join(', ')}`);
+            continue;
+          }
+          updateData.skill_short = skillShort;
         }
 
         // Validate dates
-        const today = new Date();
-        today.setHours(23, 59, 59, 999);
-        
-        const appraisalDate = parseDate(lastAppraisalDate);
-        if (!appraisalDate) {
-          errors.push(`Row ${i + 1}: Invalid Last Appraisal Date format "${lastAppraisalDate}". Expected format: YYYY-MM-DD (e.g., 2024-01-15)`);
-          continue;
-        }
-        
-        if (appraisalDate > today) {
-          errors.push(`Row ${i + 1}: Last appraisal date cannot be a future date`);
-          continue;
-        }
+        if (lastAppraisalDate) {
+          const today = new Date();
+          today.setHours(23, 59, 59, 999);
 
-        // Validate Basic DA
-        const basicDaNum = parseFloat(basicDa);
-        if (isNaN(basicDaNum)) {
-          errors.push(`Row ${i + 1}: Basic DA must be a valid number`);
-          continue;
-        }
-        
-        const categoryLower = empCat?.toLowerCase() || '';
-        const isApprenticeOrTrainee = categoryLower.includes('apprentice') || categoryLower.includes('trainee');
-        
-        if (isApprenticeOrTrainee) {
-          if (basicDaNum < 0) {
-            errors.push(`Row ${i + 1}: Basic DA cannot be negative for ${empCat} category`);
+          const appraisalDate = parseDate(lastAppraisalDate);
+          if (!appraisalDate) {
+            errors.push(`Row ${i + 1}: Invalid Last Appraisal Date format "${lastAppraisalDate}". Expected format: YYYY-MM-DD (e.g., 2024-01-15)`);
             continue;
           }
-        } else {
-          if (basicDaNum <= 0) {
-            errors.push(`Row ${i + 1}: Basic DA must be a positive number`);
+
+          if (appraisalDate > today) {
+            errors.push(`Row ${i + 1}: Last appraisal date cannot be a future date`);
             continue;
           }
+
+          updateData.last_appraisal_date = lastAppraisalDate;
         }
 
-        // Validate Salary
-        const salaryNum = parseFloat(salary);
-        if (isNaN(salaryNum) || salaryNum <= 0) {
-          errors.push(`Row ${i + 1}: Salary must be a positive number`);
+        if (basicDa) {
+          const basicDaNum = parseFloat(basicDa);
+          if (isNaN(basicDaNum)) {
+            errors.push(`Row ${i + 1}: Basic DA must be a valid number`);
+            continue;
+          }
+
+          if (isApprenticeOrTrainee) {
+            if (basicDaNum < 0) {
+              errors.push(`Row ${i + 1}: Basic DA cannot be negative for ${resultingEmpCat} category`);
+              continue;
+            }
+          } else {
+            if (basicDaNum <= 0) {
+              errors.push(`Row ${i + 1}: Basic DA must be a positive number`);
+              continue;
+            }
+          }
+
+          updateData.basic_da = basicDaNum;
+        }
+
+        if (salary) {
+          const salaryNum = parseFloat(salary);
+          if (isNaN(salaryNum) || salaryNum <= 0) {
+            errors.push(`Row ${i + 1}: Salary must be a positive number`);
+            continue;
+          }
+
+          updateData.salary = salaryNum;
+        }
+
+        if (stage) {
+          if (!stages.includes(stage)) {
+            errors.push(`Row ${i + 1}: Invalid stage "${stage}". Must be one of: ${stages.join(', ')}`);
+            continue;
+          }
+          updateData.stage = stage;
+        }
+
+        if (shiftCode) {
+          if (!shifts.includes(shiftCode)) {
+            errors.push(`Row ${i + 1}: Invalid shift code "${shiftCode}". Must be one of: ${shifts.join(', ')}`);
+            continue;
+          }
+          updateData.shift_code = shiftCode;
+        }
+
+        // If nothing is being updated, treat the row as skipped (no-op).
+        if (Object.keys(updateData).length === 0) {
+          skipped++;
           continue;
         }
 
-        // All validations passed, update the employee
-        await updateEmployee(existingEmployee.id, {
-          emp_cat: empCat,
-          skill_short: skillShort,
-          last_appraisal_date: lastAppraisalDate,
-          basic_da: basicDaNum,
-          salary: salaryNum,
-          stage: stage,
-          shift_code: shiftCode
-        }, username);
+        await updateEmployee(existingEmployee.id, updateData, username);
 
         success.push(empId);
         

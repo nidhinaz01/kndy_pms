@@ -12,6 +12,8 @@
   export let onStatusUpdated: (() => void) | null = null;
   export let onAddItem: (() => void) | null = null;
   export let onImportClick: (() => void) | null = null;
+export let search: string = '';
+export let onSearchChange: (value: string) => void = () => {};
 
   // Add fallback no-op functions
   const handleAddItem = () => { if (onAddItem) onAddItem(); };
@@ -89,6 +91,8 @@
           // Remove from table data
           tableData = tableData.filter(item => item.sw_id !== row.sw_id);
           alert('Work deleted successfully.');
+          // Base work changes affect joins shown in other tabs.
+          onStatusUpdated?.();
         }
       } catch (error) {
         console.error('Error deleting work:', error);
@@ -97,7 +101,6 @@
     }
   }
 
-  let search = '';
   let sortColumn: string = 'sw_type';
   let sortDirection: 'asc' | 'desc' = 'asc';
 
@@ -265,7 +268,13 @@
 <div class="flex items-center justify-between space-x-2 p-3 border-b theme-bg-primary rounded-t-xl shadow mt-4">
   <span class="text-lg font-semibold theme-text-primary">Standard Works</span>
   <div class="flex items-center gap-2">
-    <input type="text" placeholder="Search..." bind:value={search} class="border theme-border rounded-full pl-3 pr-3 py-2 w-full max-w-xs theme-bg-secondary theme-text-primary" />
+    <input
+      type="text"
+      placeholder="Search..."
+      value={search}
+      on:input={(e) => onSearchChange((e.currentTarget as HTMLInputElement).value)}
+      class="border theme-border rounded-full pl-3 pr-3 py-2 w-full max-w-xs theme-bg-secondary theme-text-primary"
+    />
     <span class="min-w-[140px] whitespace-nowrap">
       <Button variant="secondary" size="sm" on:click={() => showFilters = !showFilters}>
         {showFilters ? 'Hide' : 'Show'} Filters

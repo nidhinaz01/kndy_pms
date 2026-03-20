@@ -1,4 +1,4 @@
-import type { WorksTableFilters } from '$lib/types/worksTable';
+import type { WorksTableFilters, WorkStatus } from '$lib/types/worksTable';
 import { formatTimeFromMinutes } from './timeFormatUtils';
 
 export function parseTimeToHours(timeStr: string | number): number {
@@ -33,7 +33,12 @@ export function getWorkId(work: any): string {
   return `${derivedSwCode}_${woDetailsId}`;
 }
 
-export function applyFilters(data: any[], filters: WorksTableFilters): any[] {
+export function applyFilters(
+  data: any[],
+  filters: WorksTableFilters,
+  workStatus: { [key: string]: WorkStatus } = {},
+  stageCode: string = ''
+): any[] {
   let filtered = data;
 
   if (filters.searchTerm) {
@@ -85,6 +90,21 @@ export function applyFilters(data: any[], filters: WorksTableFilters): any[] {
       return work.skill_mappings.some((skill: any) => 
         (skill.sc_name || '').toLowerCase().includes(filters.requiredSkillsFilter.toLowerCase())
       );
+    });
+  }
+
+  if (filters.statusFilter && stageCode) {
+    filtered = filtered.filter((work) => {
+      const hasDerivedSwCode = !!work.std_work_type_details?.derived_sw_code;
+      const isNonStandardWork = work.is_added_work === true || !hasDerivedSwCode;
+      const derivedSwCode = hasDerivedSwCode ? work.std_work_type_details?.derived_sw_code || null : null;
+      const otherWorkCode = isNonStandardWork ? (work.sw_code || null) : null;
+      const workCode = derivedSwCode || otherWorkCode || 'Unknown';
+      const woDetailsId = work.wo_details_id;
+      if (!woDetailsId) return false;
+      const workKey = `${workCode}_${woDetailsId}_${stageCode}`;
+      const status = workStatus[workKey] || 'To be planned';
+      return status === filters.statusFilter;
     });
   }
 

@@ -93,9 +93,78 @@ export async function saveUnplannedWorkReports(
     
     // Extract work details
     const woDetailsId = selectedWork.wo_details_id || selectedWork.prdn_wo_details_id;
-    const isNonStandardWork = selectedWork.other_work_code || !selectedWork.std_work_type_details?.derived_sw_code;
-    const derivedSwCode = isNonStandardWork ? null : (selectedWork.derived_sw_code || selectedWork.std_work_type_details?.derived_sw_code || null);
-    const otherWorkCode = isNonStandardWork ? (selectedWork.other_work_code || selectedWork.sw_code) : null;
+    // Treat works as non-standard if they are OW (even when std_work_type_details exists),
+    // or if they have other_work_code explicitly.
+    const isNonStandardWork = selectedWork.other_work_code
+      ? true
+      : !!(
+          selectedWork.std_work_type_details?.derived_sw_code?.startsWith('OW') ||
+          selectedWork.std_work_type_details?.sw_code?.startsWith('OW') ||
+          false
+        );
+    const derivedSwCode = isNonStandardWork
+      ? null
+      : (selectedWork.derived_sw_code || selectedWork.std_work_type_details?.derived_sw_code || null);
+    const otherWorkCode = isNonStandardWork
+      ? (selectedWork.other_work_code || selectedWork.sw_code || null)
+      : null;
+
+    // For carry-over works: fetch cumulative time worked till date (previous dates only)
+    // for the selected workers for this specific work code + WO.
+    const dateStr = (formData.fromDate || '').split('T')[0];
+    const workerIdsForTillDate = Array.from(
+      new Set([
+        ...Object.values(formData.skillEmployees).filter(Boolean),
+        ...(formData.selectedTrainees || []).map(t => t.emp_id).filter(Boolean)
+      ])
+    ) as string[];
+
+    const timeWorkedTillDateByWorker: Record<string, number> = {};
+    if (dateStr && woDetailsId && workerIdsForTillDate.length > 0 && (derivedSwCode || otherWorkCode)) {
+      try {
+        let query = supabase
+          .from('prdn_work_reporting')
+          .select(`
+            worker_id,
+            hours_worked_till_date,
+            hours_worked_today,
+            completion_status,
+            from_date,
+            prdn_work_planning!inner(
+              stage_code,
+              wo_details_id,
+              derived_sw_code,
+              other_work_code
+            )
+          `)
+          .eq('prdn_work_planning.stage_code', stageCode)
+          .eq('prdn_work_planning.wo_details_id', woDetailsId)
+          .in('worker_id', workerIdsForTillDate)
+          .lt('from_date', dateStr)
+          .eq('is_active', true)
+          .eq('is_deleted', false)
+          .order('from_date', { ascending: false });
+
+        if (derivedSwCode) {
+          query = query.eq('prdn_work_planning.derived_sw_code', derivedSwCode);
+        } else if (otherWorkCode) {
+          query = query.eq('prdn_work_planning.other_work_code', otherWorkCode);
+        }
+
+        const { data: prevReports, error } = await query;
+        if (error) throw error;
+
+        for (const r of prevReports || []) {
+          const wid = r.worker_id;
+          if (!wid || timeWorkedTillDateByWorker[wid] !== undefined) continue;
+
+          const totalHours = (Number(r.hours_worked_till_date) || 0) + (Number(r.hours_worked_today) || 0);
+          timeWorkedTillDateByWorker[wid] = r.completion_status === 'NC' ? totalHours : 0;
+        }
+      } catch (e) {
+        console.warn('Error fetching timeWorkedTillDateByWorker for unplanned work:', e);
+      }
+    }
     
     // Step 1: Create planning records for each skill competency
     const createdPlanningRecords: any[] = [];
@@ -114,6 +183,8 @@ export async function saveUnplannedWorkReports(
       const wsmId = virtualWork.wsm_id;
       
       // Create planning record
+      const hoursWorkedTillDate = timeWorkedTillDateByWorker[workerId] || 0;
+      const totalHoursWorked = hoursWorkedTillDate + hoursWorkedToday;
       const planningData = {
         stage_code: stageCode,
         wo_details_id: woDetailsId,
@@ -126,8 +197,8 @@ export async function saveUnplannedWorkReports(
         to_date: formData.toDate,
         to_time: formData.toTime,
         planned_hours: hoursWorkedToday,
-        time_worked_till_date: 0,
-        remaining_time: hoursWorkedToday,
+        time_worked_till_date: formData.completionStatus === 'NC' ? totalHoursWorked : 0,
+        remaining_time: Math.max(0, hoursWorkedToday - totalHoursWorked),
         status: 'approved' as const, // Approved since work is being reported
         notes: 'Unplanned work - created for reporting',
         wsm_id: wsmId,
@@ -169,7 +240,8 @@ export async function saveUnplannedWorkReports(
         from_time: formData.fromTime,
         to_date: formData.toDate,
         to_time: formData.toTime,
-        hours_worked_till_date: 0,
+        // Store till-date before this report (exclude today's hours)
+        hours_worked_till_date: hoursWorkedTillDate,
         hours_worked_today: hoursWorkedToday,
         completion_status: formData.completionStatus,
         lt_minutes_total: formData.ltMinutes,
@@ -226,6 +298,8 @@ export async function saveUnplannedWorkReports(
       
       for (const trainee of formData.selectedTrainees) {
         // Create planning record for trainee
+        const hoursWorkedTillDate = timeWorkedTillDateByWorker[trainee.emp_id] || 0;
+        const totalHoursWorked = hoursWorkedTillDate + hoursWorkedToday;
         const traineePlanData = {
           stage_code: stageCode,
           wo_details_id: woDetailsId,
@@ -238,8 +312,8 @@ export async function saveUnplannedWorkReports(
           to_date: formData.toDate,
           to_time: formData.toTime,
           planned_hours: hoursWorkedToday,
-          time_worked_till_date: 0,
-          remaining_time: hoursWorkedToday,
+          time_worked_till_date: formData.completionStatus === 'NC' ? totalHoursWorked : 0,
+          remaining_time: Math.max(0, hoursWorkedToday - totalHoursWorked),
           status: 'approved' as const,
           notes: `Trainee: ${trainee.emp_name} - Added during unplanned work reporting`,
           wsm_id: null,
@@ -258,7 +332,7 @@ export async function saveUnplannedWorkReports(
           from_time: formData.fromTime,
           to_date: formData.toDate,
           to_time: formData.toTime,
-          hours_worked_till_date: 0,
+          hours_worked_till_date: hoursWorkedTillDate,
           hours_worked_today: hoursWorkedToday,
           completion_status: formData.completionStatus,
           lt_minutes_total: formData.ltMinutes,

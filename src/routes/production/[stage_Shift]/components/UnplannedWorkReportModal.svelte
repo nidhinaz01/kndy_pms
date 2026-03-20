@@ -39,6 +39,13 @@
   let previousSkillEmployeesString = '';
   let isLoadingSalary = false;
 
+  // Cumulative "time worked till date" (in hours) per selected worker,
+  // loaded from prdn_work_reporting for previous dates.
+  // Used for lost-time calculation of standard works.
+  let timeWorkedTillDateByWorker: Record<string, number> = {};
+  let isLoadingTimeWorkedTillDate = false;
+  let previousWorkerSelectionForTillDate = '';
+
   // Virtual works array - one per skill competency
   let virtualWorks: any[] = [];
   // Selected skill mapping index (for works with multiple skill combinations)
@@ -75,7 +82,17 @@
       
       // Only calculate lost time for standard works
       if (!isNonStandardWork && state.standardTimeMinutes > 0) {
-        formData.ltMinutes = calculateLostTime(state.standardTimeMinutes, state.actualTimeMinutes);
+        const workerIds = Object.values(formData.skillEmployees).filter(Boolean) as string[];
+        const maxHoursWorkedTillDate = workerIds.length > 0
+          ? Math.max(...workerIds.map(id => timeWorkedTillDateByWorker[id] || 0))
+          : 0;
+
+        const timeWorkedTillDateMinutes = maxHoursWorkedTillDate * 60;
+        formData.ltMinutes = calculateLostTime(
+          state.standardTimeMinutes,
+          state.actualTimeMinutes,
+          timeWorkedTillDateMinutes
+        );
         state.showLostTimeSection = formData.ltMinutes > 0;
       } else {
         formData.ltMinutes = 0;
@@ -97,6 +114,104 @@
     loadAverageEmployeeSalaryData().finally(() => {
       isLoadingSalary = false;
     });
+  }
+
+  // Load cumulative "time worked till date" for the currently selected workers (previous dates only).
+  // This is required for standard-work lost time calculation.
+  $: {
+    const workerIds = Array.from(
+      new Set(Object.values(formData.skillEmployees).filter(Boolean) as string[])
+    );
+    const workerKey = workerIds.slice().sort().join(',');
+
+    if (!isOpen || !selectedWork || !formData.fromDate || workerIds.length === 0) {
+      timeWorkedTillDateByWorker = {};
+      previousWorkerSelectionForTillDate = '';
+    } else if (workerKey && workerKey !== previousWorkerSelectionForTillDate && !isLoadingTimeWorkedTillDate) {
+      previousWorkerSelectionForTillDate = workerKey;
+      isLoadingTimeWorkedTillDate = true;
+      void loadTimeWorkedTillDateByWorkers(workerIds).finally(() => {
+        isLoadingTimeWorkedTillDate = false;
+      });
+    }
+  }
+
+  async function loadTimeWorkedTillDateByWorkers(workerIds: string[]) {
+    try {
+      if (!selectedWork) return;
+
+      const stageCodeToUse = selectedWork?.stage_code || stageCode;
+      const woDetailsId = selectedWork?.wo_details_id || selectedWork?.prdn_wo_details_id;
+      const dateStr = (formData.fromDate || '').split('T')[0];
+
+      if (!stageCodeToUse || !woDetailsId || !dateStr || workerIds.length === 0) {
+        timeWorkedTillDateByWorker = {};
+        return;
+      }
+
+      const nonStandard = isNonStandardWork;
+      const derivedSwCode = !nonStandard
+        ? (selectedWork.derived_sw_code || selectedWork.std_work_type_details?.derived_sw_code || null)
+        : null;
+      const otherWorkCode = nonStandard
+        ? (selectedWork.other_work_code || selectedWork.sw_code || null)
+        : null;
+
+      let query = supabase
+        .from('prdn_work_reporting')
+        .select(`
+          worker_id,
+          hours_worked_till_date,
+          hours_worked_today,
+          completion_status,
+          from_date,
+          prdn_work_planning!inner(
+            stage_code,
+            wo_details_id,
+            derived_sw_code,
+            other_work_code
+          )
+        `)
+        .eq('prdn_work_planning.stage_code', stageCodeToUse)
+        .eq('prdn_work_planning.wo_details_id', woDetailsId)
+        .in('worker_id', workerIds)
+        .lt('from_date', dateStr)
+        .eq('is_active', true)
+        .eq('is_deleted', false)
+        .order('from_date', { ascending: false });
+
+      if (derivedSwCode) {
+        query = query.eq('prdn_work_planning.derived_sw_code', derivedSwCode);
+      } else if (otherWorkCode) {
+        query = query.eq('prdn_work_planning.other_work_code', otherWorkCode);
+      } else {
+        timeWorkedTillDateByWorker = {};
+        return;
+      }
+
+      const { data: reports, error } = await query;
+      if (error) {
+        console.warn('loadTimeWorkedTillDateByWorkers error:', error);
+        timeWorkedTillDateByWorker = {};
+        return;
+      }
+
+      // Since results are ordered by from_date desc, first row per worker is the latest previous report.
+      const map: Record<string, number> = {};
+      for (const r of reports || []) {
+        const wid = r.worker_id;
+        if (!wid) continue;
+        if (map[wid] !== undefined) continue;
+
+        const totalHours = (Number(r.hours_worked_till_date) || 0) + (Number(r.hours_worked_today) || 0);
+        map[wid] = r.completion_status === 'NC' ? totalHours : 0;
+      }
+
+      timeWorkedTillDateByWorker = map;
+    } catch (e) {
+      console.warn('loadTimeWorkedTillDateByWorkers exception:', e);
+      timeWorkedTillDateByWorker = {};
+    }
   }
 
   // Get selected workers with their salaries for lost time calculation
@@ -446,6 +561,11 @@
       return;
     }
 
+    if (isLoadingTimeWorkedTillDate) {
+      alert('Please wait while loading previous time (used for lost time calculation).');
+      return;
+    }
+
     state.currentStage = 2;
   }
 
@@ -590,6 +710,8 @@
     shiftInfo = null;
     skillEmployeesString = '';
     previousSkillEmployeesString = '';
+    timeWorkedTillDateByWorker = {};
+    previousWorkerSelectionForTillDate = '';
     selectedWorkersWithSalaries = [];
     virtualWorks = [];
     isLoading = false;
@@ -791,7 +913,7 @@
             <Button variant="secondary" on:click={handleClose} disabled={isLoading}>
               Cancel
             </Button>
-            <Button variant="primary" on:click={proceedToStage2} disabled={isLoading || isNonStandardWork}>
+            <Button variant="primary" on:click={proceedToStage2} disabled={isLoading || isNonStandardWork || isLoadingTimeWorkedTillDate}>
               Next: Lost Time
             </Button>
           {:else}

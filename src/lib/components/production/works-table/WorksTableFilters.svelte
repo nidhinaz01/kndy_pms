@@ -89,5 +89,25 @@
       class="w-full px-3 py-2 border theme-border rounded-lg theme-bg-primary theme-text-primary focus:ring-2 focus:ring-blue-500 focus:border-transparent"
     />
   </div>
+
+  <div>
+    <label for="status-filter" class="block text-sm font-medium theme-text-primary mb-1">
+      Status
+    </label>
+    <select
+      id="status-filter"
+      value={filters.statusFilter}
+      on:change={(e) => onFilterChange('statusFilter', e.currentTarget.value)}
+      class="w-full px-3 py-2 border theme-border rounded-lg theme-bg-primary theme-text-primary focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+    >
+      <option value="">All</option>
+      <option value="To be planned">To be planned</option>
+      <option value="Draft Plan">Draft Plan</option>
+      <option value="Plan Pending Approval">Plan Pending Approval</option>
+      <option value="Planned">Planned</option>
+      <option value="In progress">In progress</option>
+      <option value="Completed">Completed</option>
+    </select>
+  </div>
 </div>
 

@@ -105,7 +105,7 @@
       // 1. Works with NO planning records (To be planned)
       // 2. Works with planning records that HAVE reporting records (In progress)
       // Exclude works with planning but NO reporting (Draft Plan, Planned)
-      unplannedWorks = allWorks.filter((work: ProductionWork) => {
+      let candidateUnplannedWorks = allWorks.filter((work: ProductionWork) => {
         const workCode = work.std_work_type_details?.derived_sw_code || work.sw_code;
         const woDetailsId = work.wo_details_id;
         if (!workCode || !woDetailsId) return false;
@@ -125,6 +125,71 @@
         );
         
         return hasReportedPlanning;
+      });
+
+      // De-duplicate rows early: same (workCode, wo_details_id) should appear once.
+      const seen = new Set<string>();
+      candidateUnplannedWorks = candidateUnplannedWorks.filter((work: ProductionWork) => {
+        const hasDerivedSwCode = !!work.std_work_type_details?.derived_sw_code;
+        const isNonStandardWork = (work as any).is_added_work === true || !hasDerivedSwCode;
+        const derivedSwCode = hasDerivedSwCode ? work.std_work_type_details?.derived_sw_code || null : null;
+        const otherWorkCode = isNonStandardWork ? (work.sw_code || null) : null;
+        const workCode = (derivedSwCode || otherWorkCode || 'Unknown') as string;
+        const woDetailsId = work.wo_details_id;
+
+        if (!woDetailsId) return false;
+        const key = `${workCode.toUpperCase()}_${woDetailsId}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+
+      // Exclude works that are already Completed.
+      // Important: do this via a lightweight query on `prdn_work_status` to avoid freezing
+      // (the previous approach called `checkWorkStatus()` which can be very heavy).
+      const derivedSwCodes = candidateUnplannedWorks
+        .map((w: any) => w.std_work_type_details?.derived_sw_code)
+        .filter((v: any) => !!v) as string[];
+      const otherWorkCodes = candidateUnplannedWorks
+        .filter((w: any) => (w.is_added_work === true) || !w.std_work_type_details?.derived_sw_code)
+        .map((w: any) => w.sw_code)
+        .filter((v: any) => !!v) as string[];
+      const woDetailsIds = [...new Set(candidateUnplannedWorks.map((w: any) => w.wo_details_id).filter(Boolean))] as number[];
+
+      let completedWorkKeySet = new Set<string>();
+      if (woDetailsIds.length > 0 && (derivedSwCodes.length > 0 || otherWorkCodes.length > 0)) {
+        const orConditions: string[] = [];
+        if (derivedSwCodes.length > 0) orConditions.push(`derived_sw_code.in.(${derivedSwCodes.join(',')})`);
+        if (otherWorkCodes.length > 0) orConditions.push(`other_work_code.in.(${otherWorkCodes.join(',')})`);
+
+        const { data: statusRows, error: statusError } = await supabase
+          .from('prdn_work_status')
+          .select('derived_sw_code, other_work_code, wo_details_id, current_status')
+          .eq('stage_code', stageCode)
+          .in('wo_details_id', woDetailsIds)
+          .or(orConditions.join(','));
+
+        if (!statusError && statusRows) {
+          completedWorkKeySet = new Set(
+            statusRows
+              .filter((r: any) => r.current_status === 'Completed')
+              .map((r: any) => `${(r.derived_sw_code || r.other_work_code).toUpperCase()}_${r.wo_details_id}`)
+          );
+        } else if (statusError) {
+          console.warn('Completed status filtering failed:', statusError);
+        }
+      }
+
+      unplannedWorks = candidateUnplannedWorks.filter((work: ProductionWork) => {
+        const hasDerivedSwCode = !!work.std_work_type_details?.derived_sw_code;
+        const isNonStandardWork = (work as any).is_added_work === true || !hasDerivedSwCode;
+        const derivedSwCode = hasDerivedSwCode ? work.std_work_type_details?.derived_sw_code || null : null;
+        const otherWorkCode = isNonStandardWork ? (work.sw_code || null) : null;
+        const workCode = (derivedSwCode || otherWorkCode || 'Unknown') as string;
+        const woDetailsId = work.wo_details_id;
+        if (!woDetailsId) return false;
+        const key = `${workCode.toUpperCase()}_${woDetailsId}`;
+        return !completedWorkKeySet.has(key);
       });
 
       console.log(`📋 Found ${unplannedWorks.length} unplanned works out of ${allWorks.length} total works (${allPlannedWorks.length} planned, ${reportedPlanningIds.size} with reports)`);

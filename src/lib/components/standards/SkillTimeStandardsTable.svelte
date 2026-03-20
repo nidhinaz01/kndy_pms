@@ -3,7 +3,12 @@
   import Button from '$lib/components/common/Button.svelte';
   import { exportToCSV } from '$lib/utils/exportUtils';
   import { formatDate } from '$lib/utils/formatDate';
-  import { toggleSkillTimeStandardActive, deleteSkillTimeStandard } from '$lib/api/stdSkillTimeStandards';
+import {
+  toggleSkillTimeStandardActive,
+  deleteSkillTimeStandard,
+  fetchSkillTimeStandardsByWsmId,
+  updateSkillTimeStandardsBatch
+} from '$lib/api/stdSkillTimeStandards';
 
   export let tableData: any[] = [];
   export let isTableLoading: boolean = false;
@@ -11,6 +16,8 @@
   export let onStatusUpdated: (() => void) | null = null;
   export let onAddItem: (() => void) | null = null;
   export let onImportClick: (() => void) | null = null;
+export let search: string = '';
+export let onSearchChange: (value: string) => void = () => {};
 
   // Add fallback no-op functions
   const handleAddItem = () => { if (onAddItem) onAddItem(); };
@@ -50,7 +57,117 @@
     }
   }
 
-  let search = '';
+  // Group Edit Standard Times modal (Derived Work Code + Skill Combination)
+  let showEditTimeModal = false;
+  let editModalWsmId: number | null = null;
+  let editModalDerivedSwCode = '';
+  let editModalSkillCombo = '';
+
+  let editTimeSkills: Array<{
+    sts_id: number;
+    skill_short: string;
+    skill_order: number;
+    standard_time_minutes: number;
+    checked: boolean;
+    inputValue: number | '';
+  }> = [];
+
+  let isSavingEditTimes = false;
+  let editModalErrorMsg = '';
+
+  $: selectedEditCount = editTimeSkills.filter(s => s.checked).length;
+
+  async function openEditTimeModalForRow(row: any) {
+    const wsmId = row?.wsm_id;
+    if (!wsmId) {
+      alert('Cannot edit: missing work-skill mapping id.');
+      return;
+    }
+
+    try {
+      const skills = await fetchSkillTimeStandardsByWsmId(wsmId);
+
+      // Show ordered by skill_order then skill_short.
+      const ordered = [...skills].sort((a, b) => {
+        if (a.skill_order !== b.skill_order) return a.skill_order - b.skill_order;
+        return (a.skill_short || '').localeCompare(b.skill_short || '');
+      });
+
+      editTimeSkills = ordered.map(s => ({
+        sts_id: s.sts_id as number,
+        skill_short: s.skill_short,
+        skill_order: s.skill_order,
+        standard_time_minutes: s.standard_time_minutes,
+        checked: true, // default: all selected
+        inputValue: s.standard_time_minutes
+      }));
+
+      editModalWsmId = wsmId;
+      editModalDerivedSwCode = row?.std_work_skill_mapping?.derived_sw_code || '-';
+      editModalSkillCombo = row?.std_work_skill_mapping?.sc_name || '-';
+      editModalErrorMsg = '';
+      showEditTimeModal = true;
+    } catch (error) {
+      console.error('Error loading time standards for edit modal:', error);
+      alert('Failed to load time standards for editing.');
+    }
+  }
+
+  function closeEditTimeModal() {
+    showEditTimeModal = false;
+    editModalWsmId = null;
+    editModalDerivedSwCode = '';
+    editModalSkillCombo = '';
+    editTimeSkills = [];
+    isSavingEditTimes = false;
+    editModalErrorMsg = '';
+  }
+
+  async function saveEditTimeModal() {
+    if (!editModalWsmId) return;
+    if (selectedEditCount === 0) return;
+
+    editModalErrorMsg = '';
+
+    const checkedSkills = editTimeSkills.filter(s => s.checked);
+    const updates = [] as Array<{
+      sts_id: number;
+      skill_short: string;
+      skill_order: number;
+      standard_time_minutes: number;
+    }>;
+
+    for (const s of checkedSkills) {
+      const n = Number(s.inputValue);
+
+      // Accept numerically integer only; 1.0 is OK; decimals rejected.
+      if (!Number.isFinite(n) || n <= 0 || !Number.isInteger(n)) {
+        editModalErrorMsg = `Invalid standard time for skill "${s.skill_short}". Must be an integer > 0.`;
+        return;
+      }
+
+      updates.push({
+        sts_id: s.sts_id,
+        skill_short: s.skill_short,
+        skill_order: s.skill_order,
+        standard_time_minutes: n
+      });
+    }
+
+    isSavingEditTimes = true;
+    try {
+      await updateSkillTimeStandardsBatch(editModalWsmId, updates);
+      closeEditTimeModal();
+      onStatusUpdated?.();
+      alert('Standard times updated successfully.');
+    } catch (error) {
+      console.error('Error saving edited standard times:', error);
+      editModalErrorMsg = 'Failed to update standard times. Please try again.';
+    } finally {
+      isSavingEditTimes = false;
+    }
+  }
+
   let sortColumn: string = 'derived_sw_code';
   let sortDirection: 'asc' | 'desc' = 'asc';
   let showFilters = false;
@@ -180,7 +297,13 @@
 <div class="flex items-center justify-between space-x-2 p-3 border-b theme-bg-primary rounded-t-xl shadow mt-4">
   <span class="text-lg font-semibold theme-text-primary">Skill Time Standards</span>
   <div class="flex items-center gap-2">
-    <input type="text" placeholder="Search..." bind:value={search} class="border theme-border rounded-full pl-3 pr-3 py-2 w-full max-w-xs theme-bg-secondary theme-text-primary" />
+    <input
+      type="text"
+      placeholder="Search..."
+      value={search}
+      on:input={(e) => onSearchChange((e.currentTarget as HTMLInputElement).value)}
+      class="border theme-border rounded-full pl-3 pr-3 py-2 w-full max-w-xs theme-bg-secondary theme-text-primary"
+    />
     <span class="min-w-[140px] whitespace-nowrap">
       <Button variant="secondary" size="sm" on:click={() => showFilters = !showFilters}>
         {showFilters ? 'Hide' : 'Show'} Filters
@@ -350,6 +473,17 @@
             <td class="px-4 py-2" on:click|stopPropagation>
               <div class="flex gap-2">
                 <button
+                  on:click={() => openEditTimeModalForRow(row)}
+                  class="p-1 text-purple-600 hover:text-purple-900 hover:bg-purple-100 dark:hover:bg-purple-900 rounded transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-purple-200 dark:focus:ring-purple-800"
+                  title="Edit standard times"
+                  aria-label="Edit standard times"
+                >
+                  <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 20h9" />
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16.5 3.5a2.121 2.121 0 013 3L7 18l-4 1 1-4 12.5-11.5z" />
+                  </svg>
+                </button>
+                <button
                   on:click={() => handleEditStatus(row)}
                   class="p-1 text-blue-600 hover:text-blue-900 hover:bg-blue-100 dark:hover:bg-blue-900 rounded transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-blue-200 dark:focus:ring-blue-800"
                   title="Edit status"
@@ -383,3 +517,90 @@
     {/if}
   {/if}
 </div> 
+
+{#if showEditTimeModal}
+  <div class="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
+    <div class="theme-bg-primary rounded-2xl shadow-2xl p-8 w-[48rem] max-h-[90vh] overflow-y-auto">
+      <div class="flex items-center justify-between mb-6">
+        <div class="font-bold text-lg theme-text-accent flex items-center gap-2">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 theme-text-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 20h9" />
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16.5 3.5a2.121 2.121 0 013 3L7 18l-4 1 1-4 12.5-11.5z" />
+          </svg>
+          Edit Standard Times
+        </div>
+        <button class="theme-text-secondary hover:theme-text-accent transition-colors" on:click={closeEditTimeModal} aria-label="Close modal">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+
+      <div class="mb-4 text-sm theme-text-secondary">
+        Derived Work Code: <span class="font-semibold theme-text-primary">{editModalDerivedSwCode}</span>
+        <br />
+        Skill Combination: <span class="font-semibold theme-text-primary">{editModalSkillCombo}</span>
+      </div>
+
+      {#if editModalErrorMsg}
+        <div class="theme-text-danger mb-3">{editModalErrorMsg}</div>
+      {/if}
+
+      <div class="border rounded-xl overflow-hidden">
+        <div class="grid grid-cols-[2rem_1.5fr_2fr] gap-2 px-4 py-2 theme-bg-secondary theme-text-primary text-xs">
+          <div class="font-semibold"></div>
+          <div class="font-semibold">Skill</div>
+          <div class="font-semibold">Standard Time (min)</div>
+        </div>
+
+        <div>
+          {#each editTimeSkills as s (s.sts_id)}
+            <div class="grid grid-cols-[2rem_1.5fr_2fr] gap-2 items-center px-4 py-2 border-b last:border-b-0">
+              <div>
+                <input type="checkbox" bind:checked={s.checked} />
+              </div>
+
+              <div class="theme-text-primary text-sm flex flex-col">
+                <span class="font-medium">{s.skill_short}</span>
+                <span class="theme-text-secondary text-xs">Order: {s.skill_order}</span>
+              </div>
+
+              <div>
+                <input
+                  type="number"
+                  step="1"
+                  min="1"
+                  class="w-full border theme-border rounded px-3 py-2 theme-bg-secondary theme-text-primary"
+                  bind:value={s.inputValue}
+                />
+              </div>
+            </div>
+          {/each}
+        </div>
+      </div>
+
+      <div class="flex justify-between gap-3 pt-4">
+        <Button
+          variant="primary"
+          size="md"
+          on:click={saveEditTimeModal}
+          disabled={selectedEditCount === 0 || isSavingEditTimes}
+        >
+          {isSavingEditTimes ? 'Saving...' : 'Save'}
+        </Button>
+        <Button variant="secondary" size="md" on:click={closeEditTimeModal}>Cancel</Button>
+      </div>
+
+      <div class="mt-3 text-xs theme-text-secondary">
+        Only checked skills will be updated. All standard times must be integers &gt; 0.
+      </div>
+    </div>
+  </div>
+{/if}
+
+<style>
+  @keyframes fade-in {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+</style>

@@ -56,6 +56,7 @@
             <p class="text-gray-800 dark:text-gray-100">• Employee Name - Cannot be changed</p>
             <p class="text-gray-800 dark:text-gray-100">• Date of Joining - Cannot be changed</p>
             <p class="mt-2 font-semibold text-green-600 dark:text-green-300">YOU CAN MODIFY:</p>
+            <p class="text-gray-800 dark:text-gray-100">• If you leave a cell blank, the existing database value will be kept (not changed).</p>
             <p class="text-gray-800 dark:text-gray-100">• Employee Category (must be from dropdown values)</p>
             <p class="text-gray-800 dark:text-gray-100">• Skill (must be from dropdown values)</p>
             <p class="text-gray-800 dark:text-gray-100">• Last Appraisal Date (YYYY-MM-DD format, not future date)</p>

@@ -31,6 +31,7 @@
   let selectedRow: any = null;
   let isLoading = true;
   let isTableLoading = false;
+  let commonSearch = '';
 
   // Standard Works state
   let standardWorksData: any[] = [];
@@ -102,16 +103,28 @@
 
   async function handleWorkAdded() {
     await loadStandardWorks(true); // Force reload after add
+    // Standard Works changes affect joins shown in other tabs.
+    derivativeWorksLoaded = false;
+    workSkillMappingLoaded = false;
+    timeStandardsLoaded = false;
     showAddWorkModal = false;
     alert('Work detail added successfully!');
   }
 
   async function handleStatusUpdated() {
     await loadStandardWorks(true); // Force reload after status update
+    // Plant stage / active status changes affect joins shown in other tabs.
+    derivativeWorksLoaded = false;
+    workSkillMappingLoaded = false;
+    timeStandardsLoaded = false;
   }
 
   async function handleImportSuccess() {
     await loadStandardWorks(true); // Force reload after import
+    // Imported/updated base works affect joins shown in other tabs.
+    derivativeWorksLoaded = false;
+    workSkillMappingLoaded = false;
+    timeStandardsLoaded = false;
     showImportWorkModal = false;
   }
 
@@ -354,7 +367,12 @@
         {showSidebar}
         showImportModal={showImportWorkModal}
         tableComponent={WorksTable}
-        tableComponentProps={{ onAddItem: handleAddWork, onImportClick: handleImportClick }}
+        tableComponentProps={{
+          onAddItem: handleAddWork,
+          onImportClick: handleImportClick,
+          search: commonSearch,
+          onSearchChange: (value: string) => commonSearch = value
+        }}
         addModalComponent={AddWorkModal}
         importModalComponent={ImportWorkModal}
         rowDetailsModalComponent={null}
@@ -381,7 +399,12 @@
         {showSidebar}
         showImportModal={showImportDerivativeWorkModal}
         tableComponent={DerivativeWorksTable}
-        tableComponentProps={{ onAddItem: handleAddDerivativeWork, onImportClick: handleImportDerivativeWork }}
+        tableComponentProps={{
+          onAddItem: handleAddDerivativeWork,
+          onImportClick: handleImportDerivativeWork,
+          search: commonSearch,
+          onSearchChange: (value: string) => commonSearch = value
+        }}
         addModalComponent={AddDerivativeWorkModal}
         importModalComponent={ImportDerivativeWorkModal}
         rowDetailsModalComponent={null}
@@ -408,7 +431,12 @@
         {showSidebar}
         showImportModal={showImportWorkSkillMappingModal}
         tableComponent={WorkSkillMappingTable}
-        tableComponentProps={{ onAddItem: handleAddWorkSkillMapping, onImportClick: handleImportWorkSkillMapping }}
+        tableComponentProps={{
+          onAddItem: handleAddWorkSkillMapping,
+          onImportClick: handleImportWorkSkillMapping,
+          search: commonSearch,
+          onSearchChange: (value: string) => commonSearch = value
+        }}
         addModalComponent={AddWorkSkillMappingModal}
         importModalComponent={ImportWorkSkillMappingModal}
         rowDetailsModalComponent={null}
@@ -435,7 +463,12 @@
         {showSidebar}
         showImportModal={showImportTimeStandardModal}
         tableComponent={SkillTimeStandardsTable}
-        tableComponentProps={{ onAddItem: handleAddTimeStandard, onImportClick: handleImportTimeStandard }}
+        tableComponentProps={{
+          onAddItem: handleAddTimeStandard,
+          onImportClick: handleImportTimeStandard,
+          search: commonSearch,
+          onSearchChange: (value: string) => commonSearch = value
+        }}
         addModalComponent={AddSkillTimeStandardModal}
         importModalComponent={ImportSkillTimeStandardModal}
         rowDetailsModalComponent={null}

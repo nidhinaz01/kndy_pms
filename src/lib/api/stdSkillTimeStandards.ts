@@ -238,6 +238,39 @@ export async function saveBulkSkillTimeStandards(wsm_id: number, timeStandards: 
   }
 }
 
+export interface SkillTimeStandardBatchUpdateItem {
+  sts_id: number;
+  skill_short: string;
+  skill_order: number;
+  standard_time_minutes: number;
+}
+
+// Batch update standard_time_minutes for multiple skills in one atomic RPC.
+// Unchecked skills are excluded by the caller.
+export async function updateSkillTimeStandardsBatch(
+  wsm_id: number,
+  updates: SkillTimeStandardBatchUpdateItem[]
+): Promise<void> {
+  try {
+    if (!wsm_id) throw new Error('wsm_id is required');
+    if (!Array.isArray(updates) || updates.length === 0) return;
+
+    const { getCurrentUsername } = await import('$lib/utils/userUtils');
+    const username = getCurrentUsername();
+
+    const { error } = await supabase.rpc('update_skill_time_standards_batch', {
+      p_wsm_id: wsm_id,
+      p_username: username,
+      p_updates: updates
+    });
+
+    if (error) throw error;
+  } catch (error) {
+    console.error('Error batch updating skill time standards:', error);
+    throw error;
+  }
+}
+
 // Calculate total time for a work-skill mapping
 // Uses database function for efficient calculation
 export async function calculateTotalTimeForMapping(wsm_id: number): Promise<number> {

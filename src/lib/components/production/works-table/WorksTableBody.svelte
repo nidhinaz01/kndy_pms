@@ -79,7 +79,7 @@
           <div class="text-4xl mb-2">🔧</div>
           <p class="theme-text-secondary text-lg">No works found</p>
           <p class="theme-text-secondary text-sm mt-1">
-            {filters.searchTerm || filters.woNoFilter || filters.pwoNoFilter || filters.vehicleModelFilter || filters.workCodeFilter || filters.workNameFilter || filters.requiredSkillsFilter ? 'Try adjusting your filters' : 'No works have been added yet'}
+            {filters.searchTerm || filters.woNoFilter || filters.pwoNoFilter || filters.vehicleModelFilter || filters.workCodeFilter || filters.workNameFilter || filters.requiredSkillsFilter || filters.statusFilter ? 'Try adjusting your filters' : 'No works have been added yet'}
           </p>
         </div>
       </td>

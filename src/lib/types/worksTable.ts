@@ -20,6 +20,7 @@ export interface WorksTableFilters {
   workCodeFilter: string;
   workNameFilter: string;
   requiredSkillsFilter: string;
+  statusFilter: string;
 }
 
 export interface WorksTableState {
@@ -36,7 +37,8 @@ export const initialWorksTableFilters: WorksTableFilters = {
   vehicleModelFilter: '',
   workCodeFilter: '',
   workNameFilter: '',
-  requiredSkillsFilter: ''
+  requiredSkillsFilter: '',
+  statusFilter: ''
 };
 
 export const initialWorksTableState: WorksTableState = {
