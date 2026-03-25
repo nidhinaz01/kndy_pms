@@ -303,7 +303,17 @@
     submissionStatusCache.clearForStageDate(stageCode, selectedDate);
     
     await dataLoading.loadShiftBreakTimes(dataLoadingContext);
-    await handleTabChange(activeTab);
+    const dateDependentTabs = new Set([
+      'manpower-plan',
+      'draft-plan',
+      'plan',
+      'manpower-report',
+      'draft-report',
+      'report'
+    ]);
+    if (dateDependentTabs.has(activeTab)) {
+      await handleTabChange(activeTab);
+    }
   }
   
   // Watch selectedDate for debugging

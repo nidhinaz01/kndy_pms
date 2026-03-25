@@ -445,9 +445,22 @@ export async function checkWorkStatus(
  */
 export async function checkPlanningStatus(
   works: any[],
-  stageCode: string
+  stageCode: string,
+  selectedDate?: string,
+  shiftCode?: string
 ): Promise<{ [key: string]: WorkPlanningStatus }> {
   const workPlanningStatus: { [key: string]: WorkPlanningStatus } = {};
+  let dateStr: string | undefined;
+  if (selectedDate) {
+    if (typeof selectedDate === 'string') {
+      dateStr = selectedDate.split('T')[0];
+    } else if (selectedDate && typeof selectedDate === 'object' && 'toISOString' in selectedDate) {
+      dateStr = (selectedDate as Date).toISOString().split('T')[0];
+    } else {
+      dateStr = String(selectedDate || '').split('T')[0];
+    }
+  }
+
   
   if (!works || works.length === 0) {
     return workPlanningStatus;
@@ -498,6 +511,21 @@ export async function checkPlanningStatus(
 
     uniqueWorkCodes.add(workCode);
     uniqueWoDetailsIds.add(woDetailsId);
+  }
+
+  // Must match canPlanWork / PlanWorkModal save: block when an approved submission already covers this stage-shift-date
+  if (dateStr && shiftCode) {
+    const { isPlanningBlockedForStageShiftDate } = await import('$lib/api/production/productionWorkValidationService');
+    const blockCheck = await isPlanningBlockedForStageShiftDate(stageCode, shiftCode, dateStr);
+    if (blockCheck.isBlocked) {
+      workMap.forEach((info) => {
+        workPlanningStatus[info.workKey] = {
+          canPlan: false,
+          reason: blockCheck.reason
+        };
+      });
+      return workPlanningStatus;
+    }
   }
 
   // Batch fetch removal data
@@ -589,6 +617,57 @@ export async function checkPlanningStatus(
     console.error('Error batch fetching last planning data:', error);
   }
 
+  // Batch fetch plans for selected date to show precise inline reasons in Works tab
+  let selectedDatePlanningMap = new Map<string, any[]>();
+  if (dateStr) {
+    try {
+      const orConditions: string[] = [];
+      if (derivedSwCodes.length > 0) {
+        orConditions.push(`derived_sw_code.in.(${derivedSwCodes.join(',')})`);
+      }
+      if (otherWorkCodes.length > 0) {
+        orConditions.push(`other_work_code.in.(${otherWorkCodes.join(',')})`);
+      }
+
+      if (orConditions.length > 0 && uniqueWoDetailsIds.size > 0) {
+        let dateOffset = 0;
+        let dateHasMore = true;
+        while (dateHasMore) {
+          const { data: planningData } = await supabase
+            .from('prdn_work_planning')
+            .select('id, derived_sw_code, other_work_code, wo_details_id, status, from_date')
+            .eq('stage_code', stageCode)
+            .eq('from_date', dateStr)
+            .eq('is_active', true)
+            .eq('is_deleted', false)
+            .in('wo_details_id', Array.from(uniqueWoDetailsIds))
+            .or(orConditions.join(','))
+            .order('id')
+            .range(dateOffset, dateOffset + PAGE_SIZE - 1);
+
+          if (planningData && planningData.length > 0) {
+            planningData.forEach((plan) => {
+              const code = plan.derived_sw_code || plan.other_work_code;
+              const woId = plan.wo_details_id;
+              if (code && woId) {
+                const key = `${code}_${woId}`;
+                if (!selectedDatePlanningMap.has(key)) {
+                  selectedDatePlanningMap.set(key, []);
+                }
+                selectedDatePlanningMap.get(key)!.push(plan);
+              }
+            });
+          }
+
+          dateHasMore = (planningData?.length ?? 0) === PAGE_SIZE;
+          dateOffset += PAGE_SIZE;
+        }
+      }
+    } catch (error) {
+      console.error('Error batch fetching selected date planning data:', error);
+    }
+  }
+
   // Process each work individually (by work code AND wo_details_id)
   for (const [workKey, workInfo] of workMap.entries()) {
     const { workCode, woDetailsId } = workInfo;
@@ -608,6 +687,38 @@ export async function checkPlanningStatus(
 
       // Check last plan status (keyed by work code AND wo_details_id)
       const lastPlan = lastPlanningDataMap.get(removalKey);
+      const selectedDatePlans = selectedDatePlanningMap.get(removalKey) || [];
+
+      if (selectedDatePlans.length > 0) {
+        const hasPendingApprovalPlan = selectedDatePlans.some((p) => p.status === 'pending_approval');
+        const hasDraftPlan = selectedDatePlans.some((p) => p.status === 'draft');
+        const hasApprovedPlan = selectedDatePlans.some((p) => p.status === 'approved');
+
+        if (hasPendingApprovalPlan) {
+          workPlanningStatus[workKey] = {
+            canPlan: false,
+            reason: `Work already has a pending approval plan for ${dateStr}.`
+          };
+          continue;
+        }
+
+        if (hasDraftPlan) {
+          workPlanningStatus[workKey] = {
+            canPlan: false,
+            reason: `Work already has a draft plan for ${dateStr}.`
+          };
+          continue;
+        }
+
+        if (hasApprovedPlan) {
+          workPlanningStatus[workKey] = {
+            canPlan: false,
+            reason: `Work is already planned for ${dateStr}.`
+          };
+          continue;
+        }
+      }
+
       if (lastPlan) {
         if (lastPlan.status === 'draft' || lastPlan.status === 'pending_approval') {
           const reason = `Work already has a ${lastPlan.status} plan from ${lastPlan.from_date}. Please wait for approval or delete the existing plan first.`;

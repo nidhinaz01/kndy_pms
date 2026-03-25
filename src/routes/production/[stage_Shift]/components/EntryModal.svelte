@@ -8,6 +8,13 @@
   export let isLoading: boolean = false;
   export let progressMessage: string = '';
   export let stageCode: string = '';
+  let workOrderInput: string = '';
+
+  function getWorkOrderLabel(wo: any): string {
+    return `${wo.prdn_wo_details?.wo_no || 'N/A'} - ${wo.prdn_wo_details?.pwo_no || 'N/A'} - ${wo.prdn_wo_details?.wo_model || 'N/A'}`;
+  }
+
+  $: workOrderOptionMap = new Map(waitingWorkOrders.map((wo) => [getWorkOrderLabel(wo), wo]));
 
   const dispatch = createEventDispatcher();
 
@@ -19,14 +26,10 @@
     dispatch('confirm', selectedWorkOrder);
   }
 
-  function handleWorkOrderChange(event: Event) {
-    const target = event.target as HTMLSelectElement;
-    const selectedIndex = parseInt(target.value);
-    if (!isNaN(selectedIndex) && selectedIndex >= 0 && selectedIndex < waitingWorkOrders.length) {
-      selectedWorkOrder = waitingWorkOrders[selectedIndex];
-    } else {
-      selectedWorkOrder = null;
-    }
+  function handleWorkOrderInput(event: Event) {
+    const target = event.target as HTMLInputElement;
+    workOrderInput = target.value;
+    selectedWorkOrder = workOrderOptionMap.get(workOrderInput) || null;
   }
 </script>
 
@@ -64,19 +67,24 @@
           <label for="workOrderSelect" class="block text-sm font-medium theme-text-primary mb-2">
             Select Work Order <span class="text-red-500">*</span>
           </label>
-          <select
+          <input
             id="workOrderSelect"
+            type="text"
+            list="entryWorkOrderOptions"
+            placeholder="Type or select WO No / PWO No / model..."
+            bind:value={workOrderInput}
             disabled={isLoading}
             class="w-full px-3 py-2 border theme-border rounded-lg theme-bg-primary theme-text-primary focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-50"
-            on:change={handleWorkOrderChange}
-          >
-            <option value="">Choose a work order...</option>
-            {#each waitingWorkOrders as wo, index}
-              <option value={index}>
-                {wo.prdn_wo_details?.wo_no || 'N/A'} - {wo.prdn_wo_details?.pwo_no || 'N/A'} - {wo.prdn_wo_details?.wo_model || 'N/A'}
-              </option>
+            on:input={handleWorkOrderInput}
+          />
+          <datalist id="entryWorkOrderOptions">
+            {#each waitingWorkOrders as wo}
+              <option value={getWorkOrderLabel(wo)}></option>
             {/each}
-          </select>
+          </datalist>
+          {#if workOrderInput && !selectedWorkOrder}
+            <p class="text-xs text-amber-600 mt-2">Select a value from the suggestions.</p>
+          {/if}
         </div>
 
         {#if isLoading && progressMessage}

@@ -39,7 +39,7 @@ export interface DataLoadingContext {
  * Optimized: Uses request deduplication to prevent duplicate concurrent requests
  */
 export async function loadWorkOrdersData(context: DataLoadingContext) {
-  const requestKey = `work-orders:${context.stageCode}:${context.selectedDate}`;
+  const requestKey = `work-orders:${context.stageCode}`;
   
   context.setIsWorkOrdersLoading(true);
   try {
@@ -57,7 +57,7 @@ export async function loadWorkOrdersData(context: DataLoadingContext) {
  * Optimized: Uses request deduplication to prevent duplicate concurrent requests
  */
 export async function loadWorksData(context: DataLoadingContext) {
-  const requestKey = `works:${context.stageCode}:${context.selectedDate}`;
+  const requestKey = `works:${context.stageCode}`;
   
   context.setIsWorksLoading(true);
   try {

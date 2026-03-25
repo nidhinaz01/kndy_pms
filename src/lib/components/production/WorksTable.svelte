@@ -46,7 +46,7 @@
   // Check planning status and work status when data, stageCode, or selectedDate changes
   $: if (data.length > 0 && stageCode && selectedDate) {
     console.log('🔍 WorksTable: Re-checking work status for date:', selectedDate);
-    checkPlanningStatus(data, stageCode).then(status => {
+    checkPlanningStatus(data, stageCode, selectedDate, shiftCode).then(status => {
       state.workPlanningStatus = status;
     });
     checkWorkStatus(data, stageCode, selectedDate).then(status => {

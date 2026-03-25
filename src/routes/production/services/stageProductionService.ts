@@ -414,6 +414,24 @@ export async function loadStageWorks(
 }
 
 /**
+ * Load work orders snapshot data for a specific stage
+ * This is intentionally date-independent for Work Orders tab.
+ */
+export async function loadStageWorkOrdersSnapshot(stageCode: string): Promise<any[]> {
+  // Reuse existing implementation while keeping API contract date-independent.
+  return loadStageWorkOrders(stageCode, 'snapshot');
+}
+
+/**
+ * Load works snapshot data for a specific stage
+ * This is intentionally date-independent for Works tab.
+ */
+export async function loadStageWorksSnapshot(stageCode: string): Promise<ProductionWork[]> {
+  // Reuse existing implementation while keeping API contract date-independent.
+  return loadStageWorks(stageCode, 'snapshot');
+}
+
+/**
  * Load planned works data for a specific stage
  */
 export async function loadStagePlannedWorks(

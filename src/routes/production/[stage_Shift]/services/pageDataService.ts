@@ -1,4 +1,4 @@
-import { loadStageWorkOrders, loadStageWorks, loadStagePlannedWorks, loadStageManpower, loadShiftBreakTimes } from '../../services/stageProductionService';
+import { loadStageWorkOrdersSnapshot, loadStageWorksSnapshot, loadStagePlannedWorks, loadStageManpower, loadShiftBreakTimes } from '../../services/stageProductionService';
 import { getDraftWorkPlans, getDraftManpowerPlans, getDraftWorkReports, getDraftManpowerReports } from '$lib/api/production/planningReportingService';
 import { supabase } from '$lib/supabaseClient';
 import { submissionStatusCache } from './submissionStatusCache';
@@ -7,12 +7,10 @@ import { submissionStatusCache } from './submissionStatusCache';
  * Load work orders data
  */
 export async function loadWorkOrdersData(stageCode: string, selectedDate: string) {
-  if (!selectedDate) return [];
-  
   try {
-    console.log(`🔍 Loading work orders for ${stageCode} on date: ${selectedDate}`);
-    const data = await loadStageWorkOrders(stageCode, selectedDate);
-    console.log(`📦 Active Work Orders found for ${stageCode} on ${selectedDate}:`, data.length);
+    console.log(`🔍 Loading work orders snapshot for ${stageCode}`);
+    const data = await loadStageWorkOrdersSnapshot(stageCode);
+    console.log(`📦 Active Work Orders snapshot found for ${stageCode}:`, data.length);
     return data;
   } catch (error) {
     console.error('Error loading work orders data:', error);
@@ -24,10 +22,8 @@ export async function loadWorkOrdersData(stageCode: string, selectedDate: string
  * Load works data
  */
 export async function loadWorksData(stageCode: string, selectedDate: string) {
-  if (!selectedDate) return [];
-  
   try {
-    return await loadStageWorks(stageCode, selectedDate);
+    return await loadStageWorksSnapshot(stageCode);
   } catch (error) {
     console.error('Error loading works data:', error);
     return [];
