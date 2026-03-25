@@ -54,15 +54,15 @@
   let activeTab = 'work-orders';
   let previousStageShift = '';
   
-  // Reset to work-orders tab and reload data when route parameters change
+  // Client-side navigation reuses this page instance; dataLoadingContext can lag behind the new URL.
+  // Full reload guarantees fresh state for the new stage / shift.
   $: {
     const currentStageShift = `${stageCode}-${shiftCode}`;
     if (currentStageShift !== previousStageShift && previousStageShift !== '') {
-      // Route parameters changed - reset to work-orders tab and reload
       activeTab = 'work-orders';
-      // Reload data for the new stage-shift
-      dataLoading.loadWorkOrdersData(dataLoadingContext);
-      dataLoading.loadWorksData(dataLoadingContext);
+      if (browser) {
+        window.location.reload();
+      }
     }
     previousStageShift = currentStageShift;
   }
@@ -428,18 +428,12 @@
   // Track previous route to detect navigation
   let previousRoute = '';
   
-  // Watch for route changes to reload page and reset to work-orders tab
+  // Track pathname for sidebar; stage-shift changes use a full reload (see block above).
   $: {
     const currentRoute = $page.url.pathname;
-    // When navigating to a different route (or same route from different page), reset to work-orders tab
     if (currentRoute !== previousRoute && currentRoute.includes('/production/')) {
       previousRoute = currentRoute;
       activeTab = 'work-orders';
-      // Reload data when navigating to this route (only if not initial load)
-      if (!isLoading && previousRoute !== '') {
-        dataLoading.loadWorkOrdersData(dataLoadingContext);
-        dataLoading.loadWorksData(dataLoadingContext);
-      }
     } else if (currentRoute !== previousRoute) {
       previousRoute = currentRoute;
     }

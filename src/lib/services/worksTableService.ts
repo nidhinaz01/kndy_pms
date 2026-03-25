@@ -2,6 +2,7 @@ import { supabase } from '$lib/supabaseClient';
 import { canPlanWork } from '$lib/api/production';
 import type { WorkPlanningStatus, WorkStatus } from '$lib/types/worksTable';
 import { parseUTCDate } from '$lib/utils/formatDate';
+import { getWorkStatusRowKey, getWorkStatusRowParts } from '$lib/utils/worksTableUtils';
 
 const PAGE_SIZE = 1000;
 
@@ -46,32 +47,35 @@ export async function checkWorkStatus(
   const uniqueWoDetailsIds = new Set<number>();
 
   for (const work of works) {
+    const workKey = getWorkStatusRowKey(work, stageCode);
+    if (!workKey) {
+      continue;
+    }
+
+    const parts = getWorkStatusRowParts(work);
     const hasDerivedSwCode = !!work.std_work_type_details?.derived_sw_code;
     const isNonStandardWork = work.is_added_work === true || !hasDerivedSwCode;
-    
+
     const derivedSwCode = hasDerivedSwCode ? work.std_work_type_details.derived_sw_code : null;
     const otherWorkCode = isNonStandardWork ? (work.sw_code || null) : null;
-    const workCode = derivedSwCode || otherWorkCode || 'Unknown';
+    const legacyWorkCode = derivedSwCode || otherWorkCode || 'Unknown';
     const woDetailsId = work.wo_details_id;
-    
-    // Include wo_details_id in workKey to differentiate between work orders
-    const workKey = `${workCode}_${woDetailsId}_${stageCode}`;
 
-    if (!woDetailsId || !workCode || workCode === 'Unknown') {
+    if (!woDetailsId || parts.workCode === 'Unknown') {
       workStatus[workKey] = 'To be planned';
       continue;
     }
 
     workMap.set(workKey, {
       work,
-      workCode,
+      workCode: parts.workCode,
       derivedSwCode,
       otherWorkCode,
       woDetailsId,
       workKey
     });
 
-    uniqueWorkCodes.add(workCode);
+    uniqueWorkCodes.add(legacyWorkCode);
     uniqueWoDetailsIds.add(woDetailsId);
   }
 
@@ -481,18 +485,21 @@ export async function checkPlanningStatus(
   const uniqueWoDetailsIds = new Set<number>();
 
   for (const work of works) {
+    const workKey = getWorkStatusRowKey(work, stageCode);
+    if (!workKey) {
+      continue;
+    }
+
+    const parts = getWorkStatusRowParts(work);
     const hasDerivedSwCode = !!work.std_work_type_details?.derived_sw_code;
     const isNonStandardWork = work.is_added_work === true || !hasDerivedSwCode;
-    
+
     const derivedSwCode = hasDerivedSwCode ? work.std_work_type_details.derived_sw_code : null;
     const otherWorkCode = isNonStandardWork ? (work.sw_code || null) : null;
-    const workCode = derivedSwCode || otherWorkCode || 'Unknown';
+    const legacyWorkCode = derivedSwCode || otherWorkCode || 'Unknown';
     const woDetailsId = work.wo_details_id;
-    
-    // Include wo_details_id in workKey to differentiate between work orders
-    const workKey = `${workCode}_${woDetailsId}_${stageCode}`;
 
-    if (!woDetailsId || !workCode || workCode === 'Unknown') {
+    if (!woDetailsId || parts.workCode === 'Unknown') {
       workPlanningStatus[workKey] = {
         canPlan: false,
         reason: 'Invalid work code or work order ID'
@@ -502,14 +509,14 @@ export async function checkPlanningStatus(
 
     workMap.set(workKey, {
       work,
-      workCode,
+      workCode: parts.workCode,
       derivedSwCode,
       otherWorkCode,
       woDetailsId,
       workKey
     });
 
-    uniqueWorkCodes.add(workCode);
+    uniqueWorkCodes.add(legacyWorkCode);
     uniqueWoDetailsIds.add(woDetailsId);
   }
 

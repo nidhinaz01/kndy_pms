@@ -1,7 +1,7 @@
 <script lang="ts">
   import { createEventDispatcher, onMount } from 'svelte';
   import { checkWorkStatus, checkPlanningStatus } from '$lib/services/worksTableService';
-  import { applyFilters, enrichWorkData, getWorkId } from '$lib/utils/worksTableUtils';
+  import { applyFilters, enrichWorkData, getWorkId, getWorkStatusRowKey } from '$lib/utils/worksTableUtils';
   import type { WorksTableFilters, WorksTableState } from '$lib/types/worksTable';
   import { initialWorksTableFilters, initialWorksTableState } from '$lib/types/worksTable';
   import { sortTableData, handleSortClick, type SortConfig } from '$lib/utils/tableSorting';
@@ -25,6 +25,9 @@
   let sortConfig: SortConfig = { column: null, direction: null };
   let filteredData: any[] = [];
   let sortedData: any[] = [];
+  /** Until checkWorkStatus resolves, summary must not assume every row is "To be planned". */
+  let workStatusLoadId = 0;
+  let isWorkStatusLoading = true;
 
   // Watch for data changes and apply filters
   $: {
@@ -43,16 +46,34 @@
     sortConfig = handleSortClick(column, sortConfig);
   }
 
-  // Check planning status and work status when data, stageCode, or selectedDate changes
+  // Check planning status and work status when data, stageCode, selectedDate, or shiftCode changes
   $: if (data.length > 0 && stageCode && selectedDate) {
+    const loadId = ++workStatusLoadId;
+    isWorkStatusLoading = true;
     console.log('🔍 WorksTable: Re-checking work status for date:', selectedDate);
-    checkPlanningStatus(data, stageCode, selectedDate, shiftCode).then(status => {
+    checkPlanningStatus(data, stageCode, selectedDate, shiftCode).then((status) => {
+      if (loadId !== workStatusLoadId) return;
       state.workPlanningStatus = status;
     });
-    checkWorkStatus(data, stageCode, selectedDate).then(status => {
-      console.log('🔍 WorksTable: Work status updated:', status);
-      state.workStatus = status;
-    });
+    checkWorkStatus(data, stageCode, selectedDate)
+      .then((status) => {
+        if (loadId !== workStatusLoadId) return;
+        console.log('🔍 WorksTable: Work status updated:', Object.keys(status).length, 'keys');
+        state.workStatus = status;
+      })
+      .catch((err) => {
+        console.error('checkWorkStatus failed:', err);
+        if (loadId !== workStatusLoadId) return;
+        state.workStatus = {};
+      })
+      .finally(() => {
+        if (loadId === workStatusLoadId) {
+          isWorkStatusLoading = false;
+        }
+      });
+  } else {
+    workStatusLoadId++;
+    isWorkStatusLoading = false;
   }
 
   function handleSearchChange(value: string) {
@@ -144,9 +165,8 @@
   }
 
   function isWorkPlanned(work: any): boolean {
-    const derivedSwCode = work.std_work_type_details?.derived_sw_code || work.sw_code;
-    const woDetailsId = work.wo_details_id;
-    const workKey = `${derivedSwCode}_${woDetailsId}_${stageCode}`;
+    const workKey = getWorkStatusRowKey(work, stageCode);
+    if (!workKey) return false;
     const status = state.workStatus[workKey];
     const planningStatus = state.workPlanningStatus[workKey];
     
@@ -165,9 +185,10 @@
   }
 
   function getRemoveWorkReason(work: any): { canRemove: boolean; reason?: string } {
-    const derivedSwCode = work.std_work_type_details?.derived_sw_code || work.sw_code;
-    const woDetailsId = work.wo_details_id;
-    const workKey = `${derivedSwCode}_${woDetailsId}_${stageCode}`;
+    const workKey = getWorkStatusRowKey(work, stageCode);
+    if (!workKey) {
+      return { canRemove: false, reason: 'Invalid work code or work order ID' };
+    }
     // Default to 'To be planned' if status is not yet loaded (matches template behavior)
     const status = state.workStatus[workKey] || 'To be planned';
     
@@ -213,9 +234,8 @@
   }
 
   function getPlanningStatus(work: any) {
-    const derivedSwCode = work.std_work_type_details?.derived_sw_code || work.sw_code;
-    const woDetailsId = work.wo_details_id;
-    const workKey = `${derivedSwCode}_${woDetailsId}_${stageCode}`;
+    const workKey = getWorkStatusRowKey(work, stageCode);
+    if (!workKey) return { canPlan: false };
     return state.workPlanningStatus[workKey] || { canPlan: false };
   }
 
@@ -297,7 +317,12 @@
 
   {#if sortedData.length > 0}
     <div class="px-6 py-4 theme-bg-secondary border-t theme-border">
-      <WorksTableSummary filteredData={sortedData} workStatus={state.workStatus} {stageCode} />
+      <WorksTableSummary
+        filteredData={sortedData}
+        workStatus={state.workStatus}
+        {stageCode}
+        statusesLoading={isWorkStatusLoading}
+      />
     </div>
   {/if}
 </div>

@@ -33,6 +33,28 @@ export function getWorkId(work: any): string {
   return `${derivedSwCode}_${woDetailsId}`;
 }
 
+/**
+ * Same workCode + key as WorksTableBody — must match checkWorkStatus / workStatus map.
+ */
+export function getWorkStatusRowParts(work: any): {
+  workCode: string;
+  derivedSwCode: string | null;
+  otherWorkCode: string | null;
+  woDetailsId: number | undefined;
+} {
+  const derivedSwCode = work.std_work_type_details?.derived_sw_code || work.sw_code;
+  const otherWorkCode = work.is_added_work ? (work.sw_code || null) : null;
+  const workCode = derivedSwCode || otherWorkCode || 'Unknown';
+  const woDetailsId = work.wo_details_id;
+  return { workCode, derivedSwCode, otherWorkCode, woDetailsId };
+}
+
+export function getWorkStatusRowKey(work: any, stageCode: string): string | null {
+  const { workCode, woDetailsId } = getWorkStatusRowParts(work);
+  if (woDetailsId == null || woDetailsId === undefined) return null;
+  return `${workCode}_${woDetailsId}_${stageCode}`;
+}
+
 export function applyFilters(
   data: any[],
   filters: WorksTableFilters,
@@ -95,14 +117,8 @@ export function applyFilters(
 
   if (filters.statusFilter && stageCode) {
     filtered = filtered.filter((work) => {
-      const hasDerivedSwCode = !!work.std_work_type_details?.derived_sw_code;
-      const isNonStandardWork = work.is_added_work === true || !hasDerivedSwCode;
-      const derivedSwCode = hasDerivedSwCode ? work.std_work_type_details?.derived_sw_code || null : null;
-      const otherWorkCode = isNonStandardWork ? (work.sw_code || null) : null;
-      const workCode = derivedSwCode || otherWorkCode || 'Unknown';
-      const woDetailsId = work.wo_details_id;
-      if (!woDetailsId) return false;
-      const workKey = `${workCode}_${woDetailsId}_${stageCode}`;
+      const workKey = getWorkStatusRowKey(work, stageCode);
+      if (!workKey) return false;
       const status = workStatus[workKey] || 'To be planned';
       return status === filters.statusFilter;
     });
