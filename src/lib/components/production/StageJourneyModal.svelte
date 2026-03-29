@@ -13,6 +13,17 @@
   const dispatch = createEventDispatcher();
 
   import { formatDateTimeLocal } from '$lib/utils/formatDate';
+
+  /** Delete is only for segments that *leave* the current page's stage; compare loosely (trim + case) so Plan/Report match DB quirks. */
+  function stagesMatchForDelete(
+    journeyFromStage: string | undefined | null,
+    pageStage: string | undefined | null
+  ): boolean {
+    const a = String(journeyFromStage ?? '').trim();
+    const b = String(pageStage ?? '').trim();
+    if (!a || !b) return false;
+    return a.toUpperCase() === b.toUpperCase();
+  }
   
   function handleClose() {
     dispatch('close');
@@ -102,7 +113,7 @@
                          </p>
                        {/if}
                      </div>
-                     {#if journey.from_stage === parentStage}
+                     {#if stagesMatchForDelete(journey.from_stage, parentStage)}
                        <div style="margin-left: 12px; display: flex; gap: 8px;">
                          <button
                            on:click={() => handleDeleteJourney(journey)}

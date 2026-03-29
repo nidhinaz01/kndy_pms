@@ -43,13 +43,15 @@ export async function fetchSkillCombinations(): Promise<SkillCombination[]> {
   }
 }
 
-// Fetch all skills from skill master
+// Fetch active skills from skill master (current rate version only; matches fetchSkillMaster)
 export async function fetchSkills(): Promise<Array<{ skill_id: number; skill_name: string }>> {
   try {
     const { data, error } = await supabase
       .from('hr_skill_master')
       .select('id, skill_short')
       .eq('is_deleted', false)
+      .eq('is_active', true)
+      .is('wet_date', null)
       .order('skill_short');
 
     if (error) throw error;

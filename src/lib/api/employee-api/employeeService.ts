@@ -81,6 +81,14 @@ export async function saveEmployee(employeeData: EmployeeFormData, createdBy: st
   }
 }
 
+/**
+ * Persists employee edits to `hr_emp`.
+ *
+ * When `shift_code` changes, a row is written to `prdn_emp_shift_change_log` by the
+ * database trigger `hr_emp_shift_change_log_trg` (see `database_migration_prdn_emp_shift_change_log.sql`).
+ * That covers this form save, HR bulk CSV update, the production shift-change page, and any other client
+ * that updates `hr_emp.shift_code` with `modified_by` / `modified_dt` set as usual.
+ */
 export async function updateEmployee(id: number, employeeData: Partial<EmployeeFormData>, modifiedBy: string): Promise<void> {
   try {
     const updateData: any = {

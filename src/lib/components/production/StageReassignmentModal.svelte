@@ -1,7 +1,7 @@
 <script lang="ts">
   import { createEventDispatcher, onMount } from 'svelte';
   import Button from '$lib/components/common/Button.svelte';
-  import { fetchAvailableStages, fetchShiftDetails } from '$lib/api/production';
+  import { fetchAvailableStages, fetchStagesForShift, fetchShiftDetails } from '$lib/api/production';
   import type { ProductionEmployee } from '$lib/api/production';
   import { supabase } from '$lib/supabaseClient';
 
@@ -13,6 +13,10 @@
 
   // Form state
   let availableStages: string[] = [];
+  /** True when hr_shift_stage_master returned no rows for this shift (do not fall back to all stages). */
+  let noShiftStageMapping = false;
+  /** Avoid re-fetching stages on every parent re-render when modal stays open for the same employee/shift. */
+  let lastStagesLoadKey = '';
   let selectedStage: string = '';
   let fromTime: string = '';
   let toTime: string = '';
@@ -50,9 +54,18 @@
     await loadStages();
   });
 
-  // Watch for modal opening and load stages
-  $: if (showModal && !availableStages.length) {
-    loadStages();
+  // Reload target stages when modal opens or employee/shift changes (shift-scoped list from hr_shift_stage_master)
+  $: if (showModal && employee) {
+    const key = employee.shift_code?.trim()
+      ? `${employee.emp_id}::${employee.shift_code.trim()}`
+      : `${employee.emp_id}::noshift`;
+    if (key !== lastStagesLoadKey) {
+      lastStagesLoadKey = key;
+      loadStages();
+    }
+  }
+  $: if (!showModal) {
+    lastStagesLoadKey = '';
   }
 
   // Watch for modal opening and load shift details (only if attendance times are not available)
@@ -98,12 +111,25 @@
   async function loadStages() {
     try {
       isLoadingStages = true;
-      console.log('Loading available stages...');
-      availableStages = await fetchAvailableStages();
-      console.log('Available stages loaded:', availableStages);
+      noShiftStageMapping = false;
+      const shiftCode = employee?.shift_code?.trim();
+      if (shiftCode) {
+        const mapped = await fetchStagesForShift(shiftCode);
+        availableStages = mapped;
+        noShiftStageMapping = mapped.length === 0;
+        if (noShiftStageMapping) {
+          console.warn(
+            `No stages in hr_shift_stage_master for shift "${shiftCode}". Configure shift–stage rows in HR.`
+          );
+        }
+      } else {
+        availableStages = await fetchAvailableStages();
+        noShiftStageMapping = false;
+      }
     } catch (error) {
       console.error('Error loading stages:', error);
       availableStages = [];
+      noShiftStageMapping = false;
     } finally {
       isLoadingStages = false;
     }
@@ -463,6 +489,11 @@
                 <div style="width: 20px; height: 20px; border: 2px solid #ccc; border-top: 2px solid #007bff; border-radius: 50%; animation: spin 1s linear infinite;"></div>
                 <span style="margin-left: 8px; font-size: 14px;">Loading stages...</span>
               </div>
+            {:else if noShiftStageMapping && employee?.shift_code}
+              <p class="text-amber-700 dark:text-amber-300 text-sm">
+                No stages are configured for shift <strong>{employee.shift_code}</strong> in
+                <code class="text-xs">hr_shift_stage_master</code>. Add active shift–stage rows to enable reassignment targets.
+              </p>
             {:else}
               <select
                 id="targetStage"

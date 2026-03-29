@@ -262,7 +262,12 @@
 
         <!-- Action Buttons -->
         <div class="flex justify-between gap-3 pt-4">
-          <Button variant="primary" size="md" disabled={submitting || selectedSkills.length !== manpowerRequired}>
+          <Button
+            type="submit"
+            variant="primary"
+            size="md"
+            disabled={submitting || selectedSkills.length !== manpowerRequired}
+          >
             {submitting ? 'Creating...' : 'Create Combination'}
           </Button>
           <Button variant="secondary" size="md" on:click={handleClose}>Cancel</Button>

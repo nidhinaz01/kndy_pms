@@ -54,6 +54,38 @@ export async function fetchAvailableStages(): Promise<string[]> {
   }
 }
 
+/**
+ * Stages valid for a shift (from hr_shift_stage_master).
+ * Used for stage reassignment target list so only shift-relevant stages are offered.
+ */
+export async function fetchStagesForShift(shiftCode: string): Promise<string[]> {
+  const code = shiftCode?.trim();
+  if (!code) {
+    return [];
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('hr_shift_stage_master')
+      .select('stage_code')
+      .eq('shift_code', code)
+      .eq('is_active', true)
+      .eq('is_deleted', false)
+      .order('stage_code');
+
+    if (error) {
+      console.error('Error fetching stages for shift:', error);
+      throw error;
+    }
+
+    const stages = (data || []).map((row: { stage_code: string }) => row.stage_code).filter(Boolean);
+    return [...new Set(stages)];
+  } catch (error) {
+    console.error('Error in fetchStagesForShift:', error);
+    throw error;
+  }
+}
+
 export async function fetchShiftDetails(shiftCode: string): Promise<{
   shift: {
     shift_id: number;

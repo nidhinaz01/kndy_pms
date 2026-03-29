@@ -191,6 +191,7 @@
           </Button>
           <Button
             variant="primary"
+            type="submit"
             disabled={isSubmitting}
           >
             {isSubmitting ? 'Creating...' : 'Create Shift'}

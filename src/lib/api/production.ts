@@ -24,6 +24,7 @@ export {
 export {
   fetchShiftSchedule,
   fetchAvailableStages,
+  fetchStagesForShift,
   fetchShiftDetails
 } from './production/productionShiftService';
 
@@ -53,3 +54,15 @@ export {
 
 // Work Addition Services
 export { addWorkToProduction } from './production/productionWorkAdditionService';
+
+// Production shift change (hr_emp.shift_code + audit log via DB trigger)
+export {
+  fetchActiveEmployeesByStage,
+  fetchActiveShiftOptions,
+  computeTargetShiftOptions,
+  fetchShiftChangeHistory,
+  applyShiftChangeForEmployees,
+  type StageEmployeeRow,
+  type ShiftOption,
+  type ShiftChangeLogRow
+} from './production/productionShiftChangeService';

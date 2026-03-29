@@ -541,6 +541,7 @@
       <ManpowerReportTab 
         data={manpowerReportData}
         isLoading={isManpowerReportLoading}
+        {stageCode}
         {selectedDate}
         {reportingSubmissionStatus}
         {shiftCode}

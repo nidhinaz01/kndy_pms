@@ -349,8 +349,9 @@
 </script>
 
 {#if showImportModal}
-  <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-    <div class="theme-bg-primary rounded-lg shadow-xl max-w-md w-full mx-4 max-h-[90vh] overflow-y-auto">
+  <div class="fixed inset-0 z-50 overflow-y-auto bg-black bg-opacity-50">
+    <div class="flex min-h-full items-center justify-center p-4">
+      <div class="theme-bg-primary rounded-lg shadow-xl max-w-md w-full">
       <div class="p-6">
         <div class="flex items-center justify-between mb-6">
           <h2 class="text-xl font-semibold theme-text-primary">Import Vehicle Work Flows</h2>
@@ -446,14 +447,16 @@
           </div>
         </div>
       </div>
+      </div>
     </div>
   </div>
 {/if}
 
 <!-- "All" Confirmation Modal -->
 {#if showAllConfirmation && allConfirmationData}
-  <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60]">
-    <div class="theme-bg-primary rounded-lg shadow-xl max-w-lg w-full mx-4">
+  <div class="fixed inset-0 z-[60] overflow-y-auto bg-black bg-opacity-50">
+    <div class="flex min-h-full items-center justify-center p-4">
+      <div class="theme-bg-primary rounded-lg shadow-xl max-w-lg w-full">
       <div class="p-6">
         <div class="flex items-center justify-between mb-4">
           <h2 class="text-xl font-semibold theme-text-primary">Confirm "All" Vehicle Types</h2>
@@ -493,6 +496,7 @@
             Yes, Proceed
           </Button>
         </div>
+      </div>
       </div>
     </div>
   </div>

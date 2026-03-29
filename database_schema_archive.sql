@@ -58,6 +58,8 @@ CREATE TABLE archive.prdn_wo_details (
     driver_cabin_partition character varying,
     voltage character varying,
     customer_name character varying,
+    nc_category character varying(100) NULL,
+    comments text NULL,
     archived_by character varying(100) NOT NULL,
     archived_dt timestamp without time zone NOT NULL DEFAULT (now() AT TIME ZONE 'utc')
 );

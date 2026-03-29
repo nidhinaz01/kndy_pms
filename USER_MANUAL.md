@@ -11,13 +11,14 @@
 7. [Planning Module](#planning-module)
 8. [HR Module](#hr-module)
 9. [Sales Module](#sales-module)
-10. [Standards Module](#standards-module)
-11. [R&D Module](#rnd-module)
-12. [System Admin Module](#system-admin-module)
-13. [Piece Rate Module](#piece-rate-module)
-14. [Common Features](#common-features)
-15. [Frequently Asked Questions (FAQ)](#frequently-asked-questions-faq)
-16. [Troubleshooting](#troubleshooting)
+10. [Accounts Module](#accounts-module)
+11. [Standards Module](#standards-module)
+12. [R&D Module](#rnd-module)
+13. [System Admin Module](#system-admin-module)
+14. [Piece Rate Module](#piece-rate-module)
+15. [Common Features](#common-features)
+16. [Frequently Asked Questions (FAQ)](#frequently-asked-questions-faq)
+17. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -100,10 +101,11 @@ The application is organized into the following main modules:
 3. **Planning** - Production planning and scheduling
 4. **HR** - Human resources and employee management
 5. **Sales** - Sales orders and work order management
-6. **Standards** - Standard works and workflow definitions
-7. **R&D** - Research and development document management
-8. **System Admin** - System administration and configuration
-9. **Piece Rate** - Piece rate calculations and reporting
+6. **Accounts** - Non-commercial work orders (internal / accounting)
+7. **Standards** - Standard works and workflow definitions
+8. **R&D** - Research and development document management
+9. **System Admin** - System administration and configuration
+10. **Piece Rate** - Piece rate calculations and reporting
 
 ---
 
@@ -149,6 +151,7 @@ Without this setup, work orders cannot be created, planned, or executed correctl
 | Step | Where in the app | What happens |
 |------|------------------|---------------|
 | Create work order | Sales > Work Orders | Create a new work order and assign a model (and other details). See [How to Create a New Work Order](#1-how-to-create-a-new-work-order). |
+| Non-commercial work order (if applicable) | Accounts > Create non-commercial work order | For internal or accounting-driven work orders that are not created through the normal Sales flow. See [Accounts Module](#accounts-module). |
 | Chassis receival (if applicable) | Sales > Chassis Receival | When the chassis arrives, record arrival and complete inspection using a template. Work order can then move from “Chassis to be Received” to “To be Planned” in Planning. See [Chassis Receival](#chassis-receival). |
 
 After this, the work order exists in the system and may appear in **Planning > Entry Plan** under “Chassis to be Received” or “To be Planned” depending on your process.
@@ -297,10 +300,13 @@ When a work order is no longer needed in active operations (e.g. after delivery)
 ### Where to Find Detailed Steps
 
 - **Sales (work order, chassis receival, models):** [Sales Module](#sales-module)
+- **Accounts (non-commercial work orders):** [Accounts Module](#accounts-module)
 - **R&D (document release):** [R&D Module](#rnd-module)
 - **Planning (entry plan, schedule, lead times, holidays):** [Planning Module](#planning-module)
 - **Production (enter, add works, plan, submit plan, report, submit report):** [Production Module](#production-module) and [Production Workflows - Step by Step](#production-workflows---step-by-step)
-- **HR and Standards (setup):** [HR Module](#hr-module), [Standards Module](#standards-module)
+- **Production manager views:** [Central Production Dashboard](#central-production-dashboard), [Shift change](#shift-change)
+- **HR and Standards (setup):** [HR Module](#hr-module), [Standards Module](#standards-module); bulk add works: [Add Multiple Standard Works](#add-multiple-standard-works)
+- **Piece Rate (per employee vs by stage Excel):** [Piece Rate Module](#piece-rate-module)
 - **Archive:** [Archive Work Order](#archive-work-order)
 
 ---
@@ -338,6 +344,8 @@ The Production module is the core of the system, managing production activities 
 **Path**: `/production/[stage_Shift]`
 
 **Important**: The Production module is organized by Stage and Shift. When you navigate to Production, you'll see options like "P1S2-GEN" (Plant 1 Stage 2 - General Shift). Always select the correct stage and shift combination for your work.
+
+**Related pages**: **Central Production Dashboard** (`/production/dashboard`) for a cross–stage/shift summary, and **Shift change** (`/production/shift-change`) to reassign employee shifts by stage. See the subsections below.
 
 ---
 
@@ -1239,6 +1247,19 @@ You can report multiple works at once:
 - Assign employees to specific stages if needed
 - Plan is automatically created when you plan works
 
+#### Stage reassignment: which stage submits the reassignment
+
+When you **reassign** an employee to another stage for part of the day (Manpower Plan or Manpower Report), that action does **not** change the employee’s permanent stage in HR. It records a **time-bounded visit** to another stage.
+
+**Important — who clicks “Submit plan” / “Submit report” for those lines:**
+
+- A reassignment **from your stage to another stage** (e.g. **P1S2 → P1S3**) is tied to the **receiving** stage in the system. The **receiving stage** (e.g. **P1S3**) must include that segment when **they** submit plan or report for that date.
+- A reassignment **into your stage** from elsewhere (e.g. **P1S4 → P1S2**) is included when **your** stage submits, because your stage is the **destination**.
+
+So: **the stage that receives the employee for that interval is responsible for submitting** that reassignment as part of its own submission for that date—not the stage that sent the employee away.
+
+Full detail and examples for teams and developers: see **`PRODUCTION_STAGE_REASSIGNMENT_SUBMISSION.md`** in the project repository.
+
 #### Plan Tab
 
 **Purpose**: View submitted and approved plans.
@@ -1459,6 +1480,68 @@ Before using the Production module, ensure:
    - If worker not available, check HR records
    - If time slot invalid, check shift configuration
    - If plan can't be submitted, check validation errors
+
+### Central Production Dashboard
+
+**Path**: `/production/dashboard`
+
+**Description**: 
+**Central Production Dashboard** gives a read-only summary across **all** configured plant–stage–shift combinations for a selected date. It is intended for production managers who need a single view of attendance, works, lost time, and submission status without opening each stage/shift page separately.
+
+**Features**:
+- **Date**: Pick the production date to analyze.
+- **View**: Planning only, Reporting only, or **Both** (filters how metrics and validations are presented).
+- **Production Circle (Hierarchy)**: Interactive diagram—click **plant** (outer ring), then **stage** (middle band), then **shift** (inner ring) to select a stage/shift. Drill-down instructions appear on screen.
+- **Entire Production** totals: Manpower (planned vs reported), works planned vs reported, work orders planned vs reported, lost time (WO count and minutes).
+- **Selected stage/shift panel**: When a shift is selected, shows detailed metrics, validation (planning/reporting), manpower plan vs report lists, and lost-time reasons (as applicable).
+- **Open Full Page**: Jumps to the full Production page for that stage/shift (`/production/[stageCode]-[shiftCode]`) for the same day’s operations.
+- **Pending submissions**: Lists pending plan/report approvals where configured.
+- **Back to Dashboard**: Returns to the main application dashboard (`/dashboard`).
+
+**How to Use**:
+
+1. Go to **Production > Central Production Dashboard** (menu label may vary).
+2. Set the **Date** and **View** (Planning / Reporting / Both).
+3. Use the **Production Circle** to select a plant → stage → shift.
+4. Review totals and the selected shift’s details; use **Open Full Page** to work in the full Production module for that stage/shift.
+
+**Prerequisites**:
+- Plant–stage–shift configuration must exist (otherwise the circle shows no hierarchy).
+- Read-only for managers; actual planning/reporting still happens on the stage/shift Production page.
+
+**Areas Affected**:
+- None (read-only view and navigation; no data changes from this page alone)
+
+### Shift change
+
+**Path**: `/production/shift-change`
+
+**Description**: 
+**Shift change** lets authorized users move **active employees** from one shift to another **within a stage**. Updates are written to employee shift (`hr_emp.shift_code`) and an audit log (`prdn_emp_shift_change_log`). Use this when workers’ shifts are reassigned (e.g. rotation or coverage) without editing each employee record manually in HR.
+
+**Features**:
+- Select a **stage** to load active employees for that stage (employee ID, name, skill, current shift code/name).
+- **Select** employees (checkboxes; select all on page available).
+- **Change shift**: Opens a modal with **allowed target shifts** (only alternatives that apply to the current selection).
+- **View shift history** per employee: Opens a modal with past shift-change log entries.
+
+**How to Use**:
+
+1. Go to **Production > Shift change**.
+2. Choose a **stage** from the dropdown. The employee list loads.
+3. Select one or more employees who need a new shift.
+4. Click **Change shift** (shows count of selected). Pick the **new shift** in the modal and confirm.
+5. The list refreshes; a message shows how many rows were updated (some may be skipped if already on the target shift).
+6. Use **View shift history** on a row to see past changes for that employee.
+
+**Prerequisites**:
+- Active employees must be assigned to the stage with valid shift codes.
+- Target shifts must exist in **HR > Shift Master** (active shifts).
+- Appropriate menu access.
+
+**Areas Affected**:
+- Employee shift assignment (`hr_emp.shift_code`)
+- Production planning and reporting (manpower is tied to shift)
 
 ### Plan Review
 
@@ -2550,6 +2633,37 @@ Adds standard works to work orders for planning and execution.
 - Work order work assignments
 - Production planning
 
+#### Add Multiple Standard Works
+
+**Path**: `/hr/add-multiple-std-works`
+
+**Description**: 
+Adds **multiple standard works** to one or more work orders for a chosen **stage** in a single session. You build a **queue** of additions (stage + work order + standard work + reason), then submit the queue in one batch. This is suited to bulk additions when **Add Standard Work to WO** is too slow for many lines.
+
+**Features**:
+- Select **stage**, then **work order** (active work orders for that stage).
+- Load **available standard works** for that work order at that stage (works not already added show in the list).
+- Search/filter the standard work list; select one or many works; enter a **reason for addition** (required when adding to the queue).
+- **Add to queue**: Queues items; duplicates for the same stage/WO/code are skipped.
+- **Queue** table: Review queued items; remove individual lines before submit.
+- **Submit all queued works**: Processes each queue row via the same production “add work” logic as the single-add flow; successes clear from the queue; failures remain with an error message.
+- Changing **stage** while the queue contains items for another stage prompts to clear or cancel—avoid mixing stages accidentally.
+
+**How to Use**:
+
+1. Navigate to **HR > Add Multiple Standard Works**.
+2. Select **stage**, then **work order**.
+3. Select standard work(s), enter **reason for addition**, click **Add to queue** (or equivalent).
+4. Repeat for more works or another work order (same stage).
+5. Click **Submit all queued works** when ready. Refresh work order list after partial success to continue.
+
+**Prerequisites**:
+- Work orders and standard works must exist; workflow must allow these works at the stage.
+- Same business rules as adding a single standard work to production.
+
+**Areas Affected**:
+- Production work status and planning for the affected work orders
+
 ---
 
 ## Sales Module
@@ -2867,6 +2981,53 @@ Manages chassis receival and inspection process for work orders.
 - Work order chassis receival status
 - Production planning (chassis receival is a prerequisite)
 - Inspection records
+
+---
+
+## Accounts Module
+
+### Overview
+
+The Accounts module is used to register **non-commercial work orders**—for example internal jobs, accounting-driven entries, or work orders that are not created through the standard **Sales > Work Orders** flow. These records are stored as production work order details and can be used in planning and production like other work orders, subject to your business rules.
+
+### Create Non-Commercial Work Order
+
+**Path**: `/accounts/create-work-order`
+
+**Description**: 
+Single-page form to create a non-commercial work order with category, customer, dates, optional type/model, and optional comments.
+
+**Features**:
+- **Non-commercial category** (required): Selected from configured data elements (non-commercial categories).
+- **WO number** (required): Entered without spaces; the system normalizes the value.
+- **Production / commercial WO no.** (optional): Short reference (e.g. up to 10 characters).
+- **Date WO placed** (required): Cannot be in the future.
+- **Customer name** (required).
+- **Type** and **Model** (optional): Dropdowns from distinct vehicle type codes and model names in the system.
+- **Comments**: Required **unless** both Type and Model are selected—if either Type or Model is missing, you must fill comments.
+- **Category lock**: After you choose a non-commercial category, it stays fixed until you click **Reset form** (so you can complete the rest of the entry without accidentally changing category).
+- **Save**: Creates the non-commercial work order record. Duplicate WO numbers are rejected.
+
+**How to Use**:
+
+1. Navigate to **Accounts > Create non-commercial work order** (or your menu’s equivalent path).
+2. Wait for dropdown options to load (non-commercial categories, type codes, model names).
+3. Select **Non-commercial category** first.
+4. Enter **WO number** (required). Use the format your organization expects (no spaces).
+5. Optionally enter **Production / commercial WO no.**
+6. Select **Date WO placed**.
+7. Enter **Customer name**.
+8. Optionally select **Type** and **Model**, or leave one/both empty and provide **Comments** (required in that case).
+9. Click **Save**. On success, the form resets and a confirmation message is shown.
+10. Use **Reset form** to clear all fields and choose a different category.
+
+**Prerequisites**:
+- Non-commercial categories and vehicle type/model data must be configured (e.g. data elements and vehicle types).
+- Appropriate menu access for Accounts.
+
+**Areas Affected**:
+- Production work order details (`prdn_wo_details`) for non-commercial entries
+- Downstream planning and production if your process uses these work orders
 
 ---
 
@@ -3325,7 +3486,7 @@ Archives completed or obsolete work orders by moving their data to a separate ar
 
 ### Overview
 
-The Piece Rate module provides piece rate calculations and reporting based on completed work.
+The Piece Rate module provides piece rate calculations and reporting based on completed work. Use **Time Period (1 Emp)** to review piece rate for one employee on screen; use **Stage** to export Excel for a whole stage and date range.
 
 ### Sub-Menus
 
@@ -3374,6 +3535,34 @@ View piece rate calculations for individual employees over a time period.
 - Piece rate calculations (automatic on work completion)
 - Employee earnings tracking
 - Production reporting (piece rate is part of work reports)
+
+#### Stage (Excel export)
+
+**Path**: `/piece-rate/stage`
+
+**Description**: 
+Exports **piece rate data to Excel** for a **single production stage** over a **date range**. There is no on-screen data table; you choose stage and dates, then **Export Excel report**. Generation runs asynchronously with a progress-style modal.
+
+**Features**:
+- **Stage**: Picked from **System Admin > Data Elements** category **Plant-Stage** (same stage list as elsewhere in the app).
+- **From / To dates**: Must fall in the **same month and year**; “to” must be on or after “from.”
+- **Excel workbook** typically includes:
+  - **Detail**: All reporting rows for the stage and period (multi-employee line detail).
+  - **Consolidated**: Per-employee totals plus a grand total.
+
+**How to Use**:
+
+1. Navigate to **Piece Rate > Stage** (or **Piece Rate - Stage** in the menu).
+2. Select **stage**, **from date**, and **to date** (same calendar month).
+3. Click **Export Excel report**. Wait until the file downloads or the modal completes.
+4. Open the file in Excel for analysis or sharing.
+
+**Prerequisites**:
+- Completed production reports with piece rate data for the period
+- Plant-Stage data elements configured
+
+**Areas Affected**:
+- None (export only)
 
 ---
 
@@ -3599,6 +3788,22 @@ A: Go to **Sales > Chassis Receival**, open the Pending tab, select the work ord
 
 ---
 
+### Accounts
+
+**Q: When should I use Accounts instead of Sales to create a work order?**  
+A: Use **Accounts > Create non-commercial work order** for non-commercial or internal work orders that are not entered through **Sales > Work Orders** (e.g. accounting-driven or special categories). Commercial customer orders still go through Sales unless your process says otherwise. See [Create Non-Commercial Work Order](#create-non-commercial-work-order).
+
+**Q: How do I create a non-commercial work order?**  
+A: Go to **Accounts > Create non-commercial work order**, select **Non-commercial category** and **WO number**, enter **Date WO placed** and **Customer name**, optionally **Type** and **Model** (or fill **Comments** if type/model are not both set), then **Save**. Use **Reset form** to change category. See [Create Non-Commercial Work Order](#create-non-commercial-work-order).
+
+**Q: Why won’t the form let me save without comments?**  
+A: **Comments** are required unless **both** Type and Model are selected. If you leave either Type or Model empty, you must enter comments explaining the work order.
+
+**Q: The system says this WO number already exists. What do I do?**  
+A: WO numbers must be unique. Enter a different WO number or verify whether the work order was already created.
+
+---
+
 ### Planning
 
 **Q: How do I schedule a work order through production (create an entry plan)?**  
@@ -3683,6 +3888,12 @@ A: In **Plan** tab, find the work, click **Cancel**, enter the cancellation reas
 **Q: What are Plan Review and Report Review?**  
 A: **Plan Review** and **Report Review** (under Production) let you view and compare plans and reports, often as PDFs. They are read-only review tools. See [Plan Review](#plan-review) and [Report Review](#report-review).
 
+**Q: What is the Central Production Dashboard?**  
+A: **Production > Central Production Dashboard** (`/production/dashboard`) shows a read-only summary for all plant–stage–shift combinations on a chosen date: hierarchy circle, totals, and details for the selected shift. Use **Open Full Page** to jump to the full Production screen for that stage/shift. See [Central Production Dashboard](#central-production-dashboard).
+
+**Q: How do I change an employee’s shift for a stage?**  
+A: Go to **Production > Shift change**, select the **stage**, tick the employees, click **Change shift**, pick the new shift, and confirm. Use **View shift history** to see past changes. See [Shift change](#shift-change).
+
 ---
 
 ### HR & Employees
@@ -3709,7 +3920,10 @@ A: Go to **HR > Skill Master**, click Add, enter skill code and name, and save. 
 A: **HR > Daily Shift** is for viewing and managing daily shift assignments and operations. See [Daily Shift](#daily-shift).
 
 **Q: What is “Add Std Work to WO”?**  
-A: **HR > Add Std Work to WO** is used to add standard works to work orders in a bulk or dedicated way, depending on your setup. See [Add Std Work to WO](#add-std-work-to-wo).
+A: **HR > Add Standard Work to WO** adds standard works to a work order through that screen’s flow. See [Add Standard Work to WO](#add-standard-work-to-wo).
+
+**Q: What is “Add Multiple Standard Works” and when should I use it?**  
+A: **HR > Add Multiple Standard Works** lets you queue many standard-work additions (stage + work order + reason) and submit them in one batch—useful when you need to add several works across work orders without repeating the single-add flow. See [Add Multiple Standard Works](#add-multiple-standard-works).
 
 ---
 
@@ -3771,6 +3985,9 @@ A: Go to **System Admin > Archive Work Order**, click **Archive work order**, se
 
 **Q: How do I view piece rate for an employee?**  
 A: Go to **Piece Rate > Time Period (1 Emp)**, select the employee and date range (within the same month/year), click **Load Data**, and view the piece rate calculations. See [Time Period (1 Emp)](#time-period-1-emp).
+
+**Q: How do I export piece rate for a whole stage to Excel?**  
+A: Go to **Piece Rate > Stage** (or **Piece Rate - Stage**), select **stage**, **from** and **to** dates (same month and year), then **Export Excel report**. The file includes detail and consolidated sheets. See [Stage (Excel export)](#stage-excel-export).
 
 ---
 
