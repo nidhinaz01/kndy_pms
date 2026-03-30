@@ -19,6 +19,8 @@
 15. [Common Features](#common-features)
 16. [Frequently Asked Questions (FAQ)](#frequently-asked-questions-faq)
 17. [Troubleshooting](#troubleshooting)
+18. [Quick Reference Guide](#quick-reference-guide)
+19. [Appendix](#appendix)
 
 ---
 
@@ -89,6 +91,13 @@ If you need to reset your password (e.g., you forgot it):
 1. Click the logout button in the sidebar footer
 2. Confirm logout when prompted
 3. You will be redirected to the login page
+
+### Authentication pages (reference)
+
+You normally reach these via email links from password reset or first login, not from the sidebar:
+
+- **`/auth/reset-password`** — Set a new password (may include `?first_login=true` for first-time setup). Requires a valid session from the link.
+- **`/auth/callback`** — Handles redirects from the identity provider (e.g. after email link); you are usually forwarded automatically to the set-password page or login.
 
 ---
 
@@ -1600,6 +1609,18 @@ Review and view finalized production reports in PDF format.
 ### Overview
 
 The Planning module handles production planning, scheduling, and entry management. This section provides detailed, step-by-step instructions for all planning workflows.
+
+**Main URL paths** (for bookmarks and support):
+
+| Screen | Path |
+|--------|------|
+| Entry Plan | `/planning/entry-plan` |
+| Schedule | `/planning/schedule` |
+| Holiday List | `/planning/holiday-list` |
+| Lead Times | `/planning/lead-times` |
+| Order of Stages | `/planning/order-of-stages` |
+| Entry Per Day | `/planning/entry-per-day` |
+| Entry Per Shift | `/planning/entry-per-shift` |
 
 ---
 
@@ -3690,19 +3711,56 @@ This section provides quick reference for the most common tasks. For detailed in
 5. Fill inspection form
 6. Complete inspection
 
+**Create Non-Commercial Work Order**:
+1. Accounts > Create non-commercial work order
+2. Select category, WO number, date, customer
+3. Type + Model, or comments if either is missing
+4. Save (Reset form to change category)
+
+**Central Production Dashboard**:
+1. Production > Central Production Dashboard
+2. Pick date and view mode (Planning / Reporting / Both)
+3. Use Production Circle to select plant → stage → shift
+4. Open Full Page to jump to that stage/shift Production screen
+
+**Shift Change**:
+1. Production > Shift change
+2. Select stage, select employees, Change shift
+3. View shift history on a row if needed
+
+**Add Multiple Standard Works**:
+1. HR > Add Multiple Standard Works
+2. Stage → work order → select works → reason → add to queue
+3. Submit all queued works
+
+**Piece Rate — Stage Export**:
+1. Piece Rate > Stage
+2. Stage + from/to dates (same month)
+3. Export Excel report
+
 ### Navigation Quick Reference
 
-| Task | Path |
-|------|------|
-| View Dashboard | Dashboard |
-| Production Planning | Production > [Stage]-[Shift] |
-| Entry Planning | Planning > Entry Plan |
-| View Schedule | Planning > Schedule |
-| Manage Employees | HR > Employee |
-| Manage Shifts | HR > Shift Master |
-| Create Work Order | Sales > Work Orders |
-| Manage Standards | Standards > Works |
-| System Admin | System Admin > User Management |
+| Task | Menu path | URL path (typical) |
+|------|-----------|-------------------|
+| View Dashboard | Dashboard | `/dashboard` |
+| Central Production Dashboard | Production > Central Production Dashboard | `/production/dashboard` |
+| Production (stage/shift) | Production > [Stage]-[Shift] | `/production/[stageCode]-[shiftCode]` |
+| Shift change | Production > Shift change | `/production/shift-change` |
+| Plan review | Production > Plan Review | `/production/plan-review` |
+| Report review | Production > Report Review | `/production/report-review` |
+| Entry Planning | Planning > Entry Plan | `/planning/entry-plan` |
+| View Schedule | Planning > Schedule | `/planning/schedule` |
+| Manage Employees | HR > Employee | `/hr/employee` |
+| Add Multiple Standard Works | HR > Add Multiple Standard Works | `/hr/add-multiple-std-works` |
+| Add Std Work to WO | HR > Add Standard Work to WO | `/hr/add-std-work-to-wo` |
+| Manage Shifts | HR > Shift Master | `/hr/shift-master` |
+| Create Work Order | Sales > Work Orders | `/sales/work-orders` |
+| Non-Commercial WO | Accounts > Create non-commercial work order | `/accounts/create-work-order` |
+| Manage Standards | Standards > Works | `/standards/works` |
+| Piece Rate (employee) | Piece Rate > Time Period (1 Emp) | `/piece-rate/time-period` |
+| Piece Rate (stage Excel) | Piece Rate > Stage | `/piece-rate/stage` |
+| Archive Work Orders | System Admin > Archive Work Order | `/system-admin/archive-wo` |
+| System Admin | System Admin > User Management | `/system-admin/user-management` |
 
 ### Status Reference
 

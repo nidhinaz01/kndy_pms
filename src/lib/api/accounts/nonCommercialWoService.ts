@@ -33,6 +33,43 @@ export async function fetchNonCommercialNcCategories(): Promise<string[]> {
   return values.sort((a, b) => a.localeCompare(b));
 }
 
+/** Rows for Accounts list: NC work orders whose category is in sys_data_elements (Non Commercial WO Type). */
+export interface NonCommercialWoListRow {
+  id: number;
+  nc_category: string | null;
+  wo_no: string | null;
+  pwo_no: string | null;
+  wo_date: string | null;
+  customer_name: string | null;
+  wo_type: string | null;
+  wo_model: string | null;
+  comments: string | null;
+}
+
+/**
+ * Loads `prdn_wo_details` for non-commercial WOs: `nc_category` not null and in allowed NC types.
+ * Pass `allowedCategories` from a prior `fetchNonCommercialNcCategories()` to avoid a duplicate query.
+ */
+export async function fetchNonCommercialWoList(allowedCategories?: string[]): Promise<NonCommercialWoListRow[]> {
+  const categories =
+    allowedCategories !== undefined ? allowedCategories : await fetchNonCommercialNcCategories();
+  if (categories.length === 0) {
+    return [];
+  }
+
+  const { data, error } = await supabase
+    .from('prdn_wo_details')
+    .select(
+      'id, nc_category, wo_no, pwo_no, wo_date, customer_name, wo_type, wo_model, comments'
+    )
+    .not('nc_category', 'is', null)
+    .in('nc_category', categories)
+    .order('id', { ascending: false });
+
+  if (error) throw error;
+  return (data ?? []) as NonCommercialWoListRow[];
+}
+
 export async function fetchDistinctWoTypeCodes(): Promise<string[]> {
   const { data, error } = await supabase
     .from('mstr_wo_type')

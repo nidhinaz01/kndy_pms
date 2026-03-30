@@ -11,11 +11,19 @@
     fetchDistinctWoTypeCodes,
     fetchDistinctWoTypeNames,
     normalizeNcWoNo,
-    createNonCommercialWo
+    createNonCommercialWo,
+    fetchNonCommercialWoList,
+    type NonCommercialWoListRow
   } from '$lib/api/accounts/nonCommercialWoService';
+  import { formatDate } from '$lib/utils/formatDate';
 
   let showSidebar = false;
   let menus: any[] = [];
+
+  /** Landing: list of NC work orders; Create opens the existing form flow. */
+  let viewMode: 'list' | 'create' = 'list';
+  let listRows: NonCommercialWoListRow[] = [];
+  let isListLoading = true;
 
   let ncCategories: string[] = [];
   let woTypeCodes: string[] = [];
@@ -41,6 +49,31 @@
   function showMsg(text: string, type: 'success' | 'error') {
     message = text;
     messageType = type;
+  }
+
+  async function loadNcWoList(categories?: string[]) {
+    isListLoading = true;
+    try {
+      listRows = await fetchNonCommercialWoList(
+        categories !== undefined ? categories : ncCategories.length > 0 ? ncCategories : undefined
+      );
+    } catch (e) {
+      console.error(e);
+      listRows = [];
+      showMsg('Could not load work orders. Please refresh.', 'error');
+    } finally {
+      isListLoading = false;
+    }
+  }
+
+  function goToCreate() {
+    message = '';
+    viewMode = 'create';
+  }
+
+  function backToList() {
+    message = '';
+    viewMode = 'list';
   }
 
   function passesCommentsRule(): boolean {
@@ -106,6 +139,8 @@
       });
       resetForm();
       showMsg(`Non-commercial work order saved (prdn_wo_details.id = ${id}).`, 'success');
+      viewMode = 'list';
+      await loadNcWoList(ncCategories);
     } catch (e: unknown) {
       const err = e as { code?: string; message?: string };
       if (err?.code === '23505') {
@@ -128,11 +163,15 @@
     }
     isLoadingOptions = true;
     try {
-      [ncCategories, woTypeCodes, woTypeNames] = await Promise.all([
+      const [categories, codes, names] = await Promise.all([
         fetchNonCommercialNcCategories(),
         fetchDistinctWoTypeCodes(),
         fetchDistinctWoTypeNames()
       ]);
+      ncCategories = categories;
+      woTypeCodes = codes;
+      woTypeNames = names;
+      await loadNcWoList(categories);
     } catch (e) {
       console.error(e);
       showMsg('Could not load dropdown options. Check data elements and vehicle types.', 'error');
@@ -143,7 +182,10 @@
 </script>
 
 <svelte:head>
-  <title>Accounts — Create non-commercial work order</title>
+  <title>
+    Accounts —
+    {viewMode === 'list' ? 'Non-commercial work orders' : 'Create non-commercial work order'}
+  </title>
 </svelte:head>
 
 {#if showSidebar}
@@ -162,11 +204,13 @@
 
 <div class="flex flex-col min-h-screen theme-bg-secondary transition-colors duration-200">
   <AppHeader
-    title="Create non-commercial work order"
+    title={viewMode === 'list' ? 'Non-commercial work orders' : 'Create non-commercial work order'}
     onSidebarToggle={() => (showSidebar = !showSidebar)}
   />
 
-  <div class="p-4 md:p-6 max-w-3xl mx-auto w-full">
+  <div
+    class="p-4 md:p-6 mx-auto w-full {viewMode === 'list' ? 'max-w-[min(100%,96rem)]' : 'max-w-3xl'}"
+  >
     {#if message}
       <div
         class={`mb-4 p-4 rounded-lg ${
@@ -179,7 +223,66 @@
       </div>
     {/if}
 
+    {#if viewMode === 'list'}
+      <div class="theme-bg-primary rounded-lg shadow border theme-border p-6">
+        <div class="flex justify-end mb-4">
+          <Button variant="primary" size="sm" on:click={goToCreate} disabled={isLoadingOptions}>
+            Create
+          </Button>
+        </div>
+
+        {#if isListLoading}
+          <p class="theme-text-secondary text-sm py-8 text-center">Loading…</p>
+        {:else}
+          <div class="overflow-x-auto -mx-2 sm:-mx-4 md:-mx-6">
+            <table class="w-full min-w-[64rem] text-sm theme-text-primary border-collapse">
+              <thead>
+                <tr class="theme-bg-secondary border-b theme-border text-left">
+                  <th class="px-3 py-2 font-medium whitespace-nowrap">NC category</th>
+                  <th class="px-3 py-2 font-medium whitespace-nowrap">WO no.</th>
+                  <th class="px-3 py-2 font-medium whitespace-nowrap">PWO no.</th>
+                  <th class="px-3 py-2 font-medium whitespace-nowrap">Date WO placed</th>
+                  <th class="px-3 py-2 font-medium whitespace-nowrap">Customer</th>
+                  <th class="px-3 py-2 font-medium whitespace-nowrap">WO type</th>
+                  <th class="px-3 py-2 font-medium whitespace-nowrap">WO model</th>
+                  <th class="px-3 py-2 font-medium min-w-[8rem]">Comments</th>
+                </tr>
+              </thead>
+              <tbody>
+                {#each listRows as row (row.id)}
+                  <tr class="border-b theme-border hover:theme-bg-secondary/50">
+                    <td class="px-3 py-2 whitespace-nowrap">{row.nc_category ?? '—'}</td>
+                    <td class="px-3 py-2 whitespace-nowrap">{row.wo_no ?? '—'}</td>
+                    <td class="px-3 py-2 whitespace-nowrap">{row.pwo_no ?? '—'}</td>
+                    <td class="px-3 py-2 whitespace-nowrap">
+                      {row.wo_date ? formatDate(row.wo_date) : '—'}
+                    </td>
+                    <td class="px-3 py-2 max-w-[12rem] truncate" title={row.customer_name ?? ''}>
+                      {row.customer_name ?? '—'}
+                    </td>
+                    <td class="px-3 py-2 whitespace-nowrap">{row.wo_type ?? '—'}</td>
+                    <td class="px-3 py-2 whitespace-nowrap">{row.wo_model ?? '—'}</td>
+                    <td class="px-3 py-2 max-w-[14rem] truncate align-top" title={row.comments ?? ''}>
+                      {row.comments ?? '—'}
+                    </td>
+                  </tr>
+                {:else}
+                  <tr>
+                    <td colspan="8" class="px-3 py-8 text-center theme-text-secondary">No records found.</td>
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
+          </div>
+        {/if}
+      </div>
+    {:else}
     <div class="theme-bg-primary rounded-lg shadow border theme-border p-6">
+      <div class="mb-4 flex justify-start">
+        <Button type="button" variant="secondary" size="sm" on:click={backToList} disabled={isSubmitting}>
+          Back
+        </Button>
+      </div>
       {#if isLoadingOptions}
         <p class="theme-text-secondary">Loading options…</p>
       {:else}
@@ -323,6 +426,7 @@
         </form>
       {/if}
     </div>
+    {/if}
   </div>
 
   <FloatingThemeToggle />

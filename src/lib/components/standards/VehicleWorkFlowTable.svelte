@@ -1,9 +1,8 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
   import Button from '$lib/components/common/Button.svelte';
   import { exportToCSV } from '$lib/utils/exportUtils';
   import { formatDate } from '$lib/utils/formatDate';
-  import { toggleVehicleWorkFlowActive, deleteVehicleWorkFlow } from '$lib/api/stdVehicleWorkFlow';
+  import { toggleVehicleWorkFlowActive, deleteVehicleWorkFlow, updateVehicleWorkFlow } from '$lib/api/stdVehicleWorkFlow';
 
   export let tableData: any[] = [];
   export let isTableLoading: boolean = false;
@@ -15,6 +14,55 @@
   // Add fallback no-op functions
   const handleAddItem = () => { if (onAddItem) onAddItem(); };
   const handleImportClick = () => { if (onImportClick) onImportClick(); };
+
+  let showEditDurationModal = false;
+  let durationEditRow: any = null;
+  let durationInputMinutes = '';
+  let durationSaving = false;
+
+  function openEditDuration(row: any) {
+    durationEditRow = row;
+    durationInputMinutes = String(row.estimated_duration_minutes ?? 0);
+    showEditDurationModal = true;
+  }
+
+  function closeEditDurationModal() {
+    showEditDurationModal = false;
+    durationEditRow = null;
+    durationInputMinutes = '';
+    durationSaving = false;
+  }
+
+  async function saveEstimatedDuration() {
+    const vwfId = durationEditRow?.vwf_id;
+    if (vwfId == null || vwfId === '') {
+      alert('Cannot save: missing work flow id. Please close and try again.');
+      return;
+    }
+    // bind:value on type="number" can be number | string; never call .trim() on a number
+    const str = String(durationInputMinutes ?? '').trim();
+    if (str === '') {
+      alert('Please enter a duration in minutes.');
+      return;
+    }
+    const parsed = Number(str);
+    if (!Number.isFinite(parsed) || parsed < 0 || !Number.isInteger(parsed)) {
+      alert('Please enter a valid non-negative whole number of minutes.');
+      return;
+    }
+    durationSaving = true;
+    try {
+      await updateVehicleWorkFlow(Number(vwfId), { estimated_duration_minutes: parsed });
+      durationEditRow.estimated_duration_minutes = parsed;
+      tableData = tableData;
+      alert('Estimated duration updated successfully.');
+      closeEditDurationModal();
+    } catch (error) {
+      console.error('Error updating estimated duration:', error);
+      alert('Failed to update estimated duration. Please try again.');
+      durationSaving = false;
+    }
+  }
 
   // For Edit Status
   async function handleEditStatus(row: any) {
@@ -306,6 +354,17 @@
             <td class="px-4 py-2" on:click|stopPropagation>
               <div class="flex gap-2">
                 <button
+                  type="button"
+                  on:click={() => openEditDuration(row)}
+                  class="p-1 text-emerald-600 hover:text-emerald-900 hover:bg-emerald-100 dark:hover:bg-emerald-900 rounded transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-emerald-200 dark:focus:ring-emerald-800"
+                  title="Edit estimated duration"
+                  aria-label="Edit estimated duration"
+                >
+                  <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                </button>
+                <button
                   on:click={() => handleEditStatus(row)}
                   class="p-1 text-blue-600 hover:text-blue-900 hover:bg-blue-100 dark:hover:bg-blue-900 rounded transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-blue-200 dark:focus:ring-blue-800"
                   title="Edit status"
@@ -338,4 +397,50 @@
       </div>
     {/if}
   {/if}
-</div> 
+</div>
+
+{#if showEditDurationModal && durationEditRow}
+  <div
+    class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50"
+    role="presentation"
+    on:click|self={closeEditDurationModal}
+  >
+    <div
+      class="theme-bg-primary theme-border border rounded-lg shadow-xl max-w-md w-full p-6"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="edit-duration-title"
+      tabindex="-1"
+    >
+      <h2 id="edit-duration-title" class="text-lg font-semibold theme-text-primary mb-2">
+        Edit estimated duration
+      </h2>
+      <p class="text-sm theme-text-secondary mb-1">
+        {durationEditRow.derived_sw_code || 'Work flow'}
+        {#if durationEditRow.work_details?.type_description}
+          <span class="block mt-0.5">{durationEditRow.work_details.type_description}</span>
+        {/if}
+      </p>
+      <label for="duration-minutes-input" class="block text-sm font-medium theme-text-primary mt-4 mb-1">
+        Estimated duration (minutes)
+      </label>
+      <input
+        id="duration-minutes-input"
+        type="text"
+        inputmode="numeric"
+        pattern="[0-9]*"
+        bind:value={durationInputMinutes}
+        class="w-full px-3 py-2 border theme-border rounded theme-bg-secondary theme-text-primary"
+        disabled={durationSaving}
+      />
+      <div class="flex justify-end gap-2 mt-6">
+        <Button variant="secondary" size="sm" on:click={closeEditDurationModal} disabled={durationSaving}>
+          Cancel
+        </Button>
+        <Button variant="primary" size="sm" on:click={saveEstimatedDuration} disabled={durationSaving}>
+          {durationSaving ? 'Saving...' : 'Save'}
+        </Button>
+      </div>
+    </div>
+  </div>
+{/if}
