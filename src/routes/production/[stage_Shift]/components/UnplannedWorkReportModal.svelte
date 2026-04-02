@@ -20,6 +20,7 @@
   export let isOpen: boolean = false;
   export let selectedWork: any = null;
   export let stageCode: string = '';
+  export let shiftCode: string = '';
   export let reportingDate: string = '';
 
   const dispatch = createEventDispatcher();
@@ -517,7 +518,7 @@
     try {
       console.log('👥 Loading workers for stage:', stageCodeToUse, 'date:', formData.fromDate, 'virtualWorks:', virtualWorks.length);
       // Create virtual works array for loadWorkers
-      availableWorkers = await loadWorkers(stageCodeToUse, formData.fromDate, virtualWorks);
+      availableWorkers = await loadWorkers(stageCodeToUse, formData.fromDate, virtualWorks, shiftCode);
       workersLoaded = true; // Mark as loaded
       console.log('✅ Loaded workers:', availableWorkers.length);
     } finally {
@@ -676,7 +677,7 @@
     try {
       formData.actualTimeMinutes = state.actualTimeMinutes;
       
-      const result = await saveUnplannedWorkReports(selectedWork, virtualWorks, formData, lostTimeReasons, stageCode);
+      const result = await saveUnplannedWorkReports(selectedWork, virtualWorks, formData, lostTimeReasons, stageCode, shiftCode);
       if (!result.success) {
         alert('Error saving report: ' + (result.error || 'Unknown error'));
         return;

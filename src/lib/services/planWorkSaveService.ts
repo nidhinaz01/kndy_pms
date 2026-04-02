@@ -9,6 +9,7 @@ export async function saveWorkPlanning(
   formData: PlanWorkFormData,
   workContinuation: WorkContinuation,
   stageCode: string,
+  shiftCode: string,
   fromDate: string,
   toDate?: string
 ): Promise<{ success: boolean; createdPlans: number; message: string }> {
@@ -69,6 +70,7 @@ export async function saveWorkPlanning(
         
         const planData = {
           stage_code: stageCode,
+          shift_code: shiftCode,
           wo_details_id: woDetailsId,
           derived_sw_code: derivedSwCode,
           other_work_code: otherWorkCode,
@@ -120,6 +122,7 @@ export async function saveWorkPlanning(
       
       const planData = {
         stage_code: stageCode,
+        shift_code: shiftCode,
         wo_details_id: woDetailsId,
         derived_sw_code: derivedSwCode,
         other_work_code: otherWorkCode,
@@ -249,6 +252,7 @@ export async function saveWorkPlanning(
       // Create planning record for trainee
       const traineePlanData = {
         stage_code: stageCode,
+        shift_code: shiftCode,
         wo_details_id: woDetailsId,
         derived_sw_code: derivedSwCode,
         other_work_code: otherWorkCode,

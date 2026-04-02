@@ -101,6 +101,7 @@ export async function validateEmployeeShiftReporting(
         )
       `)
       .eq('stage_code', stageCode)
+      .eq('shift_code', shiftCode)
       .eq('reporting_date', reportingDate)
       .eq('attendance_status', 'present')
       .in('status', ['draft', 'pending_approval', 'approved'])

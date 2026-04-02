@@ -261,6 +261,8 @@ export async function saveMultiSkillReports(
       const { createWorkPlanning } = await import('$lib/api/production');
       const firstWork = selectedWorks[0];
       const stageCode = firstWork.stage_code || firstWork.prdn_work_planning?.stage_code;
+      const shiftForPlanning =
+        firstWork.shift_code || firstWork.prdn_work_planning?.shift_code || 'GEN';
       const woDetailsId = firstWork.wo_details_id || firstWork.prdn_wo_details_id || firstWork.prdn_work_planning?.wo_details_id;
       const derivedSwCode = firstWork.derived_sw_code || firstWork.prdn_work_planning?.derived_sw_code;
       const otherWorkCode = firstWork.other_work_code || firstWork.prdn_work_planning?.other_work_code;
@@ -273,6 +275,7 @@ export async function saveMultiSkillReports(
       for (const trainee of formData.selectedTrainees) {
         const traineePlanData = {
           stage_code: stageCode,
+          shift_code: shiftForPlanning,
           wo_details_id: woDetailsId,
           derived_sw_code: derivedSwCode,
           other_work_code: otherWorkCode,

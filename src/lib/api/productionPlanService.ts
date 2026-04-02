@@ -240,16 +240,47 @@ export async function getActivePlanForDate(targetDate: string): Promise<any | nu
       .gte('to_date', targetDate)
       .eq('is_active', true)
       .eq('is_deleted', false)
-      .single();
+      .maybeSingle();
 
-    if (error && error.code !== 'PGRST116') { // PGRST116 is "no rows returned"
+    if (error) {
       console.error('Supabase error:', error);
       throw error;
     }
-    
-    return data || null;
+
+    return data ?? null;
   } catch (error) {
     console.error('Error checking active plan for date:', error);
+    return null;
+  }
+}
+
+/**
+ * Plan whose [from_date, to_date] includes targetDate (not deleted).
+ * Prefers {@link getActivePlanForDate}; if none, uses an inactive plan that still covers the date
+ * (e.g. last day of a superseded plan before the next plan starts).
+ */
+export async function getApplicablePlanForDate(targetDate: string): Promise<any | null> {
+  const active = await getActivePlanForDate(targetDate);
+  if (active) return active;
+
+  try {
+    const { data, error } = await supabase
+      .from('plan_prod_plan_per_shift')
+      .select('*')
+      .lte('from_date', targetDate)
+      .gte('to_date', targetDate)
+      .eq('is_deleted', false)
+      .order('from_date', { ascending: false })
+      .limit(1);
+
+    if (error) {
+      console.error('Supabase error:', error);
+      throw error;
+    }
+
+    return data?.[0] ?? null;
+  } catch (error) {
+    console.error('Error resolving applicable plan for date:', error);
     return null;
   }
 }
@@ -262,14 +293,14 @@ export async function getCurrentActivePlan(): Promise<any | null> {
       .select('*')
       .eq('is_active', true)
       .eq('is_deleted', false)
-      .single();
+      .maybeSingle();
 
-    if (error && error.code !== 'PGRST116') { // PGRST116 is "no rows returned"
+    if (error) {
       console.error('Supabase error:', error);
       throw error;
     }
-    
-    return data || null;
+
+    return data ?? null;
   } catch (error) {
     console.error('Error getting current active plan:', error);
     return null;

@@ -5,7 +5,7 @@ import type { LostTimeReason } from '$lib/api/lostTimeReasons';
 
 const PAGE_SIZE = 1000;
 
-export async function loadWorkers(stageCode: string, fromDate: string): Promise<any[]> {
+export async function loadWorkers(stageCode: string, fromDate: string, shiftCode?: string): Promise<any[]> {
   if (!stageCode || !fromDate) return [];
   
   try {
@@ -13,7 +13,7 @@ export async function loadWorkers(stageCode: string, fromDate: string): Promise<
     let offset = 0;
     let hasMore = true;
     while (hasMore) {
-      const { data, error } = await supabase
+      let q = supabase
         .from('hr_emp')
         .select(`
           emp_id,
@@ -32,6 +32,10 @@ export async function loadWorkers(stageCode: string, fromDate: string): Promise<
         .eq('hr_attendance.is_deleted', false)
         .order('emp_id')
         .range(offset, offset + PAGE_SIZE - 1);
+      if (shiftCode) {
+        q = q.eq('shift_code', shiftCode);
+      }
+      const { data, error } = await q;
 
       if (error) {
         console.error('Error loading present workers:', error);

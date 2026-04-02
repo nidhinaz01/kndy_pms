@@ -17,6 +17,7 @@
 
   export let isOpen: boolean = false;
   export let plannedWork: any = null;
+  export let shiftCode: string = '';
 
   const dispatch = createEventDispatcher();
 
@@ -108,7 +109,7 @@
 
   async function loadWorkersData() {
     if (!plannedWork?.stage_code || !formData.fromDate) return;
-    availableWorkers = await loadWorkers(plannedWork.stage_code, formData.fromDate);
+    availableWorkers = await loadWorkers(plannedWork.stage_code, formData.fromDate, shiftCode);
   }
 
   async function loadStandardTimeData() {

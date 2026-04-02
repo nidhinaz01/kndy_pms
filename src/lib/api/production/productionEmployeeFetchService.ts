@@ -17,7 +17,9 @@ import { calculateBreakTimeInMinutes } from '$lib/utils/breakTimeUtils';
 export async function fetchProductionEmployees(
   stage: string, 
   date: string, 
-  mode: 'planning' | 'reporting' | 'current' = 'current'
+  mode: 'planning' | 'reporting' | 'current' = 'current',
+  /** When set, scopes prdn_* manpower attendance rows to this shift (matches route shift). */
+  shiftCode?: string
 ): Promise<ProductionEmployee[]> {
   try {
     // Query 1: Shift schedules
@@ -263,19 +265,24 @@ export async function fetchProductionEmployees(
     });
 
     // Query 4: Work reporting (aggregate)
-    const { data: workReportingData, error: reportingError } = await supabase
+    let workReportingQuery = supabase
       .from('prdn_work_reporting')
       .select(`
         worker_id,
         hours_worked_today,
         overtime_minutes,
         prdn_work_planning!inner(
-          stage_code
+          stage_code,
+          shift_code
         )
       `)
       .eq('prdn_work_planning.stage_code', stage)
       .eq('from_date', date)
       .eq('is_deleted', false);
+    if (shiftCode) {
+      workReportingQuery = workReportingQuery.eq('prdn_work_planning.shift_code', shiftCode);
+    }
+    const { data: workReportingData, error: reportingError } = await workReportingQuery;
 
     if (reportingError) {
       console.error('Error fetching work reporting data:', reportingError);
@@ -308,23 +315,28 @@ export async function fetchProductionEmployees(
           .from('prdn_planning_manpower')
           .select('emp_id, attendance_status, planned_hours, from_time, to_time, notes, created_dt')
           .in('emp_id', employeeIds)
+          .eq('stage_code', stage)
           .eq('planning_date', date)
           .in('status', ['draft', 'pending_approval', 'approved'])
           .eq('is_deleted', false)
           .order('created_dt', { ascending: false });
+        if (shiftCode) {
+          attendanceQuery = attendanceQuery.eq('shift_code', shiftCode);
+        }
       } else if (mode === 'reporting') {
         // For reporting mode, query prdn_reporting_manpower with reporting_date
         // Include draft, pending_approval, and approved statuses (all should show attendance)
-        // Note: Removed stage_code filter to support employees reassigned between stages
-        // Attendance is per employee per date, not per stage
         attendanceQuery = supabase
           .from('prdn_reporting_manpower')
           .select('emp_id, attendance_status, actual_hours, from_time, to_time, notes')
           .in('emp_id', employeeIds)
+          .eq('stage_code', stage)
           .eq('reporting_date', date)
-          // .eq('stage_code', stage) // Removed: attendance is per employee, not per stage
           .in('status', ['draft', 'pending_approval', 'approved'])
           .eq('is_deleted', false);
+        if (shiftCode) {
+          attendanceQuery = attendanceQuery.eq('shift_code', shiftCode);
+        }
       } else {
         // 'current' mode - use hr_attendance
         // Note: Removed stage_code filter to support employees reassigned between stages
@@ -364,13 +376,18 @@ export async function fetchProductionEmployees(
 
       // For reporting mode, also fetch planned_hours from planning attendance for comparison
       if (mode === 'reporting' && employeeIds.length > 0) {
-        const { data: plannedAttendanceResult, error: plannedAttendanceError } = await supabase
+        let plannedQ = supabase
           .from('prdn_planning_manpower')
           .select('emp_id, planned_hours')
           .in('emp_id', employeeIds)
+          .eq('stage_code', stage)
           .eq('planning_date', date)
           .in('status', ['draft', 'pending_approval', 'approved'])
           .eq('is_deleted', false);
+        if (shiftCode) {
+          plannedQ = plannedQ.eq('shift_code', shiftCode);
+        }
+        const { data: plannedAttendanceResult, error: plannedAttendanceError } = await plannedQ;
 
         if (plannedAttendanceError) {
           console.error('Error fetching planned attendance data:', plannedAttendanceError);
@@ -465,13 +482,17 @@ export async function fetchProductionEmployees(
 
       // Query 7: Reporting manpower data (for LTP/LTNP hours) - only for reporting mode
       if (mode === 'reporting') {
-        const { data: reportingManpowerData, error: reportingManpowerError } = await supabase
+        let ltpQ = supabase
           .from('prdn_reporting_manpower')
           .select('emp_id, ltp_hours, ltnp_hours')
           .in('emp_id', employeeIds)
           .eq('stage_code', stage)
           .eq('reporting_date', date)
           .eq('is_deleted', false);
+        if (shiftCode) {
+          ltpQ = ltpQ.eq('shift_code', shiftCode);
+        }
+        const { data: reportingManpowerData, error: reportingManpowerError } = await ltpQ;
 
         if (reportingManpowerError) {
           console.error('Error fetching reporting manpower data:', reportingManpowerError);
@@ -487,20 +508,25 @@ export async function fetchProductionEmployees(
 
         // Query 8: Calculate lost time from work reports (lt_details) - aggregate by employee
         // First, get work reports for this stage by joining with planning
-        const { data: workReportsData, error: workReportsError } = await supabase
+        let wrLtQuery = supabase
           .from('prdn_work_reporting')
           .select(`
             worker_id,
             lt_details,
             lt_minutes_total,
             prdn_work_planning!inner(
-              stage_code
+              stage_code,
+              shift_code
             )
           `)
           .eq('prdn_work_planning.stage_code', stage)
           .eq('from_date', date)
           .in('status', ['draft', 'pending_approval', 'approved'])
           .eq('is_deleted', false);
+        if (shiftCode) {
+          wrLtQuery = wrLtQuery.eq('prdn_work_planning.shift_code', shiftCode);
+        }
+        const { data: workReportsData, error: workReportsError } = await wrLtQuery;
 
         if (workReportsError) {
           console.error('Error fetching work reports for lost time calculation:', workReportsError);

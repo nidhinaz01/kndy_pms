@@ -117,6 +117,7 @@ CREATE TABLE archive.prdn_work_planning (
     planning_submission_id integer,
     wo_details_id integer NOT NULL,
     stage_code character varying,
+    shift_code character varying(20),
     derived_sw_code character varying,
     other_work_code character varying,
     worker_id character varying,
@@ -139,6 +140,8 @@ CREATE TABLE archive.prdn_work_planning (
     modified_by character varying,
     modified_dt timestamp without time zone
 );
+
+COMMENT ON COLUMN archive.prdn_work_planning.shift_code IS 'Snapshot of public.prdn_work_planning.shift_code at archive time (shift scope).';
 
 -- -----------------------------------------------------------------------------
 -- 6. archive.prdn_work_planning_deviations

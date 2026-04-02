@@ -46,7 +46,7 @@
   let shiftMetricsByKey: Record<string, CentralShiftMetrics> = {};
   let isCentralMetricsLoading = false;
 
-  // Stage-level submission statuses (these do not vary by shift in your current model)
+  // Submission statuses keyed by `${stageCode}-${shiftCode}` (see makeStageShiftKey)
   let planningStatusByStage: Record<string, any | null> = {};
   let reportingStatusByStage: Record<string, any | null> = {};
   let isStatusesLoading = false;
@@ -136,29 +136,28 @@
   let pendingReportingStageCodes = new Set<string>();
 
   async function loadStageStatuses() {
-    const stages = Array.from(new Set(stageShifts.map(p => p.stageCode)));
     isStatusesLoading = true;
     try {
       const planningEntries = await Promise.all(
-        stages.map(async stageCode => ({
-          stageCode,
-          status: await getPlanningSubmissionStatus(stageCode, selectedDate)
+        stageShifts.map(async p => ({
+          key: makeStageShiftKey(p.stageCode, p.shiftCode),
+          status: await getPlanningSubmissionStatus(p.stageCode, p.shiftCode, selectedDate)
         }))
       );
       planningStatusByStage = {};
-      planningEntries.forEach(({ stageCode, status }) => {
-        planningStatusByStage[stageCode] = status;
+      planningEntries.forEach(({ key, status }) => {
+        planningStatusByStage[key] = status;
       });
 
       const reportingEntries = await Promise.all(
-        stages.map(async stageCode => ({
-          stageCode,
-          status: await getReportingSubmissionStatus(stageCode, selectedDate)
+        stageShifts.map(async p => ({
+          key: makeStageShiftKey(p.stageCode, p.shiftCode),
+          status: await getReportingSubmissionStatus(p.stageCode, p.shiftCode, selectedDate)
         }))
       );
       reportingStatusByStage = {};
-      reportingEntries.forEach(({ stageCode, status }) => {
-        reportingStatusByStage[stageCode] = status;
+      reportingEntries.forEach(({ key, status }) => {
+        reportingStatusByStage[key] = status;
       });
     } finally {
       isStatusesLoading = false;

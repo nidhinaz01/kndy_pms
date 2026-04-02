@@ -10,6 +10,7 @@
   export let isOpen: boolean = false;
   export let plannedWorkGroup: any = null;
   export let stageCode: string = '';
+  export let shiftCode: string = '';
   export let selectedDate: string = '';
 
   const dispatch = createEventDispatcher();
@@ -136,6 +137,7 @@
       const traineePlanPromises = selectedTrainees.map(trainee => {
         const traineePlanData = {
           stage_code: stageCode,
+          shift_code: shiftCode || firstPlannedWork.shift_code || 'GEN',
           wo_details_id: woDetailsId,
           derived_sw_code: derivedSwCode,
           other_work_code: otherWorkCode,

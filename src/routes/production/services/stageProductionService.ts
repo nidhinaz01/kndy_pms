@@ -39,8 +39,8 @@ export async function getManpowerLoadMetadata(
       return { reason: 'no_shift_schedule' };
     }
     
-    // Fetch all employees for the stage
-    const allEmployees = await fetchProductionEmployees(stageCode, dateStr, mode);
+    // Fetch all employees for the stage (attendance scoped to this shift when column exists)
+    const allEmployees = await fetchProductionEmployees(stageCode, dateStr, mode, shiftCode);
     
     if (allEmployees.length === 0) {
       return { reason: 'no_employees' };
@@ -129,7 +129,7 @@ export async function loadStageManpower(
     }
     
     // Fetch all employees for the stage
-    const allEmployees = await fetchProductionEmployees(stageCode, dateStr, mode);
+    const allEmployees = await fetchProductionEmployees(stageCode, dateStr, mode, shiftCode);
     console.log(`📊 fetchProductionEmployees returned ${allEmployees.length} employees for stage ${stageCode}`);
     
     // Case 2: No employees assigned to stage (but shift schedules exist)
@@ -437,13 +437,14 @@ export async function loadStageWorksSnapshot(stageCode: string): Promise<Product
 export async function loadStagePlannedWorks(
   stageCode: string,
   date: string,
-  status?: 'draft' | 'approved' | 'pending_approval' | 'rejected' | 'planned'
+  status?: 'draft' | 'approved' | 'pending_approval' | 'rejected' | 'planned',
+  shiftCode?: string
 ): Promise<any[]> {
   try {
     // Ensure date is in YYYY-MM-DD format for the query
     const dateStr = date.split('T')[0];
     
-    const plannedWorks = await fetchWorkPlanning(stageCode, dateStr, status);
+    const plannedWorks = await fetchWorkPlanning(stageCode, dateStr, status, shiftCode);
     console.log(`📋 Loaded ${plannedWorks.length} planned works for ${stageCode} on ${dateStr}${status ? ` with status ${status}` : ''}`);
     return plannedWorks;
   } catch (error) {

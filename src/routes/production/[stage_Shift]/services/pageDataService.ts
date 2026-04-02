@@ -40,6 +40,7 @@ export async function loadWorksData(stageCode: string, selectedDate: string) {
  */
 async function fetchReportingTimeWorkedTillDate(
   stageCode: string,
+  shiftCode: string,
   dateStr: string,
   plannedWorks: any[]
 ): Promise<Map<string, number>> {
@@ -65,6 +66,7 @@ async function fetchReportingTimeWorkedTillDate(
         )
       `)
       .eq('prdn_work_planning.stage_code', stageCode)
+      .eq('prdn_work_planning.shift_code', shiftCode)
       .lt('prdn_work_planning.from_date', dateStr)
       .eq('is_active', true)
       .eq('is_deleted', false)
@@ -105,7 +107,7 @@ async function fetchReportingTimeWorkedTillDate(
 /**
  * Load cancelled works for Plan tab (they should still be visible)
  */
-async function loadStagePlannedWorksWithCancelled(stageCode: string, date: string): Promise<any[]> {
+async function loadStagePlannedWorksWithCancelled(stageCode: string, shiftCode: string, date: string): Promise<any[]> {
   try {
     const dateStr = date.split('T')[0];
     
@@ -137,6 +139,7 @@ async function loadStagePlannedWorksWithCancelled(stageCode: string, date: strin
         )
       `)
       .eq('stage_code', stageCode)
+      .eq('shift_code', shiftCode)
       .eq('from_date', dateStr)
       .eq('status', 'cancelled')
       .eq('is_deleted', true)
@@ -151,7 +154,7 @@ async function loadStagePlannedWorksWithCancelled(stageCode: string, date: strin
   }
 }
 
-export async function loadPlannedWorksData(stageCode: string, selectedDate: string) {
+export async function loadPlannedWorksData(stageCode: string, shiftCode: string, selectedDate: string) {
   if (!selectedDate) return [];
   
   try {
@@ -165,10 +168,10 @@ export async function loadPlannedWorksData(stageCode: string, selectedDate: stri
     }
     
     // Load approved works
-    const approvedData = await loadStagePlannedWorks(stageCode, dateStr, 'approved');
+    const approvedData = await loadStagePlannedWorks(stageCode, dateStr, 'approved', shiftCode);
     
     // Also load cancelled works (they should still appear in Plan tab)
-    const cancelledData = await loadStagePlannedWorksWithCancelled(stageCode, dateStr);
+    const cancelledData = await loadStagePlannedWorksWithCancelled(stageCode, shiftCode, dateStr);
     
     // Combine both, with cancelled works marked
     const data = [
@@ -182,7 +185,7 @@ export async function loadPlannedWorksData(stageCode: string, selectedDate: stri
     let enrichedPlannedWorks = await batchEnrichItems(data || [], stageCode);
 
     // Enrich time_worked_till_date from prdn_work_reporting (cumulative hours from prior reports for same work)
-    const reportingTillDateMap = await fetchReportingTimeWorkedTillDate(stageCode, dateStr, enrichedPlannedWorks);
+    const reportingTillDateMap = await fetchReportingTimeWorkedTillDate(stageCode, shiftCode, dateStr, enrichedPlannedWorks);
     if (reportingTillDateMap.size > 0) {
       enrichedPlannedWorks = enrichedPlannedWorks.map((p: any) => {
         const workCode = p.derived_sw_code || p.other_work_code;
@@ -263,7 +266,7 @@ export async function loadManpowerReportData(stageCode: string, shiftCode: strin
  * Get planning submission status for a stage and date
  * Optimized: Uses cache to avoid duplicate queries
  */
-export async function getPlanningSubmissionStatus(stageCode: string, planningDate: string) {
+export async function getPlanningSubmissionStatus(stageCode: string, shiftCode: string, planningDate: string) {
   try {
     let dateStr: string;
     if (typeof planningDate === 'string') {
@@ -275,7 +278,7 @@ export async function getPlanningSubmissionStatus(stageCode: string, planningDat
     }
 
     // Check cache first
-    const cached = submissionStatusCache.get(stageCode, dateStr, 'planning');
+    const cached = submissionStatusCache.get(stageCode, shiftCode, dateStr, 'planning');
     if (cached !== null) {
       return cached;
     }
@@ -285,6 +288,7 @@ export async function getPlanningSubmissionStatus(stageCode: string, planningDat
       .from('prdn_planning_submissions')
       .select('id, status, submitted_dt, reviewed_dt, reviewed_by, rejection_reason, version')
       .eq('stage_code', stageCode)
+      .eq('shift_code', shiftCode)
       .eq('planning_date', dateStr)
       .eq('is_deleted', false)
       .order('version', { ascending: false })
@@ -299,7 +303,7 @@ export async function getPlanningSubmissionStatus(stageCode: string, planningDat
     const result = data || null;
     
     // Cache the result
-    submissionStatusCache.set(stageCode, dateStr, 'planning', result);
+    submissionStatusCache.set(stageCode, shiftCode, dateStr, 'planning', result);
 
     if (data) {
       console.log(`📋 Latest submission for ${stageCode} on ${dateStr}:`, {
@@ -321,7 +325,7 @@ export async function getPlanningSubmissionStatus(stageCode: string, planningDat
  * Returns the latest version (highest version number)
  * Optimized: Uses cache to avoid duplicate queries
  */
-export async function getReportingSubmissionStatus(stageCode: string, reportingDate: string) {
+export async function getReportingSubmissionStatus(stageCode: string, shiftCode: string, reportingDate: string) {
   try {
     let dateStr: string;
     if (typeof reportingDate === 'string') {
@@ -333,7 +337,7 @@ export async function getReportingSubmissionStatus(stageCode: string, reportingD
     }
 
     // Check cache first
-    const cached = submissionStatusCache.get(stageCode, dateStr, 'reporting');
+    const cached = submissionStatusCache.get(stageCode, shiftCode, dateStr, 'reporting');
     if (cached !== null) {
       return cached;
     }
@@ -343,6 +347,7 @@ export async function getReportingSubmissionStatus(stageCode: string, reportingD
       .from('prdn_reporting_submissions')
       .select('id, status, submitted_dt, reviewed_dt, reviewed_by, rejection_reason, version')
       .eq('stage_code', stageCode)
+      .eq('shift_code', shiftCode)
       .eq('reporting_date', dateStr)
       .eq('is_deleted', false)
       .order('version', { ascending: false })
@@ -357,7 +362,7 @@ export async function getReportingSubmissionStatus(stageCode: string, reportingD
     const result = data || null;
     
     // Cache the result
-    submissionStatusCache.set(stageCode, dateStr, 'reporting', result);
+    submissionStatusCache.set(stageCode, shiftCode, dateStr, 'reporting', result);
 
     return result;
   } catch (error) {
@@ -370,10 +375,10 @@ export async function getReportingSubmissionStatus(stageCode: string, reportingD
  * Batch fetch both planning and reporting submission statuses in parallel
  * Optimized: Fetches both in parallel and uses cache
  */
-export async function getBothSubmissionStatuses(stageCode: string, date: string) {
+export async function getBothSubmissionStatuses(stageCode: string, shiftCode: string, date: string) {
   const [planningStatus, reportingStatus] = await Promise.all([
-    getPlanningSubmissionStatus(stageCode, date),
-    getReportingSubmissionStatus(stageCode, date)
+    getPlanningSubmissionStatus(stageCode, shiftCode, date),
+    getReportingSubmissionStatus(stageCode, shiftCode, date)
   ]);
   
   return { planningStatus, reportingStatus };
@@ -382,7 +387,7 @@ export async function getBothSubmissionStatuses(stageCode: string, date: string)
 /**
  * Load draft plan data
  */
-export async function loadDraftPlanData(stageCode: string, selectedDate: string) {
+export async function loadDraftPlanData(stageCode: string, shiftCode: string, selectedDate: string) {
   if (!selectedDate) return { workPlans: [], manpowerPlans: [] };
   
   try {
@@ -397,8 +402,8 @@ export async function loadDraftPlanData(stageCode: string, selectedDate: string)
     }
     
     const [workPlans, manpowerPlans] = await Promise.all([
-      getDraftWorkPlans(stageCode, dateStr),
-      getDraftManpowerPlans(stageCode, dateStr)
+      getDraftWorkPlans(stageCode, dateStr, shiftCode),
+      getDraftManpowerPlans(stageCode, dateStr, shiftCode)
     ]);
     
     return { workPlans, manpowerPlans };
@@ -411,7 +416,7 @@ export async function loadDraftPlanData(stageCode: string, selectedDate: string)
 /**
  * Load draft report data
  */
-export async function loadDraftReportData(stageCode: string, selectedDate: string) {
+export async function loadDraftReportData(stageCode: string, shiftCode: string, selectedDate: string) {
   if (!selectedDate) return { workReports: [], manpowerReports: [] };
   
   try {
@@ -423,8 +428,8 @@ export async function loadDraftReportData(stageCode: string, selectedDate: strin
     }
     
     const [rawWorkReports, manpowerReports] = await Promise.all([
-      getDraftWorkReports(stageCode, dateStr),
-      getDraftManpowerReports(stageCode, dateStr)
+      getDraftWorkReports(stageCode, dateStr, shiftCode),
+      getDraftManpowerReports(stageCode, dateStr, shiftCode)
     ]);
     
     // Load deviations for all reports

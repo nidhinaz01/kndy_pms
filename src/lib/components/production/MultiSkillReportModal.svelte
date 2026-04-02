@@ -18,6 +18,7 @@
   export let isOpen: boolean = false;
   export let selectedWorks: any[] = [];
   export let stageCode: string = '';
+  export let shiftCode: string = '';
   export let reportingDate: string = '';
 
   const dispatch = createEventDispatcher();
@@ -222,7 +223,7 @@
 
   async function loadWorkersData() {
     if (!selectedWorks[0]?.stage_code || !formData.fromDate) return;
-    availableWorkers = await loadWorkers(selectedWorks[0].stage_code, formData.fromDate, selectedWorks);
+    availableWorkers = await loadWorkers(selectedWorks[0].stage_code, formData.fromDate, selectedWorks, shiftCode);
   }
 
   async function loadStandardTimeData() {

@@ -16,6 +16,7 @@
   export let draftManpowerReportData: any[] = [];
   export let isLoading: boolean = false;
   export let stageCode: string = '';
+  export let shiftCode: string = '';
   export let selectedDate: string = '';
   export let reportingSubmissionStatus: any = null;
 
@@ -102,7 +103,7 @@
     isCalculatingOT = true;
     try {
       // Always try calculateOvertime first
-      const result = await calculateOvertime(stageCode, selectedDate);
+      const result = await calculateOvertime(stageCode, selectedDate, shiftCode);
       
       if (result.hasOvertime && result.workers.length > 0) {
         // Success: OT detected and workers data available
@@ -178,7 +179,7 @@
 
   async function checkOvertime() {
     try {
-      const result = await calculateOvertime(stageCode, selectedDate);
+      const result = await calculateOvertime(stageCode, selectedDate, shiftCode);
       let detectedOvertime = result.hasOvertime;
       
       // Secondary validation: If calculateOvertime didn't detect OT, manually verify

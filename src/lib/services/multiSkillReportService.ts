@@ -3,7 +3,12 @@ import { fetchActiveLostTimeReasons } from '$lib/api/lostTimeReasons';
 import { getDetailedTimeBreakdownForDerivativeWork } from '$lib/api/stdSkillTimeStandards';
 import type { LostTimeReason } from '$lib/api/lostTimeReasons';
 
-export async function loadWorkers(stageCode: string, fromDate: string, selectedWorks?: any[]): Promise<any[]> {
+export async function loadWorkers(
+  stageCode: string,
+  fromDate: string,
+  selectedWorks?: any[],
+  shiftCode?: string
+): Promise<any[]> {
   if (!stageCode || !fromDate) return [];
   
   try {
@@ -16,7 +21,7 @@ export async function loadWorkers(stageCode: string, fromDate: string, selectedW
     }
 
     // Load workers from prdn_reporting_manpower (attendance saved in Manpower Report tab)
-    const { data: reportingAttendance, error: attendanceError } = await supabase
+    let attendanceQ = supabase
       .from('prdn_reporting_manpower')
       .select(`
         emp_id,
@@ -31,6 +36,10 @@ export async function loadWorkers(stageCode: string, fromDate: string, selectedW
       .eq('reporting_date', dateStr)
       .eq('attendance_status', 'present')
       .eq('is_deleted', false);
+    if (shiftCode) {
+      attendanceQ = attendanceQ.eq('shift_code', shiftCode);
+    }
+    const { data: reportingAttendance, error: attendanceError } = await attendanceQ;
 
     if (attendanceError) {
       console.error('❌ Error loading reporting attendance:', attendanceError);

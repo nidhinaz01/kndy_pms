@@ -1,23 +1,21 @@
--- After public.prdn_wo_details has nc_category and comments:
--- 1) Add matching columns to archive.prdn_wo_details
--- 2) Update archive_work_order() to copy them
--- 3) Optionally extend get_archived_work_orders() for UI
+-- =============================================================================
+-- Migration: shift_code on archive.prdn_work_planning + archive_work_order()
+-- =============================================================================
+-- Adds snapshot column for planning shift scope and updates archive_work_order
+-- to copy public.prdn_work_planning.shift_code.
 --
--- Run in order after database_migration_prdn_wo_details_nc.sql (or equivalent).
+-- Prerequisites:
+--   - public.prdn_work_planning.shift_code exists (e.g. database_migration_shift_code_planning_reporting.sql)
+--   - archive.prdn_wo_details and archive_work_order() already deployed
+--
+-- Idempotent: ADD COLUMN IF NOT EXISTS; function CREATE OR REPLACE.
+-- =============================================================================
 
--- -----------------------------------------------------------------------------
--- 1. Archive table: same columns as public (nullable snapshot)
--- -----------------------------------------------------------------------------
-ALTER TABLE archive.prdn_wo_details
-  ADD COLUMN IF NOT EXISTS nc_category character varying(100) NULL,
-  ADD COLUMN IF NOT EXISTS comments text NULL;
+ALTER TABLE archive.prdn_work_planning
+  ADD COLUMN IF NOT EXISTS shift_code character varying(20);
 
-COMMENT ON COLUMN archive.prdn_wo_details.nc_category IS 'Snapshot from public.prdn_wo_details at archive time.';
-COMMENT ON COLUMN archive.prdn_wo_details.comments IS 'Snapshot from public.prdn_wo_details at archive time.';
+COMMENT ON COLUMN archive.prdn_work_planning.shift_code IS 'Snapshot of public.prdn_work_planning.shift_code at archive time (shift scope).';
 
--- -----------------------------------------------------------------------------
--- 2. archive_work_order: include nc_category and comments in INSERT
--- -----------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.archive_work_order(
   p_wo_details_id integer,
   p_archived_by text
@@ -114,30 +112,4 @@ EXCEPTION
 END;
 $$;
 
-COMMENT ON FUNCTION public.archive_work_order(integer, text) IS 'Moves one work order and all related rows from public to archive. Audit: archived_by, archived_dt on archive.prdn_wo_details.';
-
--- -----------------------------------------------------------------------------
--- 3. Optional: expose nc_category in list RPC (uncomment if UI needs it)
--- -----------------------------------------------------------------------------
--- CREATE OR REPLACE FUNCTION public.get_archived_work_orders()
--- RETURNS TABLE (
---   id integer,
---   wo_no text,
---   wo_type text,
---   wo_model text,
---   wo_date date,
---   wo_delivery date,
---   nc_category text,
---   archived_by text,
---   archived_dt timestamp without time zone
--- )
--- LANGUAGE sql
--- SECURITY DEFINER
--- STABLE
--- SET search_path = public, archive
--- AS $$
---   SELECT a.id, a.wo_no::text, a.wo_type::text, a.wo_model::text, a.wo_date, a.wo_delivery,
---          a.nc_category::text, a.archived_by::text, a.archived_dt
---   FROM archive.prdn_wo_details a
---   ORDER BY a.archived_dt DESC;
--- $$;
+COMMENT ON FUNCTION public.archive_work_order(integer, text) IS 'Moves one work order and all related rows from public to archive. Includes prdn_work_planning.shift_code snapshot.';

@@ -16,17 +16,18 @@
 12. [R&D Module](#rnd-module)
 13. [System Admin Module](#system-admin-module)
 14. [Piece Rate Module](#piece-rate-module)
-15. [Common Features](#common-features)
-16. [Frequently Asked Questions (FAQ)](#frequently-asked-questions-faq)
-17. [Troubleshooting](#troubleshooting)
-18. [Quick Reference Guide](#quick-reference-guide)
-19. [Appendix](#appendix)
+15. [Reports Module](#reports-module)
+16. [Common Features](#common-features)
+17. [Frequently Asked Questions (FAQ)](#frequently-asked-questions-faq)
+18. [Troubleshooting](#troubleshooting)
+19. [Quick Reference Guide](#quick-reference-guide)
+20. [Appendix](#appendix)
 
 ---
 
 ## Introduction
 
-The Production Management System is a comprehensive web-based application designed to manage production workflows, employee data, work orders, planning, and reporting for manufacturing operations. This manual provides detailed instructions for using each module and feature of the system.
+The Production Management System is a comprehensive web-based application designed to manage production workflows, employee data, work orders, planning, reporting, and operational reports (such as month-to-date production status) for manufacturing operations. This manual provides detailed instructions for using each module and feature of the system.
 
 ### System Requirements
 
@@ -113,8 +114,9 @@ The application is organized into the following main modules:
 6. **Accounts** - Non-commercial work orders (internal / accounting)
 7. **Standards** - Standard works and workflow definitions
 8. **R&D** - Research and development document management
-9. **System Admin** - System administration and configuration
-10. **Piece Rate** - Piece rate calculations and reporting
+9. **Reports** - Operational reports (e.g. month-to-date production status)
+10. **System Admin** - System administration and configuration
+11. **Piece Rate** - Piece rate calculations and reporting
 
 ---
 
@@ -316,6 +318,7 @@ When a work order is no longer needed in active operations (e.g. after delivery)
 - **Production manager views:** [Central Production Dashboard](#central-production-dashboard), [Shift change](#shift-change)
 - **HR and Standards (setup):** [HR Module](#hr-module), [Standards Module](#standards-module); bulk add works: [Add Multiple Standard Works](#add-multiple-standard-works)
 - **Piece Rate (per employee vs by stage Excel):** [Piece Rate Module](#piece-rate-module)
+- **Reports (daily production status MTD):** [Reports Module](#reports-module)
 - **Archive:** [Archive Work Order](#archive-work-order)
 
 ---
@@ -3587,6 +3590,51 @@ Exports **piece rate data to Excel** for a **single production stage** over a **
 
 ---
 
+## Reports Module
+
+### Overview
+
+The **Reports** area provides read-only operational reports that combine planning master data, holidays, and production dates. Your administrator may group these under a **Reports** menu in the sidebar. The first report documented here is **Daily Production Status**.
+
+### Daily Production Status
+
+**Path**: `/reports/daily-production-status`
+
+**Description**: 
+A **month-to-date (MTD)** snapshot from the **1st of the selected month** through the **As of date** you choose. It summarizes working days, daily entry targets from the production plan, plant-level entry/exit counts, and a **by-stage, by-day** grid of work order entries and exits from production dates (`prdn_dates`).
+
+**Features**:
+- **As of date**: Pick any date; the report period runs from that month’s first day through that date (inclusive).
+- **Generate Report**: Loads summary and detail tables (may take a few seconds).
+- **Export Excel**: Downloads an Excel workbook with the same report content (after a report has been generated).
+- **Summary (month to date)**:
+  - **Period** (start → as-of date)
+  - **Working days completed**: Count of working days in that range (weekends excluded; **Planning > Holiday List** active holidays excluded).
+  - **Daily entry target**: From the **production plan per shift** (`plan_prod_plan_per_shift.ppd_count`) whose period covers the as-of date (uses an active plan when available; otherwise a plan that still includes that date).
+  - **Target (daily × working days)**: Working days × daily entry target when both are known.
+- **Plants** table: For each plant (e.g. P1, P2, P3), **Entered** = distinct work orders with an **entry** at the plant’s first line stage (PnS1). **Exited** = distinct work orders with an **exit** at the plant’s last line stage (e.g. P1S4, P2S4); P3 may use P3S1 for both when it is the only stage.
+- **By stage (month to date)**: One row per stage from **System Admin > Data Elements** category **Plant-Stage**, plus any stage found in `prdn_dates` that is not in that list. For each calendar day in the period: **Entry** count and WO numbers, **Exit** count and WO numbers (up to two WO numbers per line in each cell). Scroll horizontally for more dates; the Stage column stays fixed.
+
+**How to Use**:
+
+1. Open **Reports > Daily Production Status** (or navigate to `/reports/daily-production-status` if you have the menu).
+2. Set **As of date**.
+3. Click **Generate Report**.
+4. Review the summary, plant matrix, and by-stage grid.
+5. Optionally click **Export Excel** to save a file for sharing or archiving.
+6. Use the header logo shortcut to return to the **Dashboard** if shown.
+
+**Prerequisites**:
+- Menu access to the report (assigned by administrator).
+- **Holiday list** and **production plan** data for accurate working days and targets.
+- **Plant-Stage** data elements for the by-stage breakdown.
+- Production **entry/exit** dates recorded in the system (`prdn_dates`).
+
+**Areas Affected**:
+- None (read-only report and export)
+
+---
+
 ## Common Features
 
 ### Data Export
@@ -3595,6 +3643,7 @@ Many modules support exporting data to Excel or PDF:
 
 - **Excel Export**: Click "Export to Excel" button to download data as Excel file
 - **PDF Export**: Click "Export to PDF" button to generate PDF document
+- **Reports**: **Daily Production Status** offers **Export Excel** after you generate the on-screen report
 
 ### Search and Filter
 
@@ -3738,6 +3787,12 @@ This section provides quick reference for the most common tasks. For detailed in
 2. Stage + from/to dates (same month)
 3. Export Excel report
 
+**Daily Production Status (MTD)**:
+1. Reports > Daily Production Status
+2. Set As of date → Generate Report
+3. Review summary, plants, by-stage grid
+4. Export Excel if needed
+
 ### Navigation Quick Reference
 
 | Task | Menu path | URL path (typical) |
@@ -3761,6 +3816,7 @@ This section provides quick reference for the most common tasks. For detailed in
 | Piece Rate (stage Excel) | Piece Rate > Stage | `/piece-rate/stage` |
 | Archive Work Orders | System Admin > Archive Work Order | `/system-admin/archive-wo` |
 | System Admin | System Admin > User Management | `/system-admin/user-management` |
+| Daily Production Status | Reports > Daily Production Status | `/reports/daily-production-status` |
 
 ### Status Reference
 
@@ -4036,6 +4092,16 @@ A: Go to **System Admin > Chassis Receival Template**, click **Add Template**, d
 
 **Q: How do I archive a work order?**  
 A: Go to **System Admin > Archive Work Order**, click **Archive work order**, select one or more work orders, confirm the irreversible archive action, and complete the process. See [Archive Work Order](#archive-work-order).
+
+---
+
+### Reports
+
+**Q: What is Daily Production Status?**  
+A: **Reports > Daily Production Status** shows a **month-to-date** view from the 1st of the month through your chosen **As of date**: working days, daily entry target from the production plan, plant entry/exit counts, and a by-stage grid of entries/exits per day. See [Daily Production Status](#daily-production-status).
+
+**Q: How do I run or export Daily Production Status?**  
+A: Open the report, pick **As of date**, click **Generate Report**, then optionally **Export Excel**. Working days exclude weekends and holidays from **Planning > Holiday List**. See [Daily Production Status](#daily-production-status).
 
 ---
 

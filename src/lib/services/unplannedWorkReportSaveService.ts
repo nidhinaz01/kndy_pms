@@ -12,7 +12,8 @@ export async function saveUnplannedWorkReports(
   virtualWorks: any[],
   formData: MultiSkillReportFormData,
   lostTimeReasons: LostTimeReason[],
-  stageCode: string
+  stageCode: string,
+  shiftCode: string
 ): Promise<{ success: boolean; data?: any[]; error?: string }> {
   try {
     const { getCurrentUsername, getCurrentTimestamp } = await import('$lib/utils/userUtils');
@@ -187,6 +188,7 @@ export async function saveUnplannedWorkReports(
       const totalHoursWorked = hoursWorkedTillDate + hoursWorkedToday;
       const planningData = {
         stage_code: stageCode,
+        shift_code: shiftCode,
         wo_details_id: woDetailsId,
         derived_sw_code: derivedSwCode,
         other_work_code: otherWorkCode,
@@ -302,6 +304,7 @@ export async function saveUnplannedWorkReports(
         const totalHoursWorked = hoursWorkedTillDate + hoursWorkedToday;
         const traineePlanData = {
           stage_code: stageCode,
+          shift_code: shiftCode,
           wo_details_id: woDetailsId,
           derived_sw_code: derivedSwCode,
           other_work_code: otherWorkCode,

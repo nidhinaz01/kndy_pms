@@ -265,7 +265,7 @@
         await dataLoading.loadManpowerPlanData(dataLoadingContext);
         // Also load planning submission status to check if attendance should be locked
         const { getPlanningSubmissionStatus } = await import('./services/pageDataService');
-        const submissionStatus = await getPlanningSubmissionStatus(stageCode, selectedDate);
+        const submissionStatus = await getPlanningSubmissionStatus(stageCode, shiftCode, selectedDate);
         planningSubmissionStatus = submissionStatus;
       } else if (tabId === 'draft-plan') {
         await dataLoading.loadDraftPlanData(dataLoadingContext);
@@ -300,7 +300,7 @@
     
     // Clear submission status cache when date changes
     const { submissionStatusCache } = await import('./services/submissionStatusCache');
-    submissionStatusCache.clearForStageDate(stageCode, selectedDate);
+    submissionStatusCache.clearForStageShiftDate(stageCode, shiftCode, selectedDate);
     
     await dataLoading.loadShiftBreakTimes(dataLoadingContext);
     const dateDependentTabs = new Set([
@@ -558,6 +558,7 @@
         {draftManpowerReportData}
         isLoading={isDraftReportLoading}
         {stageCode}
+        {shiftCode}
         {selectedDate}
         {reportingSubmissionStatus}
         on:submit={() => eventHandlers.handleSubmitReporting(eventHandlerContext)}
@@ -598,6 +599,7 @@
   <ReportWorkModal 
     isOpen={showReportModal}
     plannedWork={selectedWorkForReporting}
+    {shiftCode}
     on:close={() => eventHandlers.handleReportModalClose(eventHandlerContext)}
     on:save={() => eventHandlers.handleReportSave(eventHandlerContext)}
   />
@@ -606,6 +608,7 @@
     isOpen={showMultiReportModal}
     selectedWorks={selectedWorksForMultiReport}
     {stageCode}
+    {shiftCode}
     reportingDate={selectedDate}
     on:close={() => eventHandlers.handleMultiReportModalClose(eventHandlerContext)}
     on:save={() => eventHandlers.handleMultiSkillReportSave(eventHandlerContext)}
@@ -668,6 +671,7 @@
     isOpen={showAddTraineesModal}
     plannedWorkGroup={selectedWorkGroupForTrainees}
     {stageCode}
+    {shiftCode}
     {selectedDate}
     on:close={() => eventHandlers.handleAddTraineesModalClose(eventHandlerContext)}
     on:save={() => eventHandlers.handleAddTraineesSave(eventHandlerContext)}
@@ -698,6 +702,7 @@
       isOpen={showUnplannedWorkReportModal}
       selectedWork={selectedWorkForUnplannedReporting}
       {stageCode}
+      {shiftCode}
       reportingDate={selectedDate}
       on:close={() => {
         showUnplannedWorkReportModal = false;

@@ -134,6 +134,7 @@ export async function savePlannedAttendance(
       .select('id')
       .eq('emp_id', empId)
       .eq('stage_code', stageCode)
+      .eq('shift_code', shiftCode)
       .eq('planning_date', planningDate)
       .eq('status', 'draft')
       .eq('is_deleted', false)
@@ -184,6 +185,7 @@ export async function savePlannedAttendance(
       const insertData: any = {
         emp_id: empId,
         stage_code: stageCode,
+        shift_code: shiftCode,
         planning_date: planningDate,
         attendance_status: attendanceStatus,
         notes: notes?.trim() || null,
@@ -216,6 +218,7 @@ export async function savePlannedAttendance(
       .select('id')
       .eq('emp_id', empId)
       .eq('stage_code', stageCode)
+      .eq('shift_code', shiftCode)
       .eq('reporting_date', reportingDate)
       .eq('status', 'draft')
       .eq('is_deleted', false)
@@ -252,6 +255,7 @@ export async function savePlannedAttendance(
       const insertReporting: any = {
         emp_id: empId,
         stage_code: stageCode,
+        shift_code: shiftCode,
         reporting_date: reportingDate,
         attendance_status: attendanceStatus,
         ltp_hours: 0,
@@ -451,6 +455,7 @@ export async function saveReportedManpower(
           .select('planned_hours')
           .eq('emp_id', empId)
           .eq('stage_code', stageCode)
+          .eq('shift_code', shiftCode)
           .eq('planning_date', reportingDate)
           .eq('attendance_status', 'present')
           .eq('is_deleted', false)
@@ -529,6 +534,7 @@ export async function saveReportedManpower(
       const insertData: any = {
         emp_id: empId,
         stage_code: stageCode,
+        shift_code: shiftCode,
         reporting_date: reportingDate,
         attendance_status: attendanceStatus,
         ltp_hours: ltpHours,

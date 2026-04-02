@@ -194,6 +194,7 @@ export async function validateEmployeeShiftPlanning(
       .from('prdn_planning_manpower')
       .select('emp_id, attendance_status, planned_hours')
       .eq('stage_code', stageCode)
+      .eq('shift_code', shiftCode)
       .eq('planning_date', planningDate)
       .eq('status', 'draft')
       .eq('is_deleted', false);
@@ -282,6 +283,7 @@ export async function validateEmployeeShiftPlanning(
       .from('prdn_work_planning')
       .select('worker_id, from_time, to_time, derived_sw_code, other_work_code, wo_details_id')
       .eq('stage_code', stageCode)
+      .eq('shift_code', shiftCode)
       .eq('from_date', planningDate)
       .eq('status', 'draft')
       .eq('is_deleted', false);

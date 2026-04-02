@@ -3,7 +3,7 @@ import { supabase } from '$lib/supabaseClient';
 /**
  * Load report data
  */
-export async function loadReportData(stageCode: string, selectedDate: string) {
+export async function loadReportData(stageCode: string, shiftCode: string, selectedDate: string) {
   if (!selectedDate) return [];
   
   try {
@@ -26,6 +26,7 @@ export async function loadReportData(stageCode: string, selectedDate: string) {
         )
       `)
       .eq('prdn_work_planning.stage_code', stageCode)
+      .eq('prdn_work_planning.shift_code', shiftCode)
       .gte('from_date', selectedDate)
       .lte('from_date', selectedDate)
       .eq('status', 'approved')

@@ -980,6 +980,7 @@
         formData,
         workContinuation,
         stageCode,
+        shiftCode,
         fromDate,
         toDate
       );

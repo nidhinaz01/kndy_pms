@@ -152,7 +152,7 @@ async function fetchPlannedWorksByStage(stageCode: string, dateStr: string): Pro
   // Planned = include draft + pending + approved (manager view).
   const { data, error } = await supabase
     .from('prdn_work_planning')
-    .select('worker_id, wo_details_id, derived_sw_code, other_work_code')
+    .select('worker_id, wo_details_id, derived_sw_code, other_work_code, shift_code')
     .eq('stage_code', stageCode)
     .eq('from_date', dateStr)
     .eq('is_active', true)
@@ -180,7 +180,8 @@ async function fetchReportedWorksByStage(
           prdn_work_planning!inner(
             wo_details_id,
             derived_sw_code,
-            other_work_code
+            other_work_code,
+            shift_code
           )
         `
         : `
@@ -189,7 +190,8 @@ async function fetchReportedWorksByStage(
           prdn_work_planning!inner(
             wo_details_id,
             derived_sw_code,
-            other_work_code
+            other_work_code,
+            shift_code
           )
         `
     )
@@ -213,7 +215,7 @@ function buildPlannedMetricsByShift(
 
   for (const row of plannedRows || []) {
     const workerId = row.worker_id ? String(row.worker_id) : '';
-    const shiftCode = workerShiftMap.get(workerId);
+    const shiftCode = (row.shift_code as string) || workerShiftMap.get(workerId);
     if (!shiftCode) continue;
     if (!shiftsToKeep.has(shiftCode)) continue;
 
@@ -255,11 +257,10 @@ function buildReportedMetricsByShift(
 
   for (const row of reportedRows || []) {
     const workerId = row.worker_id ? String(row.worker_id) : '';
-    const shiftCode = workerShiftMap.get(workerId);
+    const planning = row.prdn_work_planning || {};
+    const shiftCode = (planning.shift_code as string) || workerShiftMap.get(workerId);
     if (!shiftCode) continue;
     if (!shiftsToKeep.has(shiftCode)) continue;
-
-    const planning = row.prdn_work_planning || {};
     const woDetailsId = planning.wo_details_id ?? null;
     const workCode = (planning.other_work_code || planning.derived_sw_code || 'unknown') as string;
 
@@ -375,25 +376,17 @@ async function buildShiftMetricsForStage(
 ): Promise<CentralShiftMetrics[]> {
   const shiftsToKeep = new Set(stageShiftsForStage.map(p => String(p.shiftCode)));
 
-  // Manpower: do stage-wide fetch once, then split by shift_code.
-  const plannedEmployees = await fetchProductionEmployees(stageCode, dateStr, 'planning');
-  const reportedEmployees = await fetchProductionEmployees(stageCode, dateStr, 'reporting');
-
+  // Manpower: one fetch per configured shift so attendance rows match shift_code in DB.
   const plannedEmployeesByShift = new Map<string, any[]>();
   const reportedEmployeesByShift = new Map<string, any[]>();
 
-  for (const emp of plannedEmployees || []) {
-    const shiftCode = (emp as any).shift_code ? String((emp as any).shift_code) : '';
-    if (!shiftCode || !shiftsToKeep.has(shiftCode)) continue;
-    if (!plannedEmployeesByShift.has(shiftCode)) plannedEmployeesByShift.set(shiftCode, []);
-    plannedEmployeesByShift.get(shiftCode)!.push(emp as any);
-  }
-
-  for (const emp of reportedEmployees || []) {
-    const shiftCode = (emp as any).shift_code ? String((emp as any).shift_code) : '';
-    if (!shiftCode || !shiftsToKeep.has(shiftCode)) continue;
-    if (!reportedEmployeesByShift.has(shiftCode)) reportedEmployeesByShift.set(shiftCode, []);
-    reportedEmployeesByShift.get(shiftCode)!.push(emp as any);
+  for (const pair of stageShiftsForStage) {
+    const sc = String(pair.shiftCode);
+    if (!shiftsToKeep.has(sc)) continue;
+    const planned = await fetchProductionEmployees(stageCode, dateStr, 'planning', sc);
+    const reported = await fetchProductionEmployees(stageCode, dateStr, 'reporting', sc);
+    plannedEmployeesByShift.set(sc, planned || []);
+    reportedEmployeesByShift.set(sc, reported || []);
   }
 
   // Work planning (stage-wide)

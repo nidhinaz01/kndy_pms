@@ -75,16 +75,16 @@ export async function loadWorksData(context: DataLoadingContext) {
  * Optimized: Uses request deduplication to prevent duplicate concurrent requests
  */
 export async function loadPlannedWorksData(context: DataLoadingContext) {
-  const requestKey = `planned-works:${context.stageCode}:${context.selectedDate}`;
+  const requestKey = `planned-works:${context.stageCode}:${context.shiftCode}:${context.selectedDate}`;
   
   context.setIsPlannedWorksLoading(true);
   try {
     const plannedWorks = await requestDeduplicator.getOrCreate(requestKey, () =>
-      loadPlannedWorksDataService(context.stageCode, context.selectedDate)
+      loadPlannedWorksDataService(context.stageCode, context.shiftCode, context.selectedDate)
     );
     context.setPlannedWorksData(plannedWorks);
     
-    const statusKey = `planned-works-status:${context.stageCode}:${context.selectedDate}`;
+    const statusKey = `planned-works-status:${context.stageCode}:${context.shiftCode}:${context.selectedDate}`;
     const worksWithStatus = await requestDeduplicator.getOrCreate(statusKey, () =>
       calculatePlannedWorksStatus(plannedWorks)
     );
@@ -116,14 +116,14 @@ export async function loadManpowerPlanData(context: DataLoadingContext) {
  */
 export async function loadDraftPlanData(context: DataLoadingContext) {
   context.setIsDraftPlanLoading(true);
-  submissionStatusCache.clearForStageDate(context.stageCode, context.selectedDate);
-  const result = await loadDraftPlanDataService(context.stageCode, context.selectedDate);
+  submissionStatusCache.clearForStageShiftDate(context.stageCode, context.shiftCode, context.selectedDate);
+  const result = await loadDraftPlanDataService(context.stageCode, context.shiftCode, context.selectedDate);
   context.setDraftPlanData(result.workPlans);
   context.setDraftManpowerPlanData(result.manpowerPlans);
   
   // Also load submission status
   const { getPlanningSubmissionStatus } = await import('./pageDataService');
-  const submissionStatus = await getPlanningSubmissionStatus(context.stageCode, context.selectedDate);
+  const submissionStatus = await getPlanningSubmissionStatus(context.stageCode, context.shiftCode, context.selectedDate);
   context.setPlanningSubmissionStatus(submissionStatus);
   
   context.setIsDraftPlanLoading(false);
@@ -140,7 +140,7 @@ export async function loadManpowerReportData(context: DataLoadingContext) {
     
     // Also load submission status to check if attendance should be locked
     const { getReportingSubmissionStatus } = await import('./pageDataService');
-    const submissionStatus = await getReportingSubmissionStatus(context.stageCode, context.selectedDate);
+    const submissionStatus = await getReportingSubmissionStatus(context.stageCode, context.shiftCode, context.selectedDate);
     context.setReportingSubmissionStatus(submissionStatus);
   } catch (error) {
     console.error('Error loading manpower report data:', error);
@@ -157,14 +157,14 @@ export async function loadManpowerReportData(context: DataLoadingContext) {
 export async function loadDraftReportData(context: DataLoadingContext) {
   try {
     context.setIsDraftReportLoading(true);
-    submissionStatusCache.clearForStageDate(context.stageCode, context.selectedDate);
-    const result = await loadDraftReportDataService(context.stageCode, context.selectedDate);
+    submissionStatusCache.clearForStageShiftDate(context.stageCode, context.shiftCode, context.selectedDate);
+    const result = await loadDraftReportDataService(context.stageCode, context.shiftCode, context.selectedDate);
     context.setDraftReportData(result.workReports);
     context.setDraftManpowerReportData(result.manpowerReports);
     
     // Also load submission status
     const { getReportingSubmissionStatus } = await import('./pageDataService');
-    const submissionStatus = await getReportingSubmissionStatus(context.stageCode, context.selectedDate);
+    const submissionStatus = await getReportingSubmissionStatus(context.stageCode, context.shiftCode, context.selectedDate);
     context.setReportingSubmissionStatus(submissionStatus);
   } catch (error) {
     console.error('Error loading draft report data:', error);
@@ -182,7 +182,7 @@ export async function loadDraftReportData(context: DataLoadingContext) {
 export async function loadReportData(context: DataLoadingContext) {
   try {
     context.setIsReportLoading(true);
-    const data = await loadReportDataService(context.stageCode, context.selectedDate);
+    const data = await loadReportDataService(context.stageCode, context.shiftCode, context.selectedDate);
     context.setReportData(data);
   } catch (error) {
     console.error('Error loading report data:', error);

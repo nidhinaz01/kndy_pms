@@ -1465,7 +1465,7 @@ export async function handleSubmitPlanning(context: EventHandlerContext) {
       }
     }
 
-  await submitPlanning(context.stageCode, dateStr);
+  await submitPlanning(context.stageCode, dateStr, context.shiftCode);
   await context.loadDraftPlanData();
     alert('Plan submitted successfully!');
   } catch (error) {
@@ -1700,7 +1700,7 @@ export async function handleSubmitReporting(context: EventHandlerContext) {
     const { calculateOvertime } = await import('$lib/services/overtimeCalculationService');
     let otResult;
     try {
-      otResult = await calculateOvertime(context.stageCode, dateStr);
+      otResult = await calculateOvertime(context.stageCode, dateStr, context.shiftCode);
       
       // Log any errors from overtime calculation for debugging
       if (otResult.errors && otResult.errors.length > 0) {
@@ -1725,12 +1725,13 @@ export async function handleSubmitReporting(context: EventHandlerContext) {
         from_time,
         to_time,
         hours_worked_today,
-        prdn_work_planning!inner(stage_code)
+        prdn_work_planning!inner(stage_code, shift_code)
       `)
       .eq('from_date', dateStr)
       .in('status', ['draft', 'pending_approval'])
       .eq('is_deleted', false)
-      .eq('prdn_work_planning.stage_code', context.stageCode);
+      .eq('prdn_work_planning.stage_code', context.stageCode)
+      .eq('prdn_work_planning.shift_code', context.shiftCode);
     
     if (draftReportsError) {
       console.error('Error fetching draft reports for OT check:', draftReportsError);
@@ -1763,7 +1764,7 @@ export async function handleSubmitReporting(context: EventHandlerContext) {
       // Recalculate OT to validate stored values
       let revalidationResult;
       try {
-        revalidationResult = await calculateOvertime(context.stageCode, dateStr);
+        revalidationResult = await calculateOvertime(context.stageCode, dateStr, context.shiftCode);
       } catch (error) {
         console.error('Error revalidating overtime:', error);
         alert('Error validating overtime values: ' + ((error as Error).message || 'Unknown error'));
@@ -2006,7 +2007,7 @@ export async function handleSubmitReporting(context: EventHandlerContext) {
     }
     
     // Submit the reporting
-    const result = await submitReporting(context.stageCode, dateStr);
+    const result = await submitReporting(context.stageCode, dateStr, context.shiftCode);
     
     if (!result.success) {
       alert('Error submitting report: ' + (result.error || 'Unknown error'));
@@ -2016,7 +2017,7 @@ export async function handleSubmitReporting(context: EventHandlerContext) {
     
     // Clear submission status cache to force refresh
     const { submissionStatusCache } = await import('./submissionStatusCache');
-    submissionStatusCache.clearForStageDate(context.stageCode, dateStr);
+    submissionStatusCache.clearForStageShiftDate(context.stageCode, context.shiftCode, dateStr);
     
     // Reload data and show success message
     await context.loadDraftReportData();

@@ -77,8 +77,8 @@ SELECT id, sales_order_id, template_id, inspection_date, inspection_status, insp
 FROM archive.sales_chassis_receival_records WHERE sales_order_id = 12345;
 
 -- 3. prdn_work_planning (references wo_details_id; no FK to submissions required for restore if you allow orphaned planning or restore submissions separately)
-INSERT INTO public.prdn_work_planning (id, planning_submission_id, wo_details_id, stage_code, derived_sw_code, other_work_code, worker_id, from_date, from_time, to_date, to_time, planned_hours, time_worked_till_date, remaining_time, status, notes, report_unplanned_work, sc_required, wsm_id, is_active, is_deleted, created_by, created_dt, modified_by, modified_dt)
-SELECT id, planning_submission_id, wo_details_id, stage_code, derived_sw_code, other_work_code, worker_id, from_date, from_time, to_date, to_time, planned_hours, time_worked_till_date, remaining_time, status, notes, report_unplanned_work, sc_required, wsm_id, is_active, is_deleted, created_by, created_dt, modified_by, modified_dt
+INSERT INTO public.prdn_work_planning (id, planning_submission_id, wo_details_id, stage_code, shift_code, derived_sw_code, other_work_code, worker_id, from_date, from_time, to_date, to_time, planned_hours, time_worked_till_date, remaining_time, status, notes, report_unplanned_work, sc_required, wsm_id, is_active, is_deleted, created_by, created_dt, modified_by, modified_dt)
+SELECT id, planning_submission_id, wo_details_id, stage_code, COALESCE(shift_code, 'GEN'), derived_sw_code, other_work_code, worker_id, from_date, from_time, to_date, to_time, planned_hours, time_worked_till_date, remaining_time, status, notes, report_unplanned_work, sc_required, wsm_id, is_active, is_deleted, created_by, created_dt, modified_by, modified_dt
 FROM archive.prdn_work_planning WHERE wo_details_id = 12345;
 
 -- 4. Deviations (reference planning_id)

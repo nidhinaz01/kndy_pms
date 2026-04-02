@@ -17,7 +17,8 @@ const PAGE_SIZE = 1000;
  */
 export async function createPlanningSubmission(
   stageCode: string,
-  planningDate: string
+  planningDate: string,
+  shiftCode: string
 ): Promise<{ success: boolean; submissionId?: number; version?: number; error?: string }> {
   try {
     const currentUser = getCurrentUsername();
@@ -28,6 +29,7 @@ export async function createPlanningSubmission(
       .from('prdn_planning_submissions')
       .select('id, status, version')
       .eq('stage_code', stageCode)
+      .eq('shift_code', shiftCode)
       .eq('planning_date', planningDate)
       .in('status', ['pending_approval', 'approved'])
       .eq('is_deleted', false)
@@ -49,6 +51,7 @@ export async function createPlanningSubmission(
       .from('prdn_planning_submissions')
       .select('version')
       .eq('stage_code', stageCode)
+      .eq('shift_code', shiftCode)
       .eq('planning_date', planningDate)
       .eq('is_deleted', false)
       .order('version', { ascending: false })
@@ -69,6 +72,7 @@ export async function createPlanningSubmission(
       .from('prdn_planning_submissions')
       .insert({
         stage_code: stageCode,
+        shift_code: shiftCode,
         planning_date: planningDate,
         version: nextVersion,
         submitted_by: currentUser,
@@ -98,10 +102,11 @@ export async function createPlanningSubmission(
  */
 export async function getDraftWorkPlans(
   stageCode: string,
-  planningDate: string
+  planningDate: string,
+  shiftCode: string
 ): Promise<any[]> {
   try {
-    console.log(`🔍 getDraftWorkPlans: Fetching for stage: ${stageCode}, date: ${planningDate}`);
+    console.log(`🔍 getDraftWorkPlans: Fetching for stage: ${stageCode}, shift: ${shiftCode}, date: ${planningDate}`);
     
     const data: any[] = [];
     let offset = 0;
@@ -117,6 +122,7 @@ export async function getDraftWorkPlans(
           std_work_skill_mapping(wsm_id, sc_name)
         `)
         .eq('stage_code', stageCode)
+        .eq('shift_code', shiftCode)
         .eq('from_date', planningDate)
         .in('status', ['draft', 'pending_approval', 'approved'])
         .eq('is_active', true)
@@ -167,7 +173,8 @@ export async function getDraftWorkPlans(
  */
 export async function getDraftManpowerPlans(
   stageCode: string,
-  planningDate: string
+  planningDate: string,
+  shiftCode: string
 ): Promise<any[]> {
   try {
     const allRows: any[] = [];
@@ -181,6 +188,7 @@ export async function getDraftManpowerPlans(
           hr_emp!inner(emp_id, emp_name, skill_short)
         `)
         .eq('stage_code', stageCode)
+        .eq('shift_code', shiftCode)
         .eq('planning_date', planningDate)
         .eq('status', 'draft')
         .eq('is_active', true)
@@ -245,14 +253,15 @@ export async function getDraftStageReassignmentPlans(
  */
 export async function submitPlanning(
   stageCode: string,
-  planningDate: string
+  planningDate: string,
+  shiftCode: string
 ): Promise<{ success: boolean; error?: string }> {
   try {
     const currentUser = getCurrentUsername();
     const now = getCurrentTimestamp();
 
     // Create submission
-    const submissionResult = await createPlanningSubmission(stageCode, planningDate);
+    const submissionResult = await createPlanningSubmission(stageCode, planningDate, shiftCode);
     if (!submissionResult.success || !submissionResult.submissionId) {
       return submissionResult;
     }
@@ -269,6 +278,7 @@ export async function submitPlanning(
         modified_dt: now
       })
       .eq('stage_code', stageCode)
+      .eq('shift_code', shiftCode)
       .eq('from_date', planningDate)
       .eq('status', 'draft')
       .eq('is_deleted', false);
@@ -285,6 +295,7 @@ export async function submitPlanning(
         modified_dt: now
       })
       .eq('stage_code', stageCode)
+      .eq('shift_code', shiftCode)
       .eq('planning_date', planningDate)
       .eq('status', 'draft')
       .eq('is_deleted', false);
@@ -324,7 +335,8 @@ export async function submitPlanning(
  */
 export async function createReportingSubmission(
   stageCode: string,
-  reportingDate: string
+  reportingDate: string,
+  shiftCode: string
 ): Promise<{ success: boolean; submissionId?: number; version?: number; error?: string }> {
   try {
     const currentUser = getCurrentUsername();
@@ -335,6 +347,7 @@ export async function createReportingSubmission(
       .from('prdn_reporting_submissions')
       .select('id, status, version')
       .eq('stage_code', stageCode)
+      .eq('shift_code', shiftCode)
       .eq('reporting_date', reportingDate)
       .in('status', ['pending_approval', 'approved'])
       .eq('is_deleted', false)
@@ -356,6 +369,7 @@ export async function createReportingSubmission(
       .from('prdn_reporting_submissions')
       .select('version')
       .eq('stage_code', stageCode)
+      .eq('shift_code', shiftCode)
       .eq('reporting_date', reportingDate)
       .eq('is_deleted', false)
       .order('version', { ascending: false })
@@ -376,6 +390,7 @@ export async function createReportingSubmission(
       .from('prdn_reporting_submissions')
       .insert({
         stage_code: stageCode,
+        shift_code: shiftCode,
         reporting_date: reportingDate,
         version: nextVersion,
         submitted_by: currentUser,
@@ -405,7 +420,8 @@ export async function createReportingSubmission(
  */
 export async function getDraftWorkReports(
   stageCode: string,
-  reportingDate: string
+  reportingDate: string,
+  shiftCode: string
 ): Promise<any[]> {
   try {
     const allRows: any[] = [];
@@ -425,6 +441,7 @@ export async function getDraftWorkReports(
           )
         `)
         .eq('prdn_work_planning.stage_code', stageCode)
+        .eq('prdn_work_planning.shift_code', shiftCode)
         .eq('from_date', reportingDate)
         .in('status', ['draft', 'pending_approval', 'approved'])
         .eq('is_deleted', false)
@@ -449,7 +466,8 @@ export async function getDraftWorkReports(
  */
 export async function getDraftManpowerReports(
   stageCode: string,
-  reportingDate: string
+  reportingDate: string,
+  shiftCode: string
 ): Promise<any[]> {
   try {
     const { data, error } = await supabase
@@ -459,6 +477,7 @@ export async function getDraftManpowerReports(
         hr_emp!inner(emp_id, emp_name, skill_short)
       `)
       .eq('stage_code', stageCode)
+      .eq('shift_code', shiftCode)
       .eq('reporting_date', reportingDate)
       .in('status', ['draft', 'pending_approval', 'approved'])
       .eq('is_active', true)
@@ -477,7 +496,8 @@ export async function getDraftManpowerReports(
  */
 export async function submitReporting(
   stageCode: string,
-  reportingDate: string
+  reportingDate: string,
+  shiftCode: string
 ): Promise<{ success: boolean; error?: string }> {
   try {
     const currentUser = getCurrentUsername();
@@ -487,7 +507,7 @@ export async function submitReporting(
     const dateStr = reportingDate.includes('T') ? reportingDate.split('T')[0] : reportingDate;
 
     // Create submission
-    const submissionResult = await createReportingSubmission(stageCode, dateStr);
+    const submissionResult = await createReportingSubmission(stageCode, dateStr, shiftCode);
     if (!submissionResult.success || !submissionResult.submissionId) {
       console.error('Failed to create reporting submission:', submissionResult.error);
       return submissionResult;
@@ -503,11 +523,17 @@ export async function submitReporting(
     while (draftHasMore) {
       const { data: page, error: draftReportsError } = await supabase
         .from('prdn_work_reporting')
-        .select('planning_id, id')
+        .select(`
+          planning_id,
+          id,
+          prdn_work_planning!inner(stage_code, shift_code)
+        `)
         .eq('from_date', dateStr)
         .eq('status', 'draft')
         .eq('is_deleted', false)
         .not('planning_id', 'is', null)
+        .eq('prdn_work_planning.stage_code', stageCode)
+        .eq('prdn_work_planning.shift_code', shiftCode)
         .order('id')
         .range(draftOffset, draftOffset + PAGE_SIZE - 1);
 
@@ -534,8 +560,9 @@ export async function submitReporting(
       // Verify these planning IDs belong to the correct stage
       const { data: validPlannings, error: planningCheckError } = await supabase
         .from('prdn_work_planning')
-        .select('id, stage_code')
+        .select('id, stage_code, shift_code')
         .eq('stage_code', stageCode)
+        .eq('shift_code', shiftCode)
         .eq('is_deleted', false)
         .in('id', planningIds);
 
@@ -585,6 +612,7 @@ export async function submitReporting(
         modified_dt: now
       })
       .eq('stage_code', stageCode)
+      .eq('shift_code', shiftCode)
       .eq('reporting_date', dateStr)
       .eq('status', 'draft')
       .eq('is_deleted', false)

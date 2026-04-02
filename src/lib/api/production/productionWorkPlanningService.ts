@@ -31,7 +31,8 @@ export async function createWorkPlanning(planningData: CreateWorkPlanningData, c
 export async function fetchWorkPlanning(
   stageCode: string,
   date: string,
-  status?: 'draft' | 'planned' | 'approved' | 'pending_approval' | 'rejected'
+  status?: 'draft' | 'planned' | 'approved' | 'pending_approval' | 'rejected',
+  shiftCode?: string
 ): Promise<WorkPlanning[]> {
   try {
     let query = supabase
@@ -64,6 +65,10 @@ export async function fetchWorkPlanning(
       .eq('from_date', date)
       .eq('is_active', true)
       .eq('is_deleted', false);
+
+    if (shiftCode) {
+      query = query.eq('shift_code', shiftCode);
+    }
     
     // Filter by status if provided
     if (status) {

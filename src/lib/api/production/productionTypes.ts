@@ -50,6 +50,7 @@ export interface ShiftSchedule {
 export interface WorkPlanning {
   id: number;
   stage_code: string;
+  shift_code: string;
   wo_details_id: number;
   derived_sw_code: string | null;
   sc_required: string;
@@ -99,6 +100,7 @@ export interface WorkReporting {
 
 export interface CreateWorkPlanningData {
   stage_code: string;
+  shift_code: string;
   wo_details_id: number;
   derived_sw_code: string | null;
   sc_required: string;

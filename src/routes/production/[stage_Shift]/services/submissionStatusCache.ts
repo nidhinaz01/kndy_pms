@@ -5,6 +5,7 @@
 
 interface CacheKey {
   stageCode: string;
+  shiftCode: string;
   date: string;
   type: 'planning' | 'reporting';
 }
@@ -18,7 +19,7 @@ class SubmissionStatusCache {
   private cache = new Map<string, CacheEntry>();
   private readonly TTL = 60000; // 60 seconds TTL to handle concurrent updates
 
-  private getKey(stageCode: string, date: string, type: 'planning' | 'reporting'): string {
+  private getKey(stageCode: string, shiftCode: string, date: string, type: 'planning' | 'reporting'): string {
     // Normalize date to YYYY-MM-DD format
     const dateStr = typeof date === 'string' 
       ? date.split('T')[0] 
@@ -26,11 +27,11 @@ class SubmissionStatusCache {
         ? (date as Date).toISOString().split('T')[0]
         : String(date || '').split('T')[0];
     
-    return `${stageCode}:${dateStr}:${type}`;
+    return `${stageCode}:${shiftCode}:${dateStr}:${type}`;
   }
 
-  get(stageCode: string, date: string, type: 'planning' | 'reporting'): any | null {
-    const key = this.getKey(stageCode, date, type);
+  get(stageCode: string, shiftCode: string, date: string, type: 'planning' | 'reporting'): any | null {
+    const key = this.getKey(stageCode, shiftCode, date, type);
     const entry = this.cache.get(key);
     
     if (!entry) {
@@ -46,8 +47,8 @@ class SubmissionStatusCache {
     return entry.status;
   }
 
-  set(stageCode: string, date: string, type: 'planning' | 'reporting', status: any): void {
-    const key = this.getKey(stageCode, date, type);
+  set(stageCode: string, shiftCode: string, date: string, type: 'planning' | 'reporting', status: any): void {
+    const key = this.getKey(stageCode, shiftCode, date, type);
     this.cache.set(key, {
       status,
       timestamp: Date.now()
@@ -58,15 +59,15 @@ class SubmissionStatusCache {
     this.cache.clear();
   }
 
-  // Clear entries for a specific stage/date combination
-  clearForStageDate(stageCode: string, date: string): void {
+  // Clear entries for a specific stage/shift/date combination
+  clearForStageShiftDate(stageCode: string, shiftCode: string, date: string): void {
     const dateStr = typeof date === 'string' 
       ? date.split('T')[0] 
       : (date && typeof date === 'object' && 'toISOString' in date)
         ? (date as Date).toISOString().split('T')[0]
         : String(date || '').split('T')[0];
     
-    const prefix = `${stageCode}:${dateStr}:`;
+    const prefix = `${stageCode}:${shiftCode}:${dateStr}:`;
     const keysToDelete: string[] = [];
     
     this.cache.forEach((_, key) => {

@@ -65,7 +65,8 @@ function minutesToTime(minutes: number): string {
  */
 export async function calculateOvertime(
   stageCode: string,
-  reportingDate: string
+  reportingDate: string,
+  shiftCode: string
 ): Promise<OvertimeCalculationResult> {
   const errors: string[] = [];
   const workers: WorkerOvertime[] = [];
@@ -91,6 +92,7 @@ export async function calculateOvertime(
           hours_worked_today,
           prdn_work_planning!inner(
             stage_code,
+            shift_code,
             derived_sw_code,
             other_work_code,
             std_work_type_details(
@@ -108,6 +110,7 @@ export async function calculateOvertime(
         .in('status', ['draft', 'pending_approval'])
         .eq('is_deleted', false)
         .eq('prdn_work_planning.stage_code', stageCode)
+        .eq('prdn_work_planning.shift_code', shiftCode)
         .order('id')
         .range(offset, offset + PAGE_SIZE - 1);
 
