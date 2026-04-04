@@ -1,7 +1,13 @@
 <script lang="ts">
   import { createEventDispatcher, onMount } from 'svelte';
   import { checkWorkStatus, checkPlanningStatus } from '$lib/services/worksTableService';
-  import { applyFilters, enrichWorkData, getWorkId, getWorkStatusRowKey } from '$lib/utils/worksTableUtils';
+  import {
+    applyFilters,
+    buildWorksFilterDatalists,
+    enrichWorkData,
+    getWorkId,
+    getWorkStatusRowKey
+  } from '$lib/utils/worksTableUtils';
   import type { WorksTableFilters, WorksTableState } from '$lib/types/worksTable';
   import { initialWorksTableFilters, initialWorksTableState } from '$lib/types/worksTable';
   import { sortTableData, handleSortClick, type SortConfig } from '$lib/utils/tableSorting';
@@ -25,6 +31,7 @@
   let sortConfig: SortConfig = { column: null, direction: null };
   let filteredData: any[] = [];
   let sortedData: any[] = [];
+  $: worksFilterDatalists = buildWorksFilterDatalists(data);
   /** Until checkWorkStatus resolves, summary must not assume every row is "To be planned". */
   let workStatusLoadId = 0;
   let isWorkStatusLoading = true;
@@ -269,7 +276,9 @@
 
     {#if state.showFilters}
       <div class="mt-4 p-4 theme-bg-secondary rounded-lg border theme-border">
-        <WorksTableFiltersComponent
+        <svelte:component
+          this={WorksTableFiltersComponent}
+          datalists={worksFilterDatalists}
           {filters}
           onFilterChange={handleFilterChange}
         />

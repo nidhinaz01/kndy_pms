@@ -2,6 +2,11 @@ import { supabase } from '$lib/supabaseClient';
 import { fetchActiveLostTimeReasons } from '$lib/api/lostTimeReasons';
 import { getDetailedTimeBreakdownForDerivativeWork } from '$lib/api/stdSkillTimeStandards';
 import type { LostTimeReason } from '$lib/api/lostTimeReasons';
+import {
+  normalizeReportDate,
+  getEmpIdsReassignedIntoStage,
+  fetchPresentHrEmpRowsForIds
+} from './reportStageWorkerInclusion';
 
 export async function loadWorkers(
   stageCode: string,
@@ -12,13 +17,9 @@ export async function loadWorkers(
   if (!stageCode || !fromDate) return [];
   
   try {
-    // Get date string in YYYY-MM-DD format
-    let dateStr: string;
-    if (typeof fromDate === 'string') {
-      dateStr = fromDate.split('T')[0];
-    } else {
-      dateStr = new Date(fromDate).toISOString().split('T')[0];
-    }
+    const dateStr = normalizeReportDate(
+      typeof fromDate === 'string' ? fromDate : new Date(fromDate).toISOString().split('T')[0]
+    );
 
     // Load workers from prdn_reporting_manpower (attendance saved in Manpower Report tab)
     let attendanceQ = supabase
@@ -76,7 +77,6 @@ export async function loadWorkers(
           .from('hr_emp')
           .select('emp_id, emp_name, skill_short, stage')
           .in('emp_id', plannedWorkerIds)
-          .eq('stage', stageCode)
           .eq('is_active', true)
           .eq('is_deleted', false);
 
@@ -95,7 +95,25 @@ export async function loadWorkers(
       }
     }
 
-    return Array.from(workersMap.values());
+    const reassignedIds = await getEmpIdsReassignedIntoStage(stageCode, dateStr, shiftCode);
+    const missingReassigned = [...reassignedIds].filter((id) => !workersMap.has(id));
+    if (missingReassigned.length > 0) {
+      const extraRows = await fetchPresentHrEmpRowsForIds(missingReassigned, dateStr, shiftCode);
+      extraRows.forEach((row: any) => {
+        if (row.emp_id && !workersMap.has(row.emp_id)) {
+          workersMap.set(row.emp_id, {
+            emp_id: row.emp_id,
+            emp_name: row.emp_name,
+            skill_short: row.skill_short,
+            stage: row.stage
+          });
+        }
+      });
+    }
+
+    return Array.from(workersMap.values()).sort((a, b) =>
+      String(a.emp_id || '').localeCompare(String(b.emp_id || ''))
+    );
   } catch (error) {
     console.error('Error loading workers:', error);
     return [];

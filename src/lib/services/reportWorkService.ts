@@ -2,6 +2,11 @@ import { supabase } from '$lib/supabaseClient';
 import { fetchActiveLostTimeReasons } from '$lib/api/lostTimeReasons';
 import { getDetailedTimeBreakdownForDerivativeWork } from '$lib/api/stdSkillTimeStandards';
 import type { LostTimeReason } from '$lib/api/lostTimeReasons';
+import {
+  normalizeReportDate,
+  getEmpIdsReassignedIntoStage,
+  fetchPresentHrEmpRowsForIds
+} from './reportStageWorkerInclusion';
 
 const PAGE_SIZE = 1000;
 
@@ -9,6 +14,7 @@ export async function loadWorkers(stageCode: string, fromDate: string, shiftCode
   if (!stageCode || !fromDate) return [];
   
   try {
+    const dateStr = normalizeReportDate(fromDate);
     const allRows: any[] = [];
     let offset = 0;
     let hasMore = true;
@@ -27,7 +33,7 @@ export async function loadWorkers(stageCode: string, fromDate: string, shiftCode
         .eq('stage', stageCode)
         .eq('is_active', true)
         .eq('is_deleted', false)
-        .eq('hr_attendance.attendance_date', fromDate)
+        .eq('hr_attendance.attendance_date', dateStr)
         .eq('hr_attendance.attendance_status', 'present')
         .eq('hr_attendance.is_deleted', false)
         .order('emp_id')
@@ -46,7 +52,24 @@ export async function loadWorkers(stageCode: string, fromDate: string, shiftCode
       hasMore = page.length === PAGE_SIZE;
       offset += PAGE_SIZE;
     }
-    return allRows;
+
+    const byId = new Map<string, any>();
+    allRows.forEach((row) => {
+      if (row.emp_id) byId.set(row.emp_id, row);
+    });
+
+    const reassignedIds = await getEmpIdsReassignedIntoStage(stageCode, dateStr, shiftCode);
+    const missing = [...reassignedIds].filter((id) => !byId.has(id));
+    if (missing.length > 0) {
+      const extra = await fetchPresentHrEmpRowsForIds(missing, dateStr, shiftCode);
+      extra.forEach((row) => {
+        if (row.emp_id && !byId.has(row.emp_id)) byId.set(row.emp_id, row);
+      });
+    }
+
+    return Array.from(byId.values()).sort((a, b) =>
+      String(a.emp_id || '').localeCompare(String(b.emp_id || ''))
+    );
   } catch (error) {
     console.error('Error loading present workers:', error);
     return [];

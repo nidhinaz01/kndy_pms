@@ -153,3 +153,54 @@ export function enrichWorkData(work: any): any {
   };
 }
 
+/** Sorted unique strings for Works tab filter datalists (alphabetical suggestions + free typing). */
+export interface WorksFilterDatalists {
+  woNo: string[];
+  pwoNo: string[];
+  vehicleModel: string[];
+  workCode: string[];
+  workName: string[];
+  requiredSkills: string[];
+}
+
+function uniqueSortedField(
+  works: any[],
+  pick: (w: any) => string | null | undefined
+): string[] {
+  const set = new Set<string>();
+  for (const w of works || []) {
+    const v = pick(w);
+    if (v != null && String(v).trim() !== '') set.add(String(v).trim());
+  }
+  return [...set].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+}
+
+export function buildWorksFilterDatalists(works: any[]): WorksFilterDatalists {
+  const workNames = new Set<string>();
+  for (const w of works || []) {
+    const n1 = w.sw_name;
+    const n2 = w.std_work_type_details?.type_description;
+    if (n1 != null && String(n1).trim() !== '') workNames.add(String(n1).trim());
+    if (n2 != null && String(n2).trim() !== '') workNames.add(String(n2).trim());
+  }
+
+  const skillNames = new Set<string>();
+  for (const w of works || []) {
+    const mappings = w.skill_mappings;
+    if (!Array.isArray(mappings)) continue;
+    for (const skill of mappings) {
+      const name = skill?.sc_name;
+      if (name != null && String(name).trim() !== '') skillNames.add(String(name).trim());
+    }
+  }
+
+  return {
+    woNo: uniqueSortedField(works, (w) => w.wo_no),
+    pwoNo: uniqueSortedField(works, (w) => w.pwo_no),
+    vehicleModel: uniqueSortedField(works, (w) => w.mstr_wo_type?.wo_type_name),
+    workCode: uniqueSortedField(works, (w) => w.std_work_type_details?.derived_sw_code || w.sw_code),
+    workName: [...workNames].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' })),
+    requiredSkills: [...skillNames].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
+  };
+}
+

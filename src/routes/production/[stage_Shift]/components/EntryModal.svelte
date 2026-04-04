@@ -14,7 +14,12 @@
     return `${wo.prdn_wo_details?.wo_no || 'N/A'} - ${wo.prdn_wo_details?.pwo_no || 'N/A'} - ${wo.prdn_wo_details?.wo_model || 'N/A'}`;
   }
 
-  $: workOrderOptionMap = new Map(waitingWorkOrders.map((wo) => [getWorkOrderLabel(wo), wo]));
+  /** Datalist order follows this list; sort by full label for alphabetical WO / PWO / model order. */
+  $: sortedWaitingWorkOrders = [...waitingWorkOrders].sort((a, b) =>
+    getWorkOrderLabel(a).localeCompare(getWorkOrderLabel(b), undefined, { sensitivity: 'base' })
+  );
+
+  $: workOrderOptionMap = new Map(sortedWaitingWorkOrders.map((wo) => [getWorkOrderLabel(wo), wo]));
 
   const dispatch = createEventDispatcher();
 
@@ -78,7 +83,7 @@
             on:input={handleWorkOrderInput}
           />
           <datalist id="entryWorkOrderOptions">
-            {#each waitingWorkOrders as wo}
+            {#each sortedWaitingWorkOrders as wo}
               <option value={getWorkOrderLabel(wo)}></option>
             {/each}
           </datalist>

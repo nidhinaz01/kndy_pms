@@ -706,6 +706,18 @@
     warnings.skillMismatchDetails = result.details;
   }
 
+  /**
+   * Native stage roster is in `availableWorkers` (hr_emp.stage = stage).
+   * People reassigned into this stage for the day appear only in `filteredAvailableWorkers`
+   * after time filtering — same list the step-2 dropdown uses.
+   */
+  function findWorkerByEmpId(empId: string): Worker | undefined {
+    if (!empId) return undefined;
+    const fromFiltered = filteredAvailableWorkers.find(w => w.emp_id === empId);
+    if (fromFiltered) return fromFiltered;
+    return availableWorkers.find(w => w.emp_id === empId);
+  }
+
   function handleWorkerChange(event: Event, skillKey: string) {
     const target = event.target as HTMLSelectElement;
     const workerId = target.value;
@@ -719,7 +731,7 @@
     
     // If a worker is selected, check if they're already assigned to another skill competency
     if (workerId) {
-      const selectedWorker = availableWorkers.find(w => w.emp_id === workerId);
+      const selectedWorker = findWorkerByEmpId(workerId);
       
       // Check if this worker is already assigned to a different skill competency
       for (const [key, worker] of Object.entries(formData.selectedWorkers)) {
@@ -1206,8 +1218,7 @@
     selectedWorkerIds.forEach(empId => {
       const isInAvailable = filteredAvailableWorkers.some(w => w.emp_id === empId);
       if (!isInAvailable) {
-        // Find the worker in the full availableWorkers list
-        const worker = availableWorkers.find(w => w.emp_id === empId);
+        const worker = findWorkerByEmpId(empId);
         if (worker) {
           // Add to filteredAvailableWorkers
           filteredAvailableWorkers = [...filteredAvailableWorkers, worker];
