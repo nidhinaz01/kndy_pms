@@ -343,7 +343,8 @@ async function getApplicableSkillRate(
 }
 
 /**
- * Calculate working days in a specific month (excluding weekends and holidays)
+ * Working days in a month: every calendar day counts unless it is in the holiday list
+ * (weekends count unless marked as holidays).
  */
 async function calculateWorkingDaysInMonth(year: number, month: number): Promise<number> {
   try {
@@ -358,19 +359,14 @@ async function calculateWorkingDaysInMonth(year: number, month: number): Promise
     const currentDate = new Date(firstDay);
     
     while (currentDate <= lastDay) {
-      const dayOfWeek = currentDate.getDay();
-      // Skip weekends (Saturday = 6, Sunday = 0)
-      if (dayOfWeek !== 0 && dayOfWeek !== 6) {
-        // Check if it's not a holiday
-        const isHolidayDate = holidays.some(holiday => 
-          holiday.getFullYear() === currentDate.getFullYear() &&
-          holiday.getMonth() === currentDate.getMonth() &&
-          holiday.getDate() === currentDate.getDate()
-        );
-        
-        if (!isHolidayDate) {
-          workingDays++;
-        }
+      const isHolidayDate = holidays.some(holiday => 
+        holiday.getFullYear() === currentDate.getFullYear() &&
+        holiday.getMonth() === currentDate.getMonth() &&
+        holiday.getDate() === currentDate.getDate()
+      );
+      
+      if (!isHolidayDate) {
+        workingDays++;
       }
       
       currentDate.setDate(currentDate.getDate() + 1);

@@ -122,7 +122,7 @@
     </div>
   </div>
 
-  <main class="mx-auto min-w-0 w-full max-w-6xl flex-1 px-4 py-6 sm:px-6">
+  <main class="mx-auto min-w-0 w-full max-w-[100rem] flex-1 px-4 py-6 sm:px-6">
       {#if errorMessage}
         <div
           class="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800 dark:border-red-900 dark:bg-red-950/40 dark:text-red-200"
@@ -133,8 +133,9 @@
 
       {#if !report && !loading && !errorMessage}
         <p class="theme-text-secondary text-sm">
-          Choose a date and click <strong>Generate Report</strong>. Working days use the holiday list (active
-          holidays in <code class="text-xs">plan_holidays</code>), excluding weekends. Daily entry target comes from the
+          Choose a date and click <strong>Generate Report</strong>. Working days are calendar days in the period that are
+          not active holidays in <code class="text-xs">plan_holidays</code> (weekends count unless listed as holidays).
+          Daily entry target comes from the
           production plan (<code class="text-xs">plan_prod_plan_per_shift.ppd_count</code>) whose period covers the
           selected date (active plan if any; otherwise an inactive plan that still includes that date).
         </p>

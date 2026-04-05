@@ -27,7 +27,7 @@
 
 ## Introduction
 
-The Production Management System is a comprehensive web-based application designed to manage production workflows, employee data, work orders, planning, reporting, and operational reports (such as month-to-date production status) for manufacturing operations. This manual provides detailed instructions for using each module and feature of the system.
+The Production Management System is a comprehensive web-based application designed to manage production workflows, employee data, work orders, planning, reporting, and operational reports (including month-to-date production status, lost time, and deviation reports) for manufacturing operations. This manual provides detailed instructions for using each module and feature of the system.
 
 ### System Requirements
 
@@ -318,7 +318,7 @@ When a work order is no longer needed in active operations (e.g. after delivery)
 - **Production manager views:** [Central Production Dashboard](#central-production-dashboard), [Shift change](#shift-change)
 - **HR and Standards (setup):** [HR Module](#hr-module), [Standards Module](#standards-module); bulk add works: [Add Multiple Standard Works](#add-multiple-standard-works)
 - **Piece Rate (per employee vs by stage Excel):** [Piece Rate Module](#piece-rate-module)
-- **Reports (daily production status MTD):** [Reports Module](#reports-module)
+- **Reports (daily production status, lost time, deviations):** [Reports Module](#reports-module)
 - **Archive:** [Archive Work Order](#archive-work-order)
 
 ---
@@ -3594,7 +3594,13 @@ Exports **piece rate data to Excel** for a **single production stage** over a **
 
 ### Overview
 
-The **Reports** area provides read-only operational reports that combine planning master data, holidays, and production dates. Your administrator may group these under a **Reports** menu in the sidebar. The first report documented here is **Daily Production Status**.
+The **Reports** area provides read-only operational reports. Your administrator may group them under a **Reports** menu in the sidebar. Documented reports:
+
+- **Daily Production Status** — month-to-date production entry/exit and targets  
+- **Lost Time Report** — lost-time lines from work reports (with worker name) over a date range  
+- **Deviation Report** — planning and reporting deviations overlapping a date range  
+
+**Shared date rules** (Lost Time and Deviation): **From** and **To** dates must both be set; **from** ≤ **to**; **to** cannot be after today; the range cannot exceed **93 days** (about three months). Defaults are often the first day of the current month through today.
 
 ### Daily Production Status
 
@@ -3633,6 +3639,58 @@ A **month-to-date (MTD)** snapshot from the **1st of the selected month** throug
 **Areas Affected**:
 - None (read-only report and export)
 
+### Lost Time Report
+
+**Path**: `/reports/lost-time-report`
+
+**Description**: 
+Lists **lost-time detail lines** from submitted work reports whose reporting window **overlaps** the selected **From** / **To** date range. Only rows that have lost-time data (`lt_details`) and a **worker name** are included (rows without a named worker are excluded).
+
+**Features**:
+- **From date** / **To date**: Same validation as other range reports (see Overview above).
+- **Generate Report**: Loads a wide results table.
+- **Export Excel**: Exports the current result set; the Excel file includes additional columns such as shift, worker ID/skill, LT comments, report status, and audit fields (beyond what is shown on screen).
+- On-screen columns include (among others): Shift, Stage, Date (report from, with time if present), Work order, Work code, Work name + details, Skill competency, Std time, Worker, Report to (date/time), Minutes, Reason, Payable (Yes/No), Value.
+
+**How to Use**:
+
+1. Open **Reports > Lost Time Report** (or `/reports/lost-time-report`).
+2. Set **From** and **To** dates.
+3. Click **Generate Report**.
+4. Review the table; use **Export Excel** if you need the extended columns or a file to share.
+
+**Prerequisites**:
+- Menu access; lost-time reasons configured in **System Admin > Lost Time Reasons** where applicable.
+- Work reports in the range with lost-time lines and named workers.
+
+**Areas Affected**:
+- None (read-only)
+
+### Deviation Report
+
+**Path**: `/reports/deviation-report`
+
+**Description**: 
+Shows **planning and reporting deviations** whose time windows overlap the selected **From** / **To** range. Planning-side deviations (including trainee addition) appear as **one** row with context **Plan**. Reporting-side deviations appear as **two** rows each: **Plan** (planned window/worker and standard time from skill mapping) and **Report** (reported window/worker and reported standard time when present). Overlap is determined by each row’s `from_date` / `to_date` with your filter range.
+
+**Features**:
+- **From date** / **To date**: Same validation as Lost Time Report (max ~3 months, to ≤ today).
+- **Generate Report** / **Export Excel** (Excel after rows are loaded).
+- Table columns include: Stage, Shift, Date, **Context** (Plan / Report), Type, Reason, Work order, Work code, Work name + details, Skill competency, Std time, Worker.
+
+**How to Use**:
+
+1. Open **Reports > Deviation Report** (or `/reports/deviation-report`).
+2. Set **From** and **To** dates.
+3. Click **Generate Report**.
+4. Review Plan vs Report lines; export to Excel if needed.
+
+**Prerequisites**:
+- Menu access; deviation records recorded during planning/reporting in Production.
+
+**Areas Affected**:
+- None (read-only)
+
 ---
 
 ## Common Features
@@ -3643,7 +3701,7 @@ Many modules support exporting data to Excel or PDF:
 
 - **Excel Export**: Click "Export to Excel" button to download data as Excel file
 - **PDF Export**: Click "Export to PDF" button to generate PDF document
-- **Reports**: **Daily Production Status** offers **Export Excel** after you generate the on-screen report
+- **Reports**: **Daily Production Status**, **Lost Time Report**, and **Deviation Report** each offer **Export Excel** after you generate the on-screen report (where rows exist for the latter two)
 
 ### Search and Filter
 
@@ -3793,6 +3851,16 @@ This section provides quick reference for the most common tasks. For detailed in
 3. Review summary, plants, by-stage grid
 4. Export Excel if needed
 
+**Lost Time Report**:
+1. Reports > Lost Time Report
+2. From / To dates (max ~3 months, to ≤ today)
+3. Generate Report → Export Excel if needed
+
+**Deviation Report**:
+1. Reports > Deviation Report
+2. From / To dates (same rules as Lost Time)
+3. Generate Report → review Plan / Report context rows → Export Excel if needed
+
 ### Navigation Quick Reference
 
 | Task | Menu path | URL path (typical) |
@@ -3817,6 +3885,8 @@ This section provides quick reference for the most common tasks. For detailed in
 | Archive Work Orders | System Admin > Archive Work Order | `/system-admin/archive-wo` |
 | System Admin | System Admin > User Management | `/system-admin/user-management` |
 | Daily Production Status | Reports > Daily Production Status | `/reports/daily-production-status` |
+| Lost Time Report | Reports > Lost Time Report | `/reports/lost-time-report` |
+| Deviation Report | Reports > Deviation Report | `/reports/deviation-report` |
 
 ### Status Reference
 
@@ -4102,6 +4172,15 @@ A: **Reports > Daily Production Status** shows a **month-to-date** view from the
 
 **Q: How do I run or export Daily Production Status?**  
 A: Open the report, pick **As of date**, click **Generate Report**, then optionally **Export Excel**. Working days exclude weekends and holidays from **Planning > Holiday List**. See [Daily Production Status](#daily-production-status).
+
+**Q: What is the Lost Time Report?**  
+A: **Reports > Lost Time Report** lists lost-time lines from work reports that overlap your **From** / **To** range, for rows that have a **worker name**. Use **Export Excel** for extra columns (worker ID, comments, status, audit). See [Lost Time Report](#lost-time-report).
+
+**Q: What is the Deviation Report?**  
+A: **Reports > Deviation Report** shows planning and reporting deviations overlapping your date range. Reporting deviations appear as two lines (**Plan** and **Report**) per event. See [Deviation Report](#deviation-report).
+
+**Q: Why does the Lost Time or Deviation report say my date range is invalid?**  
+A: **To** cannot be after today, **from** must be on or before **to**, and the span cannot exceed **93 days** (~3 months). Narrow the range and try again.
 
 ---
 

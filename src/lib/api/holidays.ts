@@ -142,7 +142,8 @@ export async function isHoliday(date: Date): Promise<boolean> {
   }
 }
 
-// Calculate working days between two dates (excluding holidays)
+// Calculate working days between two dates: every day counts unless it is in the holiday list
+// (weekends are working unless explicitly marked as holidays).
 export async function calculateWorkingDays(startDate: Date, endDate: Date): Promise<number> {
   try {
     const holidays = await getHolidayDates(startDate.getFullYear(), endDate.getFullYear());
@@ -151,19 +152,14 @@ export async function calculateWorkingDays(startDate: Date, endDate: Date): Prom
     const currentDate = new Date(startDate);
     
     while (currentDate <= endDate) {
-      // Skip weekends (Saturday = 6, Sunday = 0)
-      const dayOfWeek = currentDate.getDay();
-      if (dayOfWeek !== 0 && dayOfWeek !== 6) {
-        // Check if it's not a holiday
-        const isHolidayDate = holidays.some(holiday => 
-          holiday.getFullYear() === currentDate.getFullYear() &&
-          holiday.getMonth() === currentDate.getMonth() &&
-          holiday.getDate() === currentDate.getDate()
-        );
-        
-        if (!isHolidayDate) {
-          workingDays++;
-        }
+      const isHolidayDate = holidays.some(holiday => 
+        holiday.getFullYear() === currentDate.getFullYear() &&
+        holiday.getMonth() === currentDate.getMonth() &&
+        holiday.getDate() === currentDate.getDate()
+      );
+      
+      if (!isHolidayDate) {
+        workingDays++;
       }
       
       currentDate.setDate(currentDate.getDate() + 1);
