@@ -1,7 +1,13 @@
 import { supabase } from '$lib/supabaseClient';
 import type { MultiSkillReportFormData, BreakdownData } from '$lib/types/multiSkillReport';
 import type { LostTimeReason } from '$lib/api/lostTimeReasons';
+import { getEffectiveRowTimes } from '$lib/utils/planWorkUtils';
 import { calculatePieceRateForPlanning } from './pieceRateCalculationService';
+
+function isTraineePlanningRow(work: any): boolean {
+  const n = work.notes ?? work.prdn_work_planning?.notes;
+  return typeof n === 'string' && n.trim().startsWith('Trainee:');
+}
 
 export async function saveMultiSkillReports(
   selectedWorks: any[],
@@ -12,8 +18,8 @@ export async function saveMultiSkillReports(
     const { getCurrentUsername, getCurrentTimestamp } = await import('$lib/utils/userUtils');
     const currentUser = getCurrentUsername();
     const now = getCurrentTimestamp();
-    
-    const hoursWorkedToday = (formData.actualTimeMinutes ?? 0) / 60;
+
+    const skillWorks = (selectedWorks || []).filter((w) => !isTraineePlanningRow(w));
     
     const hasBreakdown = formData.breakdownData.breakdownItems.length > 0;
     
@@ -113,8 +119,8 @@ export async function saveMultiSkillReports(
     };
     
     // Check if any works have reporting_id (indicating they're existing reports to update)
-    const worksToUpdate = selectedWorks.filter(work => work.reporting_id);
-    const worksToInsert = selectedWorks.filter(work => !work.reporting_id);
+    const worksToUpdate = skillWorks.filter(work => work.reporting_id);
+    const worksToInsert = skillWorks.filter(work => !work.reporting_id);
     
     // Prepare update data for existing reports
     const updatePromises = worksToUpdate.map(async (work) => {
@@ -124,14 +130,17 @@ export async function saveMultiSkillReports(
       // Calculate lt_details specific to this worker
       const workerLtDetails = calculateLtDetailsForWorker(workerId);
       
+      const eff = getEffectiveRowTimes(String(work.id), formData);
+      const rowHoursWorked = eff.plannedHours;
+
       const updateData = {
         worker_id: workerId,
-        from_date: formData.fromDate,
-        from_time: formData.fromTime,
-        to_date: formData.toDate,
-        to_time: formData.toTime,
+        from_date: eff.fromDate,
+        from_time: eff.fromTime,
+        to_date: eff.toDate,
+        to_time: eff.toTime,
         hours_worked_till_date: work.hours_worked_till_date || work.time_worked_till_date || 0,
-        hours_worked_today: hoursWorkedToday,
+        hours_worked_today: rowHoursWorked,
         completion_status: formData.completionStatus,
         lt_minutes_total: formData.ltMinutes,
         lt_details: workerLtDetails,
@@ -159,15 +168,18 @@ export async function saveMultiSkillReports(
       // Calculate lt_details specific to this worker
       const workerLtDetails = calculateLtDetailsForWorker(workerId);
       
+      const eff = getEffectiveRowTimes(String(work.id), formData);
+      const rowHoursWorked = eff.plannedHours;
+
       return {
         planning_id: work.id,
         worker_id: workerId, // null if deviation, otherwise the assigned worker
-        from_date: formData.fromDate,
-        from_time: formData.fromTime,
-        to_date: formData.toDate,
-        to_time: formData.toTime,
+        from_date: eff.fromDate,
+        from_time: eff.fromTime,
+        to_date: eff.toDate,
+        to_time: eff.toTime,
         hours_worked_till_date: work.hours_worked_till_date || work.time_worked_till_date || 0,
-        hours_worked_today: hoursWorkedToday,
+        hours_worked_today: rowHoursWorked,
         completion_status: formData.completionStatus,
         lt_minutes_total: formData.ltMinutes,
         lt_details: workerLtDetails, // Per-worker lost time details
@@ -224,7 +236,7 @@ export async function saveMultiSkillReports(
     }> = [];
     
     savedReports.forEach((report: any) => {
-      const work = selectedWorks.find(w => w.id === report.planning_id);
+      const work = skillWorks.find(w => w.id === report.planning_id);
       if (work) {
         const deviation = formData.deviations[work.id];
         if (deviation?.hasDeviation && deviation.reason.trim().length > 0) {
@@ -254,12 +266,16 @@ export async function saveMultiSkillReports(
 
     // Handle trainee planning and deviations (if trainees were added during reporting)
     if (formData.selectedTrainees && formData.selectedTrainees.length > 0) {
-      if (!formData.traineeDeviationReason || !formData.traineeDeviationReason.trim()) {
+      const hasNewTrainee = formData.selectedTrainees.some((t) => !t.reporting_id);
+      if (hasNewTrainee && (!formData.traineeDeviationReason || !formData.traineeDeviationReason.trim())) {
         return { success: false, error: 'Deviation reason is required for adding trainees.' };
       }
 
       const { createWorkPlanning } = await import('$lib/api/production');
-      const firstWork = selectedWorks[0];
+      const firstWork = skillWorks[0];
+      if (!firstWork) {
+        return { success: false, error: 'Missing skill work rows for trainee reporting context.' };
+      }
       const stageCode = firstWork.stage_code || firstWork.prdn_work_planning?.stage_code;
       const shiftForPlanning =
         firstWork.shift_code || firstWork.prdn_work_planning?.shift_code || 'GEN';
@@ -271,8 +287,54 @@ export async function saveMultiSkillReports(
         return { success: false, error: 'Missing required work information for trainee planning.' };
       }
       
-      // Create planning records for each trainee
-      for (const trainee of formData.selectedTrainees) {
+      for (let ti = 0; ti < formData.selectedTrainees.length; ti++) {
+        const trainee = formData.selectedTrainees[ti];
+        const eff = getEffectiveRowTimes(`trainee-${ti}`, formData);
+        const rowHours = eff.plannedHours;
+
+        if (trainee.reporting_id && trainee.planning_id) {
+          const { error: repErr } = await supabase
+            .from('prdn_work_reporting')
+            .update({
+              from_date: eff.fromDate,
+              from_time: eff.fromTime,
+              to_date: eff.toDate,
+              to_time: eff.toTime,
+              hours_worked_today: rowHours,
+              completion_status: formData.completionStatus,
+              modified_by: currentUser,
+              modified_dt: now
+            })
+            .eq('id', trainee.reporting_id);
+
+          if (repErr) {
+            console.error(`Error updating report for trainee ${trainee.emp_name}:`, repErr);
+            return { success: false, error: `Failed to update report for trainee ${trainee.emp_name}` };
+          }
+
+          const { error: planErr } = await supabase
+            .from('prdn_work_planning')
+            .update({
+              from_date: eff.fromDate,
+              from_time: eff.fromTime,
+              to_date: eff.toDate,
+              to_time: eff.toTime,
+              planned_hours: rowHours,
+              remaining_time: rowHours,
+              modified_by: currentUser,
+              modified_dt: now
+            })
+            .eq('id', trainee.planning_id);
+
+          if (planErr) {
+            console.error(`Error updating planning for trainee ${trainee.emp_name}:`, planErr);
+            return { success: false, error: `Failed to update planning for trainee ${trainee.emp_name}` };
+          }
+
+          console.log(`✅ Updated planning and report for trainee ${trainee.emp_name}`);
+          continue;
+        }
+
         const traineePlanData = {
           stage_code: stageCode,
           shift_code: shiftForPlanning,
@@ -281,13 +343,13 @@ export async function saveMultiSkillReports(
           other_work_code: otherWorkCode,
           sc_required: 'T',
           worker_id: trainee.emp_id,
-          from_date: formData.fromDate,
-          from_time: formData.fromTime,
-          to_date: formData.toDate,
-          to_time: formData.toTime,
-          planned_hours: hoursWorkedToday,
+          from_date: eff.fromDate,
+          from_time: eff.fromTime,
+          to_date: eff.toDate,
+          to_time: eff.toTime,
+          planned_hours: rowHours,
           time_worked_till_date: 0,
-          remaining_time: hoursWorkedToday,
+          remaining_time: rowHours,
           status: 'approved' as const,
           notes: `Trainee: ${trainee.emp_name} - Added during reporting`,
           wsm_id: null
@@ -295,16 +357,15 @@ export async function saveMultiSkillReports(
 
         const traineePlan = await createWorkPlanning(traineePlanData, currentUser);
 
-        // Create reporting record for the trainee
         const traineeReportData = {
           planning_id: traineePlan.id,
           worker_id: trainee.emp_id,
-          from_date: formData.fromDate,
-          from_time: formData.fromTime,
-          to_date: formData.toDate,
-          to_time: formData.toTime,
+          from_date: eff.fromDate,
+          from_time: eff.fromTime,
+          to_date: eff.toDate,
+          to_time: eff.toTime,
           hours_worked_till_date: 0,
-          hours_worked_today: hoursWorkedToday,
+          hours_worked_today: rowHours,
           completion_status: formData.completionStatus,
           lt_minutes_total: 0,
           lt_details: null,
@@ -327,7 +388,6 @@ export async function saveMultiSkillReports(
           return { success: false, error: `Failed to create report for trainee ${trainee.emp_name}` };
         }
 
-        // Create deviation record for trainee addition
         const { error: deviationError } = await supabase
           .from('prdn_work_planning_deviations')
           .insert({

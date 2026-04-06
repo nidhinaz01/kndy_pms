@@ -1,4 +1,4 @@
-import type { TimeSlot } from '$lib/types/planWork';
+import type { PlanWorkFormData, RowTimeFormLike, TimeSlot } from '$lib/types/planWork';
 import { formatTime } from './timeFormatUtils';
 import { calculateBreakTimeForWorkPeriod, calculateBreakTimeInMinutes } from './breakTimeUtils';
 
@@ -54,6 +54,44 @@ export function calculatePlannedHours(fromTime: string, toTime: string): number 
 }
 
 /**
+ * Effective dates/times for one planning row (skill slot or trainee index).
+ * Custom override is times-only; dates always come from Step 1 (`formData.fromDate` / `toDate`).
+ */
+export function getEffectiveRowTimes(
+  rowKey: string,
+  formData: RowTimeFormLike
+): {
+  fromDate: string;
+  toDate: string;
+  fromTime: string;
+  toTime: string;
+  plannedHours: number;
+} {
+  const fromDate = formData.fromDate || '';
+  const toDate = formData.toDate || fromDate;
+  const o = formData.rowTimeOverrides?.[rowKey];
+  const defaultPlanned =
+    formData.plannedHours ??
+    calculatePlannedHours(formData.fromTime || '', formData.toTime || '');
+  if (o?.useCustom && o.fromTime && o.toTime) {
+    return {
+      fromDate,
+      toDate,
+      fromTime: o.fromTime,
+      toTime: o.toTime,
+      plannedHours: calculatePlannedHours(o.fromTime, o.toTime)
+    };
+  }
+  return {
+    fromDate,
+    toDate,
+    fromTime: formData.fromTime || '',
+    toTime: formData.toTime || '',
+    plannedHours: defaultPlanned
+  };
+}
+
+/**
  * Calculate break time in a time slot
  * Returns hours for backward compatibility
  * @deprecated Use calculateBreakTimeInMinutes from breakTimeUtils and convert to hours if needed
@@ -86,18 +124,24 @@ export function autoCalculateEndTime(
     
     if (workDurationMinutes <= 0) return '';
 
-    // Calculate break time in the work period (returns minutes)
-    const breakMinutes = calculateBreakTimeForWorkPeriod(
-      fromTime,
-      workDurationMinutes,
-      shiftBreakTimes
-    );
+    // Wall-clock span = standard work minutes + break minutes that fall in that span.
+    // Iterate until stable so breaks that only appear after extending the window are included
+    // (same end-time model as Plan Work modal).
+    let clockSpanMinutes = workDurationMinutes;
+    if (shiftBreakTimes && shiftBreakTimes.length > 0) {
+      for (let i = 0; i < 20; i++) {
+        const breakOverlap = calculateBreakTimeForWorkPeriod(
+          fromTime,
+          clockSpanMinutes,
+          shiftBreakTimes
+        );
+        const nextSpan = workDurationMinutes + breakOverlap;
+        if (nextSpan === clockSpanMinutes) break;
+        clockSpanMinutes = nextSpan;
+      }
+    }
 
-    // Total time = work duration + break time
-    const totalMinutes = workDurationMinutes + breakMinutes;
-    const endMinutes = fromMinutes + totalMinutes;
-    
-    // Handle overnight
+    const endMinutes = fromMinutes + clockSpanMinutes;
     const endHour = Math.floor((endMinutes % (24 * 60)) / 60);
     const endMin = endMinutes % 60;
     
@@ -108,9 +152,59 @@ export function autoCalculateEndTime(
   }
 }
 
+/** Minutes between each "From time" option in Plan Work (shift-boundary dropdown). */
+const TIME_SLOT_STEP_MINUTES = 5;
+
+/** Normalize DB time (HH:MM:SS or HH:MM) to HH:MM for pickers and calculations. */
+export function normalizeTimeToHHMM(timeStr: string): string {
+  if (!timeStr) return '';
+  const parts = timeStr.split(':');
+  if (parts.length >= 2) {
+    return `${parts[0].padStart(2, '0')}:${parts[1].padStart(2, '0')}`;
+  }
+  return timeStr;
+}
+
+/** Snap a wall time to the nearest generated shift slot (same grid as Plan Work). */
+export function findClosestShiftTimeSlot(
+  targetTime: string,
+  shiftStart: string,
+  shiftEnd: string
+): string {
+  const normalizedTarget = normalizeTimeToHHMM(targetTime);
+  if (!normalizedTarget || !shiftStart || !shiftEnd) return normalizedTarget;
+
+  try {
+    const timeSlots = generateTimeSlots(shiftStart, shiftEnd);
+    if (timeSlots.length === 0) return normalizedTarget;
+
+    const [targetHour, targetMin] = normalizedTarget.split(':').map(Number);
+    const targetMinutes = targetHour * 60 + targetMin;
+
+    let closestSlot = timeSlots[0];
+    let minDiff = Infinity;
+
+    for (const slot of timeSlots) {
+      const [slotHour, slotMin] = slot.value.split(':').map(Number);
+      const slotMinutes = slotHour * 60 + slotMin;
+      const diff = Math.abs(slotMinutes - targetMinutes);
+      if (diff < minDiff) {
+        minDiff = diff;
+        closestSlot = slot;
+      }
+    }
+
+    return closestSlot.value;
+  } catch (error) {
+    console.error('Error finding closest shift time slot:', error);
+    return normalizedTarget;
+  }
+}
+
 export function generateTimeSlots(shiftStartTime: string, shiftEndTime: string): TimeSlot[] {
   const slots: TimeSlot[] = [];
-  
+  const stepMs = TIME_SLOT_STEP_MINUTES * 60 * 1000;
+
   try {
     const [startHour, startMinute] = shiftStartTime.split(':').map(Number);
     const shiftStartDate = new Date(2000, 0, 1, startHour, startMinute);
@@ -137,7 +231,7 @@ export function generateTimeSlots(shiftStartTime: string, shiftEndTime: string):
       
       slots.push({ value, display });
       
-      currentTime = new Date(currentTime.getTime() + 15 * 60 * 1000);
+      currentTime = new Date(currentTime.getTime() + stepMs);
     }
     
     return slots;

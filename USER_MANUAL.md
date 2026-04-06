@@ -539,11 +539,11 @@ Let's go through each step in detail:
 4. **Step 1: Select Time Slot**:
    - The modal opens with **Step 1: Time Selection**
    - **Select Skill Mapping**: If the work requires multiple skills, select which skill combination you're planning for
-   - **From Time**: Click the time picker and select the start time
-     - Times are in 15-minute intervals (e.g., 09:00, 09:15, 09:30)
-   - **To Time**: The system may auto-calculate based on standard time, or you can select manually
-   - **Duration**: The system shows the calculated duration
-   - Review any warnings shown (e.g., time overlaps, break times)
+   - **From Date** and **To Date**: Choose the calendar span for the planned work (often the same as the production date; use different dates only when the planned window crosses midnight or multiple days)
+   - **From Time**: Select the start time from the shift’s allowed slots (typically 15-minute intervals)
+   - **To Time**: The system may auto-calculate from standard time (**Auto Calculate End Time** when available), or select manually
+   - **Duration / planned hours**: Based on the elapsed time between the selected **from** and **to** times for that window (simple duration for the slot)
+   - Review any warnings shown (e.g., overlaps with other work, shift configuration)
 
 5. **Continue to Step 2**:
    - Click **"Next"** or **"Continue"** button
@@ -566,6 +566,11 @@ Let's go through each step in detail:
      - You must provide a reason for adding trainees (deviation reason)
      - Trainees are added to help with the work but don't replace the main worker
      - Maximum of 2 trainees allowed per work
+   - **Custom from/to times per assignment (Optional)**:
+     - Under each selected **main worker** or **trainee**, you can enable **"Custom from/to times for this assignment"**
+     - When enabled, pick **From time** and **To time** for that person only (still within the shift’s time slots). Other assignments keep the shared Step 1 window unless they also use custom times
+     - Uncheck the option to clear custom times and use the shared window again
+     - If custom times are enabled, both from and to must be filled before saving; incomplete custom rows show a validation message
    - The system shows warnings if:
      - Worker has time conflicts
      - Worker doesn't have the required skill
@@ -576,7 +581,8 @@ Let's go through each step in detail:
    - **Time Overlap Warning**: Worker is already assigned to another work in the same time
    - **Time Excess Warning**: Worker's total planned hours exceed shift hours
    - **Skill Mismatch Warning**: Worker doesn't have the required skill
-   - You can proceed with warnings, but it's recommended to resolve them
+   - Some **time conflicts** are **blocking**: the system will not save until workers’ times no longer overlap other draft plans (you’ll see a message to resolve conflicts first)
+   - **Planning blocked**: If the daily plan for this stage/shift/date is already submitted or approved, planning may be blocked for that date (message explains why)
 
 8. **Save the Plan**:
    - Click **"Save Plan"** or **"Save"** button
@@ -1040,15 +1046,20 @@ Overtime can be reported from the Draft Report tab:
    - The system shows planned workers
    - Verify actual workers who performed the work
    - You can change workers if different from plan
-   - For multi-skill works, report for each skill separately or together
+   - For **multi-skill** works, the **Report** flow uses a multi-skill report screen: assign workers per skill (and trainees if applicable), then continue to lost time / save as prompted
 
-6. **Review and Save**:
+6. **Per-worker from/to times (planning and reporting)**:
+   - **Plan Work (modal)**: In **Step 2**, after choosing the shared time window in **Step 1**, each **main worker** and **trainee** can optionally use **Custom from/to times for this assignment** so that person’s planned **from** and **to** times differ from the shared slot (still chosen from the shift’s time list). This is the same pattern whether you plan from the **Works** tab or edit a draft plan.
+   - **Report (multi-skill modal)**: For works reported through the **multi-skill report** flow, you set an overall **from/to date and time** for the report, then—under each worker or trainee—you can again enable **Custom from/to times for this assignment** so each person’s **actual** reporting window can differ from the shared times.
+   - **Report (single-work modal)**: For a standard single-work **Report** dialog, **From time** and **To time** usually describe the overall work interval; use multi-skill reporting when each worker needs different times.
+
+7. **Review and Save**:
    - Review all entered information
    - Check for any warnings
    - Click **"Save Report"** or **"Report"** button
    - The report is saved as "Draft Report"
 
-7. **Verify Report Created**:
+8. **Verify Report Created**:
    - Go to **"Draft Report"** tab
    - You should see your reported work
    - Status shows "Draft Report"
@@ -1966,26 +1977,33 @@ Manages production plan entries per shift for each stage.
 **Path**: `/planning/holiday-list`
 
 **Description**: 
-Manages holiday calendar used for production date calculations.
+Manages the holiday calendar used for production date calculations, reporting (e.g. working days in **Daily Production Status**), and entry-plan logic.
 
 **Features**:
-- Add holidays to the calendar
-- View list of holidays
-- Edit or delete holidays
-- Holidays are excluded from production date calculations
+- **Year selector**: Load and manage holidays for a specific calendar year
+- **Statistics**: Summary counts (total, active, inactive, by year)
+- **Table and calendar views**: Toggle between list/table and calendar layout
+- **Add** single holidays (date, description, active flag as applicable)
+- **Edit** holidays (e.g. activate/deactivate, update details)
+- **Delete** holidays
+- **Import holidays** (bulk import via the import flow—follow on-screen steps and template if provided)
+- **Add Sundays for year**: One action to insert Sunday entries for the year (existing Sundays are skipped)
+- **Active holidays** are the ones typically excluded from working-day counts; inactive rows may be kept for history
 
 **How to Use**:
 
 1. **Adding Holidays**:
    - Navigate to Planning > Holiday List
-   - Click "Add Holiday" button
-   - Enter holiday date and description
-   - Save the holiday
+   - Choose the **year** if needed
+   - Click **Add Holiday** (or equivalent)
+   - Enter holiday date, description, and other required fields
+   - Save
 
 2. **Managing Holidays**:
-   - View all holidays in the table
-   - Edit holiday details
-   - Delete holidays if needed
+   - Use the table or calendar view to review holidays for the selected year
+   - **Edit** or toggle **active** status as needed
+   - **Delete** if the holiday should be removed
+   - Use **Import** for bulk load, or **Add Sundays** to seed all Sundays for the year
 
 **Prerequisites**:
 - None
@@ -3997,7 +4015,7 @@ A: Go to **Planning > Entry Plan**, open the **"To be Planned"** tab (or **Chass
 A: Go to **Planning > Schedule**. Select the date range and use the **Plan**, **Actual**, **Deviation**, and **Statistics** tabs. See [How to View and Analyze Production Schedule](#2-how-to-view-and-analyze-production-schedule).
 
 **Q: How do I add a holiday to the calendar?**  
-A: Go to **Planning > Holiday List**, click **Add Holiday**, enter the date and description, and save. Holidays are excluded from schedule date calculations. See [Holiday List](#holiday-list).
+A: Go to **Planning > Holiday List**, select the **year** if needed, click **Add Holiday**, enter the date and description, and save. You can also **import** holidays in bulk or use **Add Sundays** for the year. See [Holiday List](#holiday-list).
 
 **Q: How do I set or change lead times for stages?**  
 A: Go to **Planning > Lead Times** and configure the lead time (e.g. in days) for each stage. Entry Plan uses these to calculate entry/exit dates. See [Lead Times](#lead-times).
@@ -4039,6 +4057,12 @@ A: Go to **Production > [Stage/Shift] > Draft Plan** tab, review all plans, fix 
 
 **Q: What is the difference between Plan, Draft Plan, and Works tabs?**  
 A: **Works** shows all works for the stage; you plan works here (they move to Draft Plan). **Draft Plan** shows planned works before submission; you can edit or delete here, then submit. **Plan** shows the approved/submitted plan for the day (read-only for reporting).
+
+**Q: Can different workers on the same work have different start/end times?**  
+A: **Yes—for planning and for multi-skill reporting.** In **Plan Work**, **Step 2**: enable **Custom from/to times for this assignment** under a worker or trainee. In the **multi-skill Report** modal, use the same optional control so each person’s **actual** from/to times can differ from the shared report window. Single-work **Report** dialogs typically use one from/to for the whole work; use the multi-skill report when each worker needs their own times.
+
+**Q: Why won’t the plan save even though I clicked Save?**  
+A: **Time conflicts** with other draft plans for the same workers can block saving until you adjust times or workers. **Planning** can also be **blocked** for a date if the stage/shift plan is already submitted or approved. Read the alert message for the exact reason.
 
 ---
 

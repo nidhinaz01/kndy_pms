@@ -1,6 +1,6 @@
 import { supabase } from '$lib/supabaseClient';
 import { createWorkPlanning } from '$lib/api/production';
-import { getIndividualSkills } from '$lib/utils/planWorkUtils';
+import { getIndividualSkills, getEffectiveRowTimes } from '$lib/utils/planWorkUtils';
 import { getCurrentUsername, getCurrentTimestamp } from '$lib/utils/userUtils';
 import type { PlanWorkFormData, WorkContinuation } from '$lib/types/planWork';
 
@@ -67,6 +67,7 @@ export async function saveWorkPlanning(
         const workerId = (worker as any).emp_id;
         const matchKey = `${skillShort}-${workerId}`;
         const existingPlan = existingPlansMap.get(matchKey);
+        const eff = getEffectiveRowTimes(workerKey, formData);
         
         const planData = {
           stage_code: stageCode,
@@ -76,13 +77,13 @@ export async function saveWorkPlanning(
           other_work_code: otherWorkCode,
           sc_required: skillShort,
           worker_id: workerId,
-          from_date: fromDate,
-          from_time: formData.fromTime,
-          to_date: planningToDate,
-          to_time: formData.toTime,
-          planned_hours: formData.plannedHours,
+          from_date: eff.fromDate || fromDate,
+          from_time: eff.fromTime,
+          to_date: eff.toDate || planningToDate,
+          to_time: eff.toTime,
+          planned_hours: eff.plannedHours,
           time_worked_till_date: workContinuation.timeWorkedTillDate,
-          remaining_time: Math.max(0, workContinuation.remainingTime - formData.plannedHours),
+          remaining_time: Math.max(0, workContinuation.remainingTime - eff.plannedHours),
           status: 'draft' as const,
           notes: `Planned for ${skillShort} skill`,
           wsm_id: isNonStandardWork ? null : wsmId
@@ -119,6 +120,7 @@ export async function saveWorkPlanning(
       const workerId = (worker as any).emp_id;
       const matchKey = `GEN-${workerId}`;
       const existingPlan = existingPlansMap.get(matchKey);
+      const eff = getEffectiveRowTimes('general', formData);
       
       const planData = {
         stage_code: stageCode,
@@ -128,13 +130,13 @@ export async function saveWorkPlanning(
         other_work_code: otherWorkCode,
         sc_required: 'GEN',
         worker_id: workerId,
-        from_date: fromDate,
-        from_time: formData.fromTime,
-        to_date: planningToDate,
-        to_time: formData.toTime,
-        planned_hours: formData.plannedHours,
+        from_date: eff.fromDate || fromDate,
+        from_time: eff.fromTime,
+        to_date: eff.toDate || planningToDate,
+        to_time: eff.toTime,
+        planned_hours: eff.plannedHours,
         time_worked_till_date: workContinuation.timeWorkedTillDate,
-        remaining_time: Math.max(0, workContinuation.remainingTime - formData.plannedHours),
+        remaining_time: Math.max(0, workContinuation.remainingTime - eff.plannedHours),
         status: 'draft' as const,
         notes: 'General work planning'
       };
@@ -248,8 +250,9 @@ export async function saveWorkPlanning(
     const traineePlanPromises: Promise<any>[] = [];
     const deviationPromises: Promise<any>[] = [];
     
-    for (const trainee of formData.selectedTrainees) {
-      // Create planning record for trainee
+    for (let ti = 0; ti < formData.selectedTrainees.length; ti++) {
+      const trainee = formData.selectedTrainees[ti];
+      const eff = getEffectiveRowTimes(`trainee-${ti}`, formData);
       const traineePlanData = {
         stage_code: stageCode,
         shift_code: shiftCode,
@@ -258,13 +261,13 @@ export async function saveWorkPlanning(
         other_work_code: otherWorkCode,
         sc_required: 'T', // Trainee skill
         worker_id: trainee.emp_id,
-        from_date: fromDate,
-        from_time: formData.fromTime,
-        to_date: planningToDate,
-        to_time: formData.toTime,
-        planned_hours: formData.plannedHours,
+        from_date: eff.fromDate || fromDate,
+        from_time: eff.fromTime,
+        to_date: eff.toDate || planningToDate,
+        to_time: eff.toTime,
+        planned_hours: eff.plannedHours,
         time_worked_till_date: workContinuation.timeWorkedTillDate,
-        remaining_time: Math.max(0, workContinuation.remainingTime - formData.plannedHours),
+        remaining_time: Math.max(0, workContinuation.remainingTime - eff.plannedHours),
         status: 'draft' as const,
         notes: `Trainee: ${trainee.emp_name}`,
         wsm_id: null // Trainees don't have skill mappings

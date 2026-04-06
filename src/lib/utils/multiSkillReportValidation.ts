@@ -76,9 +76,10 @@ export function validateStage1(
     errors.toTime = 'To time is required';
   }
 
-  // Validate trainees if any are selected
+  // New trainees require a deviation reason (existing draft rows already have one)
   if (formData.selectedTrainees && formData.selectedTrainees.length > 0) {
-    if (!formData.traineeDeviationReason || !formData.traineeDeviationReason.trim()) {
+    const hasNewTrainee = formData.selectedTrainees.some((t) => !t.reporting_id);
+    if (hasNewTrainee && (!formData.traineeDeviationReason || !formData.traineeDeviationReason.trim())) {
       errors.trainees = 'Please provide a reason for adding trainees';
     }
   }

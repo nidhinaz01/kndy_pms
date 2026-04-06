@@ -3,11 +3,18 @@
   import { browser } from '$app/environment';
   import Button from '$lib/components/common/Button.svelte';
   import { X } from 'lucide-svelte';
-  import { loadWorkers, loadStandardTime, loadLostTimeReasons, loadShiftInfo, loadAverageEmployeeSalary, checkWorkerConflicts } from '$lib/services/multiSkillReportService';
+  import { loadWorkers, loadStandardTime, loadLostTimeReasons, loadShiftInfo, loadAverageEmployeeSalary, checkMultiSkillReportConflicts } from '$lib/services/multiSkillReportService';
   import { saveUnplannedWorkReports } from '$lib/services/unplannedWorkReportSaveService';
   import { calculateActualTime, calculateLostTime } from '$lib/utils/multiSkillReportUtils';
-  import { validateSave } from '$lib/utils/multiSkillReportValidation';
-  import { getSkillShort, getIndividualSkills } from '$lib/utils/planWorkUtils';
+  import { validateSave, validateStage1 } from '$lib/utils/multiSkillReportValidation';
+  import {
+    getSkillShort,
+    getIndividualSkills,
+    calculatePlannedHours,
+    autoCalculateEndTime,
+    findClosestShiftTimeSlot
+  } from '$lib/utils/planWorkUtils';
+  import type { RowTimeOverride, ShiftInfo } from '$lib/types/planWork';
   import type { MultiSkillReportFormData, MultiSkillReportState } from '$lib/types/multiSkillReport';
   import { initialMultiSkillReportFormData, initialMultiSkillReportState } from '$lib/types/multiSkillReport';
   import type { LostTimeReason } from '$lib/api/lostTimeReasons';
@@ -36,6 +43,14 @@
   let isLoadingWorkers = false; // Flag to prevent concurrent loading
   let lostTimeReasons: LostTimeReason[] = [];
   let shiftInfo: any = null;
+  /** Shift breaks for `autoCalculateEndTime` (same as Plan Work modal). */
+  let shiftBreakTimes: Array<{ start_time: string; end_time: string }> = [];
+  /** Tracks auto-calculated toTime so edits match Plan Work behavior. */
+  let lastAutoCalculatedToTime: string | null = null;
+  /** When false, `fromTime` is filled from shift start after shift info loads. */
+  let userHasSelectedFromTime = false;
+  /** Non-standard: when false, `toTime` can default to shift end after shift loads. */
+  let userHasSelectedToTime = false;
   let skillEmployeesString = '';
   let previousSkillEmployeesString = '';
   let isLoadingSalary = false;
@@ -69,6 +84,67 @@
     (selectedWork.std_work_type_details?.derived_sw_code?.startsWith('OW') || 
      selectedWork.std_work_type_details?.sw_code?.startsWith('OW') || false)
   );
+
+  // Auto-calculate toTime from fromTime + standard duration + breaks (aligned with Plan Work modal).
+  $: if (formData.fromTime && !isNonStandardWork && state.standardTimeMinutes > 0) {
+    // Include lastAutoCalculatedToTime === null so a prefilled toTime (e.g. shift end) still recalculates
+    // once standard minutes and breaks are ready, unless the user edited To manually.
+    const shouldAuto =
+      !userHasSelectedToTime &&
+      (!formData.toTime ||
+        lastAutoCalculatedToTime === null ||
+        formData.toTime === lastAutoCalculatedToTime);
+    if (shouldAuto) {
+      const calculatedToTime = autoCalculateEndTime(
+        formData.fromTime,
+        0,
+        state.standardTimeMinutes,
+        shiftBreakTimes
+      );
+      if (calculatedToTime && calculatedToTime !== formData.toTime) {
+        formData.toTime = calculatedToTime;
+        lastAutoCalculatedToTime = calculatedToTime;
+        formData = { ...formData };
+      }
+    }
+  }
+
+  // If toTime is before fromTime, span overnight — align toDate (same as Plan Work modal).
+  $: if (formData.fromDate && formData.fromTime && formData.toTime) {
+    const [fromHour, fromMin] = formData.fromTime.split(':').map(Number);
+    const [toHour, toMin] = formData.toTime.split(':').map(Number);
+    const fromMinutes = fromHour * 60 + fromMin;
+    const toMinutes = toHour * 60 + toMin;
+
+    if (toMinutes < fromMinutes) {
+      const fromDateObj = new Date(formData.fromDate);
+      fromDateObj.setDate(fromDateObj.getDate() + 1);
+      const nextDay = fromDateObj.toISOString().split('T')[0];
+      if (formData.toDate !== nextDay) {
+        formData.toDate = nextDay;
+        formData = { ...formData };
+      }
+    } else if (formData.toDate !== formData.fromDate) {
+      formData.toDate = formData.fromDate;
+      formData = { ...formData };
+    }
+  }
+
+  // Planned hours from current from/to (after auto toTime updates).
+  $: {
+    const fromTime = formData.fromTime;
+    const toTime = formData.toTime;
+    if (fromTime && toTime) {
+      const h = calculatePlannedHours(fromTime, toTime);
+      if (formData.plannedHours !== h) {
+        formData.plannedHours = h;
+        formData = { ...formData };
+      }
+    } else if (formData.plannedHours !== 0) {
+      formData.plannedHours = 0;
+      formData = { ...formData };
+    }
+  }
 
   // Reactive calculation of actual time (only for standard works)
   $: {
@@ -275,7 +351,7 @@
     loadSelectedWorkersWithSalaries();
   }
   
-  $: if (state.currentStage === 2 && Object.values(formData.skillEmployees).filter(Boolean).length > 0 && selectedWorkersWithSalaries.length === 0) {
+  $: if (state.currentStage === 3 && Object.values(formData.skillEmployees).filter(Boolean).length > 0 && selectedWorkersWithSalaries.length === 0) {
     loadSelectedWorkersWithSalaries();
   }
 
@@ -382,14 +458,26 @@
           to_time: '17:00'
         }];
       }
-      
-      // Initialize form data
+
+      const nonStd = !!(
+        selectedWork.other_work_code ||
+        selectedWork.std_work_type_details?.derived_sw_code?.startsWith('OW') ||
+        selectedWork.std_work_type_details?.sw_code?.startsWith('OW')
+      );
+
+      // Initialize form data (standard works: toTime filled by auto-calc once standard time + breaks load)
+      lastAutoCalculatedToTime = null;
+      userHasSelectedFromTime = false;
+      userHasSelectedToTime = false;
       formData = {
         ...initialMultiSkillReportFormData,
         fromDate: reportingDate || '',
+        // Placeholder until shift info loads (then shift start / non-std shift end).
         fromTime: '08:00',
         toDate: reportingDate || '',
-        toTime: '17:00'
+        toTime: nonStd ? '17:00' : '',
+        plannedHours: nonStd ? calculatePlannedHours('08:00', '17:00') : 0,
+        rowTimeOverrides: {}
       };
       
       formData.skillEmployees = {};
@@ -466,6 +554,8 @@
   async function handleSkillMappingSelect(index: number) {
     console.log('🎯 handleSkillMappingSelect called with index:', index);
     selectedSkillMappingIndex = index;
+    userHasSelectedFromTime = false;
+    userHasSelectedToTime = false;
     workersLoaded = false; // Reset flag when skill mapping changes
     isLoadingWorkers = false; // Reset loading flag
     
@@ -539,10 +629,59 @@
   }
 
   async function loadShiftInfoData() {
-    // Use stageCode prop if selectedWork.stage_code is not available
     const stageCodeToUse = selectedWork?.stage_code || stageCode;
     if (!stageCodeToUse || !formData.fromDate) return;
     shiftInfo = await loadShiftInfo(stageCodeToUse, formData.fromDate);
+
+    if (shiftInfo?.hr_shift_master?.shift_id) {
+      const { data: breakData, error: breakError } = await supabase
+        .from('hr_shift_break_master')
+        .select('*')
+        .eq('shift_id', shiftInfo.hr_shift_master.shift_id)
+        .eq('is_active', true)
+        .eq('is_deleted', false)
+        .order('break_number');
+
+      if (!breakError && breakData) {
+        shiftBreakTimes = breakData.map((b: any) => ({
+          start_time: b.start_time,
+          end_time: b.end_time
+        }));
+      } else {
+        shiftBreakTimes = [];
+      }
+    } else {
+      shiftBreakTimes = [];
+    }
+
+    applyShiftTimesFromLoadedShift();
+  }
+
+  /** Default from/to from shift master (Plan Work–style slots). Standard `to` comes from auto-calc reactives. */
+  function applyShiftTimesFromLoadedShift() {
+    const sm = shiftInfo?.hr_shift_master;
+    if (!sm?.start_time || !sm?.end_time) return;
+
+    let changed = false;
+
+    if (!userHasSelectedFromTime) {
+      const fromSlot = findClosestShiftTimeSlot(sm.start_time, sm.start_time, sm.end_time);
+      if (fromSlot && formData.fromTime !== fromSlot) {
+        lastAutoCalculatedToTime = null;
+        formData.fromTime = fromSlot;
+        changed = true;
+      }
+    }
+
+    if (isNonStandardWork && !userHasSelectedToTime) {
+      const toSlot = findClosestShiftTimeSlot(sm.end_time, sm.start_time, sm.end_time);
+      if (toSlot && formData.toTime !== toSlot) {
+        formData.toTime = toSlot;
+        changed = true;
+      }
+    }
+
+    if (changed) formData = { ...formData };
   }
 
   async function loadAverageEmployeeSalaryData() {
@@ -550,8 +689,24 @@
     state.averageEmployeeSalary = await loadAverageEmployeeSalary(employeeIds);
   }
 
-  function proceedToStage2() {
-    const validation = validateSave(formData, virtualWorks, isNonStandardWork);
+  function proceedFromStage1To2() {
+    if (availableSkillMappings.length > 1 && selectedSkillMappingIndex < 0) {
+      alert('Please select a skill combination before continuing.');
+      return;
+    }
+    if (virtualWorks.length === 0) {
+      alert('Work setup is not ready yet. Please wait or try again.');
+      return;
+    }
+    if (!formData.fromDate || !formData.fromTime || !formData.toDate || !formData.toTime) {
+      alert('Please set the full date and time range.');
+      return;
+    }
+    state.currentStage = 2;
+  }
+
+  function proceedFromStage2To3() {
+    const validation = validateStage1(formData, virtualWorks);
     if (!validation.isValid) {
       alert(Object.values(validation.errors)[0]);
       return;
@@ -567,11 +722,26 @@
       return;
     }
 
-    state.currentStage = 2;
+    state.currentStage = 3;
   }
 
   function goBackToStage1() {
     state.currentStage = 1;
+  }
+
+  function goBackToStage2() {
+    state.currentStage = 2;
+  }
+
+  function handleRowTimeOverride(rowKey: string, next: RowTimeOverride | null) {
+    const rest = { ...formData.rowTimeOverrides };
+    if (next === null) {
+      delete rest[rowKey];
+    } else {
+      rest[rowKey] = next;
+    }
+    formData.rowTimeOverrides = rest;
+    formData = { ...formData };
   }
 
   async function handleSave() {
@@ -590,14 +760,11 @@
       return;
     }
 
-    // Check worker conflicts (no planning IDs to exclude since these are new)
-    const conflictResult = await checkWorkerConflicts(
-      formData.skillEmployees,
-      formData.fromDate,
-      formData.fromTime,
-      formData.toDate,
-      formData.toTime,
-      [] // No existing planning IDs to exclude
+    const conflictResult = await checkMultiSkillReportConflicts(
+      virtualWorks,
+      formData,
+      [],
+      []
     );
     
     if (conflictResult.hasConflict) {
@@ -609,8 +776,11 @@
       if (!proceed) return;
     }
 
-    // Validate worker attendance
-    const selectedWorkerIds = Object.values(formData.skillEmployees).filter(Boolean) as string[];
+    // Validate worker attendance (skills + trainees)
+    const selectedWorkerIds = [
+      ...Object.values(formData.skillEmployees).filter(Boolean),
+      ...(formData.selectedTrainees || []).map((t) => t.emp_id)
+    ].filter(Boolean) as string[];
     
     if (selectedWorkerIds.length > 0 && stageCode && reportingDate) {
       try {
@@ -715,6 +885,14 @@
     previousWorkerSelectionForTillDate = '';
     selectedWorkersWithSalaries = [];
     virtualWorks = [];
+    availableSkillMappings = [];
+    selectedSkillMappingIndex = -1;
+    workersLoaded = false;
+    isLoadingWorkers = false;
+    shiftBreakTimes = [];
+    lastAutoCalculatedToTime = null;
+    userHasSelectedFromTime = false;
+    userHasSelectedToTime = false;
     isLoading = false;
     isLoadingSalary = false;
     formData.selectedTrainees = [];
@@ -749,10 +927,21 @@
   }
 
   function handleTraineeRemove(index: number) {
+    const prevOverrides = formData.rowTimeOverrides || {};
     formData.selectedTrainees = formData.selectedTrainees.filter((_, i) => i !== index);
     if (formData.selectedTrainees.length === 0) {
       formData.traineeDeviationReason = '';
     }
+    const ro: Record<string, RowTimeOverride> = {};
+    for (const [k, v] of Object.entries(prevOverrides)) {
+      if (!k.startsWith('trainee-')) ro[k] = v;
+    }
+    formData.selectedTrainees.forEach((_, i) => {
+      const oldIdx = i < index ? i : i + 1;
+      const o = prevOverrides[`trainee-${oldIdx}`];
+      if (o) ro[`trainee-${i}`] = o;
+    });
+    formData.rowTimeOverrides = ro;
     formData = { ...formData };
   }
 
@@ -762,13 +951,41 @@
   }
 
   function handleDateChange(field: string, value: string) {
-    if (field === 'fromDate') formData.fromDate = value;
-    if (field === 'toDate') formData.toDate = value;
+    if (field === 'fromDate') {
+      formData.fromDate = value;
+      if (!formData.toDate || formData.toDate < formData.fromDate) {
+        formData.toDate = formData.fromDate;
+      }
+      workersLoaded = false;
+      formData = { ...formData };
+      void (async () => {
+        await loadShiftInfoData();
+        await loadWorkersData();
+      })();
+      return;
+    }
+    if (field === 'toDate') {
+      formData.toDate = value;
+      if (formData.fromDate && formData.toDate < formData.fromDate) {
+        formData.toDate = formData.fromDate;
+      }
+    }
+    formData = { ...formData };
   }
 
   function handleTimeChange(field: string, value: string) {
-    if (field === 'fromTime') formData.fromTime = value;
-    if (field === 'toTime') formData.toTime = value;
+    if (field === 'fromTime') {
+      userHasSelectedFromTime = true;
+      if (formData.toTime) {
+        lastAutoCalculatedToTime = formData.toTime;
+      }
+      formData.fromTime = value;
+    } else if (field === 'toTime') {
+      userHasSelectedToTime = true;
+      formData.toTime = value;
+      lastAutoCalculatedToTime = null;
+    }
+    formData = { ...formData };
   }
 
   function handleStatusChange(value: 'C' | 'NC') {
@@ -800,16 +1017,21 @@
         <div class="flex items-center justify-between">
           <div>
             <h3 class="text-lg font-medium theme-text-primary">Report Unplanned Work</h3>
-            <div class="flex items-center space-x-4 mt-2">
+            <div class="flex flex-wrap items-center gap-x-4 gap-y-2 mt-2">
               <div class="flex items-center space-x-2">
                 <div class="w-6 h-6 rounded-full flex items-center justify-center text-xs font-medium {state.currentStage >= 1 ? 'bg-blue-500 text-white' : 'bg-gray-300 dark:bg-gray-600 text-gray-600 dark:text-gray-300'}">1</div>
-                <span class="text-sm theme-text-secondary">Assign & Time</span>
+                <span class="text-sm theme-text-secondary">Select time</span>
+              </div>
+              <div class="w-8 h-px bg-gray-300 dark:bg-gray-600 hidden sm:block"></div>
+              <div class="flex items-center space-x-2">
+                <div class="w-6 h-6 rounded-full flex items-center justify-center text-xs font-medium {state.currentStage >= 2 ? 'bg-blue-500 text-white' : 'bg-gray-300 dark:bg-gray-600 text-gray-600 dark:text-gray-300'}">2</div>
+                <span class="text-sm theme-text-secondary">Assign workers</span>
               </div>
               {#if !isNonStandardWork}
-                <div class="w-8 h-px bg-gray-300 dark:bg-gray-600"></div>
+                <div class="w-8 h-px bg-gray-300 dark:bg-gray-600 hidden sm:block"></div>
                 <div class="flex items-center space-x-2">
-                  <div class="w-6 h-6 rounded-full flex items-center justify-center text-xs font-medium {state.currentStage >= 2 ? 'bg-blue-500 text-white' : 'bg-gray-300 dark:bg-gray-600 text-gray-600 dark:text-gray-300'}">2</div>
-                  <span class="text-sm theme-text-secondary">Lost Time & Save</span>
+                  <div class="w-6 h-6 rounded-full flex items-center justify-center text-xs font-medium {state.currentStage >= 3 ? 'bg-blue-500 text-white' : 'bg-gray-300 dark:bg-gray-600 text-gray-600 dark:text-gray-300'}">3</div>
+                  <span class="text-sm theme-text-secondary">Lost time & save</span>
                 </div>
               {/if}
             </div>
@@ -833,7 +1055,6 @@
           {#if state.currentStage === 1}
             <WorkDetailsDisplay selectedWorks={virtualWorks.length > 0 ? virtualWorks : [selectedWork]} standardTimeMinutes={state.standardTimeMinutes} />
             
-            <!-- Skill Combination Selection (if multiple combinations exist) -->
             {#if availableSkillMappings.length > 1 && selectedSkillMappingIndex < 0}
               <div class="mt-6">
                 <h4 class="font-medium theme-text-primary mb-3">Select Skill Combination</h4>
@@ -867,19 +1088,6 @@
               </div>
             {:else if virtualWorks.length > 0}
               <div class="mt-6">
-                <EmployeeAssignment
-                  selectedWorks={virtualWorks}
-                  {availableWorkers}
-                  {formData}
-                  onEmployeeChange={handleEmployeeChange}
-                  onDeviationChange={handleDeviationChange}
-                  onTraineeAdd={handleTraineeAdd}
-                  onTraineeRemove={handleTraineeRemove}
-                  onTraineeReasonChange={handleTraineeReasonChange}
-                />
-              </div>
-
-              <div class="mt-6">
                 <SharedTimeSelection
                   {formData}
                   actualTimeMinutes={state.actualTimeMinutes}
@@ -889,12 +1097,29 @@
                 />
               </div>
             {:else if availableSkillMappings.length === 0}
-              <!-- No skill mappings found -->
               <div class="px-6 py-8 text-center">
                 <p class="theme-text-secondary">No skill competencies found for this work.</p>
               </div>
             {/if}
-          {:else}
+          {:else if state.currentStage === 2}
+            <div class="space-y-4">
+              <p class="text-sm theme-text-secondary">
+                Assign workers to each skill. Optionally set custom from/to times per row when they differ from the range above.
+              </p>
+              <EmployeeAssignment
+                selectedWorks={virtualWorks}
+                {availableWorkers}
+                {formData}
+                shiftInfo={shiftInfo as ShiftInfo | null}
+                onEmployeeChange={handleEmployeeChange}
+                onDeviationChange={handleDeviationChange}
+                onTraineeAdd={handleTraineeAdd}
+                onTraineeRemove={handleTraineeRemove}
+                onTraineeReasonChange={handleTraineeReasonChange}
+                onRowTimeOverride={handleRowTimeOverride}
+              />
+            </div>
+          {:else if state.currentStage === 3}
             <LostTimeSection
               {formData}
               {lostTimeReasons}
@@ -909,25 +1134,51 @@
           {/if}
         </div>
 
-        <div class="px-6 py-4 border-t theme-border flex justify-between">
+        <div class="px-6 py-4 border-t theme-border flex justify-between items-center flex-wrap gap-2">
           {#if state.currentStage === 1}
             <Button variant="secondary" on:click={handleClose} disabled={isLoading}>
               Cancel
             </Button>
-            <Button variant="primary" on:click={proceedToStage2} disabled={isLoading || isNonStandardWork || isLoadingTimeWorkedTillDate}>
-              Next: Lost Time
+            <Button
+              variant="primary"
+              on:click={proceedFromStage1To2}
+              disabled={isLoading || virtualWorks.length === 0}
+            >
+              Next: Assign workers →
             </Button>
-          {:else}
+          {:else if state.currentStage === 2}
             <Button variant="secondary" on:click={goBackToStage1} disabled={isLoading}>
-              Back
+              ← Back
             </Button>
-            <div class="flex space-x-2">
+            <div class="flex flex-wrap gap-2 justify-end">
               <Button variant="secondary" on:click={handleClose} disabled={isLoading}>
                 Cancel
               </Button>
-              <Button 
-                variant="primary" 
-                on:click={handleSave} 
+              {#if isNonStandardWork}
+                <Button variant="primary" on:click={handleSave} disabled={isLoading}>
+                  {isLoading ? 'Saving...' : 'Save Report'}
+                </Button>
+              {:else}
+                <Button
+                  variant="primary"
+                  on:click={proceedFromStage2To3}
+                  disabled={isLoading || isLoadingTimeWorkedTillDate}
+                >
+                  Next: Lost time →
+                </Button>
+              {/if}
+            </div>
+          {:else if state.currentStage === 3}
+            <Button variant="secondary" on:click={goBackToStage2} disabled={isLoading}>
+              ← Back
+            </Button>
+            <div class="flex flex-wrap gap-2 justify-end">
+              <Button variant="secondary" on:click={handleClose} disabled={isLoading}>
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                on:click={handleSave}
                 disabled={isLoading || !isLostTimeValid}
               >
                 {isLoading ? 'Saving...' : 'Save Report'}

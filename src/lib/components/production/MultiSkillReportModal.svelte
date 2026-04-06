@@ -2,12 +2,14 @@
   import { createEventDispatcher } from 'svelte';
   import Button from '$lib/components/common/Button.svelte';
   import { X } from 'lucide-svelte';
-  import { loadWorkers, loadStandardTime, loadLostTimeReasons, loadShiftInfo, loadAverageEmployeeSalary, checkWorkerConflicts } from '$lib/services/multiSkillReportService';
+  import { loadWorkers, loadStandardTime, loadLostTimeReasons, loadShiftInfo, loadAverageEmployeeSalary, checkMultiSkillReportConflicts } from '$lib/services/multiSkillReportService';
   import { saveMultiSkillReports, updatePlanningStatus, updateProductionDatesIfFirstReport, updateWorkStatus } from '$lib/services/multiSkillReportSaveService';
   import { calculateActualTime, calculateLostTime } from '$lib/utils/multiSkillReportUtils';
   import { validateSave } from '$lib/utils/multiSkillReportValidation';
   import type { MultiSkillReportFormData, MultiSkillReportState } from '$lib/types/multiSkillReport';
   import { initialMultiSkillReportFormData, initialMultiSkillReportState } from '$lib/types/multiSkillReport';
+  import type { RowTimeOverride } from '$lib/types/planWork';
+  import { calculatePlannedHours } from '$lib/utils/planWorkUtils';
   import type { LostTimeReason } from '$lib/api/lostTimeReasons';
   import { supabase } from '$lib/supabaseClient';
   import WorkDetailsDisplay from './multi-skill-report/WorkDetailsDisplay.svelte';
@@ -35,6 +37,22 @@
   let skillEmployeesString = '';
   let previousSkillEmployeesString = '';
   let isLoadingSalary = false;
+
+  function isTraineePlanningWork(work: any): boolean {
+    const n = work?.notes ?? work?.prdn_work_planning?.notes;
+    return typeof n === 'string' && n.trim().startsWith('Trainee:');
+  }
+
+  $: skillPlanningWorks = selectedWorks.filter((w: any) => !isTraineePlanningWork(w));
+
+  function normReportTime(timeStr: string): string {
+    if (!timeStr) return '';
+    const parts = String(timeStr).split(':');
+    if (parts.length >= 2) {
+      return `${parts[0].padStart(2, '0')}:${parts[1].padStart(2, '0')}`;
+    }
+    return timeStr;
+  }
 
   // Watch for selectedWorks changes
   $: if (selectedWorks.length > 0 && isOpen) {
@@ -67,10 +85,11 @@
   }
 
   // Check if this is a non-standard work (code starts with OW or has other_work_code)
-  $: isNonStandardWork = selectedWorks.length > 0 && (
-    selectedWorks[0]?.other_work_code ? true : 
-    (selectedWorks[0]?.std_work_type_details?.derived_sw_code?.startsWith('OW') || 
-     selectedWorks[0]?.std_work_type_details?.sw_code?.startsWith('OW') || false)
+  $: firstSkillOrWork = skillPlanningWorks[0] || selectedWorks[0];
+  $: isNonStandardWork = !!firstSkillOrWork && (
+    firstSkillOrWork?.other_work_code ? true : 
+    (firstSkillOrWork?.std_work_type_details?.derived_sw_code?.startsWith('OW') || 
+     firstSkillOrWork?.std_work_type_details?.sw_code?.startsWith('OW') || false)
   );
 
   // Reactive calculation of actual time (only for standard works)
@@ -88,8 +107,8 @@
       if (!isNonStandardWork && state.standardTimeMinutes > 0) {
         // Use max time_worked_till_date across selected works (hours -> minutes)
         const timeWorkedTillDateMinutes =
-          selectedWorks.length > 0
-            ? Math.max(...selectedWorks.map((w: any) => (w.time_worked_till_date || 0) * 60))
+          skillPlanningWorks.length > 0
+            ? Math.max(...skillPlanningWorks.map((w: any) => (w.time_worked_till_date || 0) * 60))
             : 0;
         formData.ltMinutes = calculateLostTime(
           state.standardTimeMinutes,
@@ -222,12 +241,15 @@
   }
 
   async function loadWorkersData() {
-    if (!selectedWorks[0]?.stage_code || !formData.fromDate) return;
-    availableWorkers = await loadWorkers(selectedWorks[0].stage_code, formData.fromDate, selectedWorks, shiftCode);
+    const w0 = skillPlanningWorks[0] || selectedWorks[0];
+    if (!w0?.stage_code || !formData.fromDate) return;
+    const worksForLoad = skillPlanningWorks.length ? skillPlanningWorks : selectedWorks;
+    availableWorkers = await loadWorkers(w0.stage_code, formData.fromDate, worksForLoad, shiftCode);
   }
 
   async function loadStandardTimeData() {
-    state.standardTimeMinutes = await loadStandardTime(selectedWorks);
+    const works = skillPlanningWorks.length ? skillPlanningWorks : selectedWorks;
+    state.standardTimeMinutes = await loadStandardTime(works);
   }
 
   async function loadLostTimeReasonsData() {
@@ -235,8 +257,9 @@
   }
 
   async function loadShiftInfoData() {
-    if (!selectedWorks[0]?.stage_code || !formData.fromDate) return;
-    shiftInfo = await loadShiftInfo(selectedWorks[0].stage_code, formData.fromDate);
+    const w0 = skillPlanningWorks[0] || selectedWorks[0];
+    if (!w0?.stage_code || !formData.fromDate) return;
+    shiftInfo = await loadShiftInfo(w0.stage_code, formData.fromDate);
   }
 
   async function loadAverageEmployeeSalaryData() {
@@ -246,23 +269,41 @@
 
   function initializeForm() {
     if (selectedWorks.length === 0) return;
-    
-    const firstWork = selectedWorks[0];
+
+    const mappingWorks = selectedWorks.filter((w: any) => !isTraineePlanningWork(w));
+    const traineeWorks = selectedWorks.filter((w: any) => isTraineePlanningWork(w));
+
+    const firstWork = mappingWorks[0] || selectedWorks[0];
+    const fromDates = selectedWorks.map((w: any) => (w.from_date || '').toString().split('T')[0]).filter(Boolean);
+    const toDates = selectedWorks.map((w: any) => (w.to_date || '').toString().split('T')[0]).filter(Boolean);
+
+    const allFrom = selectedWorks.map((w: any) => normReportTime(w.from_time || '')).filter(Boolean);
+    const allTo = selectedWorks.map((w: any) => normReportTime(w.to_time || '')).filter(Boolean);
+    const earliest = allFrom.length ? [...allFrom].sort()[0] : '';
+    const latest = allTo.length ? [...allTo].sort().reverse()[0] : '';
+
+    const fromDateStr =
+      fromDates.length > 0 ? [...fromDates].sort()[0] : (firstWork.from_date || '').toString().split('T')[0] || '';
+    const toDateStr =
+      toDates.length > 0 ? [...toDates].sort().reverse()[0] : (firstWork.to_date || '').toString().split('T')[0] || '';
+
     formData = {
       ...initialMultiSkillReportFormData,
-      fromDate: firstWork.from_date || '',
-      fromTime: firstWork.from_time || '',
-      toDate: firstWork.to_date || '',
-      toTime: firstWork.to_time || ''
+      fromDate: fromDateStr,
+      fromTime: earliest || normReportTime(firstWork.from_time || ''),
+      toDate: toDateStr,
+      toTime: latest || normReportTime(firstWork.to_time || ''),
+      plannedHours: calculatePlannedHours(
+        earliest || normReportTime(firstWork.from_time || ''),
+        latest || normReportTime(firstWork.to_time || '')
+      ),
+      rowTimeOverrides: {}
     };
-    
+
     formData.skillEmployees = {};
     formData.deviations = {};
-    formData.selectedTrainees = [];
-    formData.traineeDeviationReason = '';
-    
-    // Assign each work its own employee (no grouping)
-    selectedWorks.forEach(work => {
+
+    mappingWorks.forEach((work: any) => {
       formData.skillEmployees[work.id] = work.worker_id || '';
       formData.deviations[work.id] = {
         hasDeviation: false,
@@ -270,12 +311,70 @@
         deviationType: 'no_worker'
       };
     });
-    
+
+    const gFrom = normReportTime(formData.fromTime);
+    const gTo = normReportTime(formData.toTime);
+    const overrides: Record<string, RowTimeOverride> = {};
+    mappingWorks.forEach((w: any) => {
+      const pf = normReportTime(w.from_time);
+      const pt = normReportTime(w.to_time);
+      if (pf && pt && (pf !== gFrom || pt !== gTo)) {
+        overrides[String(w.id)] = { useCustom: true, fromTime: pf, toTime: pt };
+      }
+    });
+
+    const sortedTrainees = [...traineeWorks].sort(
+      (a: any, b: any) => Number(a.id ?? 0) - Number(b.id ?? 0)
+    );
+    formData.selectedTrainees = sortedTrainees.map((w: any) => ({
+      emp_id: String(w.worker_id || w.hr_emp?.emp_id || ''),
+      emp_name:
+        w.hr_emp?.emp_name ||
+        (typeof w.notes === 'string' ? w.notes.replace(/^Trainee:\s*/i, '').trim() : '') ||
+        'Unknown',
+      skill_short: w.hr_emp?.skill_short || 'T',
+      reporting_id: w.reporting_id,
+      planning_id: w.id
+    }));
+
+    sortedTrainees.forEach((w: any, ti: number) => {
+      const pf = normReportTime(w.from_time);
+      const pt = normReportTime(w.to_time);
+      if (pf && pt && (pf !== gFrom || pt !== gTo)) {
+        overrides[`trainee-${ti}`] = { useCustom: true, fromTime: pf, toTime: pt };
+      }
+    });
+
+    formData.rowTimeOverrides = overrides;
+    formData.traineeDeviationReason = '';
+
+    void traineeDeviationPrefetch(sortedTrainees);
+
     state = { ...initialMultiSkillReportState };
   }
 
+  async function traineeDeviationPrefetch(traineeWorks: any[]) {
+    const ids = traineeWorks
+      .map((w: any) => w.id)
+      .filter((id: any) => id != null && id !== '');
+    if (ids.length === 0) return;
+    const { data, error } = await supabase
+      .from('prdn_work_planning_deviations')
+      .select('reason')
+      .eq('deviation_type', 'trainee_addition')
+      .in('planning_id', ids as number[])
+      .eq('is_active', true)
+      .eq('is_deleted', false)
+      .limit(1);
+    const reason = Array.isArray(data) && data[0]?.reason ? data[0].reason : null;
+    if (!error && reason) {
+      formData.traineeDeviationReason = reason;
+      formData = { ...formData };
+    }
+  }
+
   function proceedToStage2() {
-    const validation = validateSave(formData, selectedWorks, isNonStandardWork);
+    const validation = validateSave(formData, skillPlanningWorks, isNonStandardWork);
     if (!validation.isValid) {
       alert(Object.values(validation.errors)[0]);
       return;
@@ -313,7 +412,7 @@
     
     let validation;
     try {
-      validation = validateSave(formData, selectedWorks, isNonStandardWork);
+      validation = validateSave(formData, skillPlanningWorks, isNonStandardWork);
       console.log('✅ Validation result:', validation);
     } catch (validationError) {
       console.error('❌ Error in validateSave:', validationError);
@@ -336,12 +435,9 @@
       .map(work => work.reporting_id)
       .filter((id): id is number => id !== undefined && id !== null);
     
-    const conflictResult = await checkWorkerConflicts(
-      formData.skillEmployees,
-      formData.fromDate,
-      formData.fromTime,
-      formData.toDate,
-      formData.toTime,
+    const conflictResult = await checkMultiSkillReportConflicts(
+      selectedWorks,
+      formData,
       planningIds,
       reportingIds.length > 0 ? reportingIds : undefined
     );
@@ -460,7 +556,7 @@
 
       dispatch('save', {
         success: true,
-        message: `Successfully reported ${selectedWorks.length} skill competencies`,
+        message: `Successfully reported ${skillPlanningWorks.length} skill competencies`,
         reportData: result.data
       });
 
@@ -521,11 +617,22 @@
   }
 
   function handleTraineeRemove(index: number) {
+    const prevOverrides = formData.rowTimeOverrides || {};
     formData.selectedTrainees = formData.selectedTrainees.filter((_, i) => i !== index);
     if (formData.selectedTrainees.length === 0) {
       formData.traineeDeviationReason = '';
     }
-    formData = { ...formData }; // Trigger reactivity
+    const ro: Record<string, RowTimeOverride> = {};
+    for (const [k, v] of Object.entries(prevOverrides)) {
+      if (!k.startsWith('trainee-')) ro[k] = v;
+    }
+    formData.selectedTrainees.forEach((_, i) => {
+      const oldIdx = i < index ? i : i + 1;
+      const o = prevOverrides[`trainee-${oldIdx}`];
+      if (o) ro[`trainee-${i}`] = o;
+    });
+    formData.rowTimeOverrides = ro;
+    formData = { ...formData };
   }
 
   function handleTraineeReasonChange(reason: string) {
@@ -536,11 +643,26 @@
   function handleDateChange(field: string, value: string) {
     if (field === 'fromDate') formData.fromDate = value;
     if (field === 'toDate') formData.toDate = value;
+    formData.plannedHours = calculatePlannedHours(formData.fromTime || '', formData.toTime || '');
+    formData = { ...formData };
   }
 
   function handleTimeChange(field: string, value: string) {
     if (field === 'fromTime') formData.fromTime = value;
     if (field === 'toTime') formData.toTime = value;
+    formData.plannedHours = calculatePlannedHours(formData.fromTime || '', formData.toTime || '');
+    formData = { ...formData };
+  }
+
+  function handleRowTimeOverride(rowKey: string, next: RowTimeOverride | null) {
+    const rest = { ...formData.rowTimeOverrides };
+    if (next === null) {
+      delete rest[rowKey];
+    } else {
+      rest[rowKey] = next;
+    }
+    formData.rowTimeOverrides = rest;
+    formData = { ...formData };
   }
 
   function handleStatusChange(value: 'C' | 'NC') {
@@ -600,28 +722,30 @@
           </div>
         {:else if selectedWorks.length > 0}
           <WorkDetailsDisplay 
-            {selectedWorks} 
+            selectedWorks={skillPlanningWorks.length ? skillPlanningWorks : selectedWorks}
             standardTimeMinutes={state.standardTimeMinutes}
           />
 
           {#if state.currentStage === 1}
-            <EmployeeAssignment
-              {selectedWorks}
-              {availableWorkers}
-              {formData}
-              onEmployeeChange={handleEmployeeChange}
-              onDeviationChange={handleDeviationChange}
-              onTraineeAdd={handleTraineeAdd}
-              onTraineeRemove={handleTraineeRemove}
-              onTraineeReasonChange={handleTraineeReasonChange}
-            />
-
             <SharedTimeSelection
               {formData}
               actualTimeMinutes={state.actualTimeMinutes}
               onDateChange={handleDateChange}
               onTimeChange={handleTimeChange}
               onStatusChange={handleStatusChange}
+            />
+
+            <EmployeeAssignment
+              selectedWorks={skillPlanningWorks}
+              {availableWorkers}
+              {formData}
+              shiftInfo={shiftInfo}
+              onEmployeeChange={handleEmployeeChange}
+              onDeviationChange={handleDeviationChange}
+              onTraineeAdd={handleTraineeAdd}
+              onTraineeRemove={handleTraineeRemove}
+              onTraineeReasonChange={handleTraineeReasonChange}
+              onRowTimeOverride={handleRowTimeOverride}
             />
           {/if}
 

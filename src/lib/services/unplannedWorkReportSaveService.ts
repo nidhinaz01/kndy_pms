@@ -1,6 +1,7 @@
 import { supabase } from '$lib/supabaseClient';
 import type { MultiSkillReportFormData, BreakdownData } from '$lib/types/multiSkillReport';
 import type { LostTimeReason } from '$lib/api/lostTimeReasons';
+import { getEffectiveRowTimes } from '$lib/utils/planWorkUtils';
 import { calculatePieceRateForPlanning } from './pieceRateCalculationService';
 
 /**
@@ -19,8 +20,6 @@ export async function saveUnplannedWorkReports(
     const { getCurrentUsername, getCurrentTimestamp } = await import('$lib/utils/userUtils');
     const currentUser = getCurrentUsername();
     const now = getCurrentTimestamp();
-    
-    const hoursWorkedToday = (formData.actualTimeMinutes ?? 0) / 60;
     
     const hasBreakdown = formData.breakdownData.breakdownItems.length > 0;
     
@@ -183,9 +182,11 @@ export async function saveUnplannedWorkReports(
       const scRequired = virtualWork.sc_required || 'T';
       const wsmId = virtualWork.wsm_id;
       
-      // Create planning record
+      const eff = getEffectiveRowTimes(String(virtualWork.id), formData);
+      const rowHours = eff.plannedHours;
+
       const hoursWorkedTillDate = timeWorkedTillDateByWorker[workerId] || 0;
-      const totalHoursWorked = hoursWorkedTillDate + hoursWorkedToday;
+      const totalHoursWorked = hoursWorkedTillDate + rowHours;
       const planningData = {
         stage_code: stageCode,
         shift_code: shiftCode,
@@ -194,13 +195,13 @@ export async function saveUnplannedWorkReports(
         other_work_code: otherWorkCode,
         sc_required: scRequired,
         worker_id: workerId, // Required, cannot be null
-        from_date: formData.fromDate,
-        from_time: formData.fromTime,
-        to_date: formData.toDate,
-        to_time: formData.toTime,
-        planned_hours: hoursWorkedToday,
+        from_date: eff.fromDate,
+        from_time: eff.fromTime,
+        to_date: eff.toDate,
+        to_time: eff.toTime,
+        planned_hours: rowHours,
         time_worked_till_date: formData.completionStatus === 'NC' ? totalHoursWorked : 0,
-        remaining_time: Math.max(0, hoursWorkedToday - totalHoursWorked),
+        remaining_time: Math.max(0, rowHours - totalHoursWorked),
         status: 'approved' as const, // Approved since work is being reported
         notes: 'Unplanned work - created for reporting',
         wsm_id: wsmId,
@@ -238,13 +239,13 @@ export async function saveUnplannedWorkReports(
       const reportData = {
         planning_id: planningRecord.id,
         worker_id: workerId, // Required, cannot be null
-        from_date: formData.fromDate,
-        from_time: formData.fromTime,
-        to_date: formData.toDate,
-        to_time: formData.toTime,
+        from_date: eff.fromDate,
+        from_time: eff.fromTime,
+        to_date: eff.toDate,
+        to_time: eff.toTime,
         // Store till-date before this report (exclude today's hours)
         hours_worked_till_date: hoursWorkedTillDate,
-        hours_worked_today: hoursWorkedToday,
+        hours_worked_today: rowHours,
         completion_status: formData.completionStatus,
         lt_minutes_total: formData.ltMinutes,
         lt_details: ltDetails,
@@ -298,10 +299,13 @@ export async function saveUnplannedWorkReports(
       
       const { createWorkPlanning } = await import('$lib/api/production');
       
-      for (const trainee of formData.selectedTrainees) {
-        // Create planning record for trainee
+      for (let ti = 0; ti < formData.selectedTrainees.length; ti++) {
+        const trainee = formData.selectedTrainees[ti];
+        const eff = getEffectiveRowTimes(`trainee-${ti}`, formData);
+        const rowHours = eff.plannedHours;
+
         const hoursWorkedTillDate = timeWorkedTillDateByWorker[trainee.emp_id] || 0;
-        const totalHoursWorked = hoursWorkedTillDate + hoursWorkedToday;
+        const totalHoursWorked = hoursWorkedTillDate + rowHours;
         const traineePlanData = {
           stage_code: stageCode,
           shift_code: shiftCode,
@@ -310,13 +314,13 @@ export async function saveUnplannedWorkReports(
           other_work_code: otherWorkCode,
           sc_required: 'T',
           worker_id: trainee.emp_id,
-          from_date: formData.fromDate,
-          from_time: formData.fromTime,
-          to_date: formData.toDate,
-          to_time: formData.toTime,
-          planned_hours: hoursWorkedToday,
+          from_date: eff.fromDate,
+          from_time: eff.fromTime,
+          to_date: eff.toDate,
+          to_time: eff.toTime,
+          planned_hours: rowHours,
           time_worked_till_date: formData.completionStatus === 'NC' ? totalHoursWorked : 0,
-          remaining_time: Math.max(0, hoursWorkedToday - totalHoursWorked),
+          remaining_time: Math.max(0, rowHours - totalHoursWorked),
           status: 'approved' as const,
           notes: `Trainee: ${trainee.emp_name} - Added during unplanned work reporting`,
           wsm_id: null,
@@ -331,12 +335,12 @@ export async function saveUnplannedWorkReports(
         const traineeReportData = {
           planning_id: traineePlan.id,
           worker_id: trainee.emp_id,
-          from_date: formData.fromDate,
-          from_time: formData.fromTime,
-          to_date: formData.toDate,
-          to_time: formData.toTime,
+          from_date: eff.fromDate,
+          from_time: eff.fromTime,
+          to_date: eff.toDate,
+          to_time: eff.toTime,
           hours_worked_till_date: hoursWorkedTillDate,
-          hours_worked_today: hoursWorkedToday,
+          hours_worked_today: rowHours,
           completion_status: formData.completionStatus,
           lt_minutes_total: formData.ltMinutes,
           lt_details: traineeLtDetails,

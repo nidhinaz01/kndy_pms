@@ -34,6 +34,23 @@ export interface TimeSlot {
   display: string;
 }
 
+/** Optional per-row override (times only; dates use global Step 1). Key = skill slot e.g. US-0 or trainee-0. */
+export interface RowTimeOverride {
+  useCustom: boolean;
+  fromTime: string;
+  toTime: string;
+}
+
+/** Shared by Plan Work and Multi-Skill Report for `getEffectiveRowTimes`. */
+export interface RowTimeFormLike {
+  fromDate?: string;
+  toDate?: string;
+  fromTime?: string;
+  toTime?: string;
+  plannedHours?: number;
+  rowTimeOverrides?: Record<string, RowTimeOverride>;
+}
+
 export interface PlanWorkFormData {
   selectedWorkers: { [skill: string]: SelectedWorker | null };
   selectedTrainees: SelectedWorker[];
@@ -44,6 +61,8 @@ export interface PlanWorkFormData {
   toTime: string;
   plannedHours: number;
   selectedSkillMappingIndex: number;
+  /** Per assignment row: custom from/to time only (optional). */
+  rowTimeOverrides: Record<string, RowTimeOverride>;
 }
 
 export interface PlanWorkWarnings {
@@ -66,7 +85,8 @@ export const initialPlanWorkFormData: PlanWorkFormData = {
   fromTime: '',
   toTime: '',
   plannedHours: 0,
-  selectedSkillMappingIndex: -1
+  selectedSkillMappingIndex: -1,
+  rowTimeOverrides: {}
 };
 
 export const initialWarnings: PlanWorkWarnings = {

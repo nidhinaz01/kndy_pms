@@ -1578,6 +1578,7 @@ export function handleEditReport(context: EventHandlerContext, event: CustomEven
       derived_sw_code: planning.derived_sw_code,
       other_work_code: planning.other_work_code,
       sc_required: planning.sc_required,
+      notes: planning.notes,
       stage_code: planning.stage_code,
       wsm_id: planning.wsm_id,
       // Nested objects from planning (needed for modal display and validation)

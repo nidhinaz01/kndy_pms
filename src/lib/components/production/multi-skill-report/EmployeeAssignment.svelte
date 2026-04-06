@@ -1,14 +1,19 @@
 <script lang="ts">
   import type { MultiSkillReportFormData } from '$lib/types/multiSkillReport';
+  import type { ShiftInfo } from '$lib/types/planWork';
+  import type { RowTimeOverride } from '$lib/types/planWork';
+  import PlanWorkRowCustomTimes from '../plan-work/PlanWorkRowCustomTimes.svelte';
 
   export let selectedWorks: any[] = [];
   export let availableWorkers: any[] = [];
   export let formData: MultiSkillReportFormData;
+  export let shiftInfo: ShiftInfo | null = null;
   export let onEmployeeChange: (workId: string, employeeId: string) => void = () => {};
   export let onDeviationChange: (workId: string, hasDeviation: boolean, reason: string) => void = () => {};
   export let onTraineeAdd: (trainee: { emp_id: string; emp_name: string; skill_short: string }) => void = () => {};
   export let onTraineeRemove: (index: number) => void = () => {};
   export let onTraineeReasonChange: (reason: string) => void = () => {};
+  export let onRowTimeOverride: (rowKey: string, next: RowTimeOverride | null) => void = () => {};
   
   // Filter trainees from available workers
   $: availableTrainees = availableWorkers.filter(w => w.skill_short === 'T');
@@ -212,6 +217,14 @@
             </p>
           </div>
         {/if}
+        <PlanWorkRowCustomTimes
+          rowKey={String(workId)}
+          {shiftInfo}
+          override={formData.rowTimeOverrides[String(workId)]}
+          globalFromTime={formData.fromTime}
+          globalToTime={formData.toTime}
+          onChange={onRowTimeOverride}
+        />
       </div>
     {/each}
   </div>
@@ -301,20 +314,30 @@
       <!-- Selected Trainees List -->
       <div class="space-y-2 mb-3">
         {#each formData.selectedTrainees as trainee, index}
-          <div class="flex items-center justify-between p-2 bg-gray-50 dark:bg-gray-800 rounded border theme-border">
-            <div class="flex items-center">
-              <span class="text-sm font-medium theme-text-primary mr-2">
-                {trainee.emp_name}
-              </span>
-              <span class="text-xs theme-text-secondary">({trainee.skill_short})</span>
+          <div class="p-2 bg-gray-50 dark:bg-gray-800 rounded border theme-border space-y-2">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center">
+                <span class="text-sm font-medium theme-text-primary mr-2">
+                  {trainee.emp_name}
+                </span>
+                <span class="text-xs theme-text-secondary">({trainee.skill_short})</span>
+              </div>
+              <button
+                type="button"
+                on:click={() => onTraineeRemove(index)}
+                class="text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-300 text-sm font-medium"
+              >
+                Remove
+              </button>
             </div>
-            <button
-              type="button"
-              on:click={() => onTraineeRemove(index)}
-              class="text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-300 text-sm font-medium"
-            >
-              Remove
-            </button>
+            <PlanWorkRowCustomTimes
+              rowKey={`trainee-${index}`}
+              {shiftInfo}
+              override={formData.rowTimeOverrides[`trainee-${index}`]}
+              globalFromTime={formData.fromTime}
+              globalToTime={formData.toTime}
+              onChange={onRowTimeOverride}
+            />
           </div>
         {/each}
       </div>

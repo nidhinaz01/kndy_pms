@@ -2,6 +2,8 @@ import { supabase } from '$lib/supabaseClient';
 import { fetchActiveLostTimeReasons } from '$lib/api/lostTimeReasons';
 import { getDetailedTimeBreakdownForDerivativeWork } from '$lib/api/stdSkillTimeStandards';
 import type { LostTimeReason } from '$lib/api/lostTimeReasons';
+import type { MultiSkillReportFormData } from '$lib/types/multiSkillReport';
+import { getEffectiveRowTimes } from '$lib/utils/planWorkUtils';
 import {
   normalizeReportDate,
   getEmpIdsReassignedIntoStage,
@@ -486,5 +488,72 @@ export async function checkWorkerConflicts(
     console.error('Error checking worker conflicts:', error);
     return { hasConflict: false, hasReportConflict: false, message: '' };
   }
+}
+
+/**
+ * Conflict check for multi-skill report: each skill row and each trainee uses its own effective interval.
+ */
+export async function checkMultiSkillReportConflicts(
+  selectedWorks: any[],
+  formData: MultiSkillReportFormData,
+  excludePlanningIds?: number[],
+  excludeReportIds?: number[]
+): Promise<{ hasConflict: boolean; hasReportConflict: boolean; message: string }> {
+  const isTraineeRow = (w: any) => {
+    const n = w.notes ?? w.prdn_work_planning?.notes;
+    return typeof n === 'string' && n.trim().startsWith('Trainee:');
+  };
+  const skillWorks = (selectedWorks || []).filter((w) => !isTraineeRow(w));
+
+  type Interval = { workerId: string; fromDate: string; fromTime: string; toDate: string; toTime: string };
+  const intervals: Interval[] = [];
+
+  for (const work of skillWorks) {
+    const wid = formData.skillEmployees[work.id];
+    if (!wid || formData.deviations[work.id]?.hasDeviation) continue;
+    const eff = getEffectiveRowTimes(String(work.id), formData);
+    intervals.push({
+      workerId: wid,
+      fromDate: eff.fromDate,
+      fromTime: eff.fromTime,
+      toDate: eff.toDate,
+      toTime: eff.toTime
+    });
+  }
+
+  for (let ti = 0; ti < formData.selectedTrainees.length; ti++) {
+    const t = formData.selectedTrainees[ti];
+    if (!t.emp_id) continue;
+    const eff = getEffectiveRowTimes(`trainee-${ti}`, formData);
+    intervals.push({
+      workerId: t.emp_id,
+      fromDate: eff.fromDate,
+      fromTime: eff.fromTime,
+      toDate: eff.toDate,
+      toTime: eff.toTime
+    });
+  }
+
+  let firstPlanConflict: { hasConflict: boolean; hasReportConflict: boolean; message: string } | null = null;
+
+  for (const inv of intervals) {
+    const result = await checkWorkerConflicts(
+      { row: inv.workerId },
+      inv.fromDate,
+      inv.fromTime,
+      inv.toDate,
+      inv.toTime,
+      excludePlanningIds,
+      excludeReportIds
+    );
+    if (result.hasReportConflict) {
+      return result;
+    }
+    if (result.hasConflict && !result.hasReportConflict && !firstPlanConflict) {
+      firstPlanConflict = result;
+    }
+  }
+
+  return firstPlanConflict || { hasConflict: false, hasReportConflict: false, message: '' };
 }
 

@@ -1,7 +1,8 @@
 <script lang="ts">
   import { supabase } from '$lib/supabaseClient';
-  import type { Worker, SelectedWorker } from '$lib/types/planWork';
+  import type { Worker, SelectedWorker, RowTimeOverride, ShiftInfo } from '$lib/types/planWork';
   import { getSkillShort, getIndividualSkills } from '$lib/utils/planWorkUtils';
+  import PlanWorkRowCustomTimes from './PlanWorkRowCustomTimes.svelte';
 
   export let work: any = null;
   export let availableWorkers: Worker[] = [];
@@ -12,6 +13,9 @@
   export let selectedDate: string = '';
   export let fromTime: string = '';
   export let toTime: string = '';
+  export let shiftInfo: ShiftInfo | null = null;
+  export let rowTimeOverrides: Record<string, RowTimeOverride> = {};
+  export let onRowCustomTimesChange: (rowKey: string, next: RowTimeOverride | null) => void = () => {};
   export let onWorkerChange: (event: Event, skillKey: string) => void = () => {};
   export let onTraineeAdd: (trainee: SelectedWorker) => void = () => {};
   export let onTraineeRemove: (index: number) => void = () => {};
@@ -220,6 +224,14 @@
                             </div>
                           {/if}
                         {/if}
+                        <PlanWorkRowCustomTimes
+                          rowKey={`${individualSkill}-${skillIndex}`}
+                          {shiftInfo}
+                          override={rowTimeOverrides[`${individualSkill}-${skillIndex}`]}
+                          globalFromTime={fromTime}
+                          globalToTime={toTime}
+                          onChange={onRowCustomTimesChange}
+                        />
                       </div>
                     {/each}
                   </div>
@@ -256,6 +268,14 @@
                       </div>
                     {/if}
                   {/if}
+                  <PlanWorkRowCustomTimes
+                    rowKey={skillShort || skill.sc_name}
+                    {shiftInfo}
+                    override={rowTimeOverrides[skillShort || skill.sc_name]}
+                    globalFromTime={fromTime}
+                    globalToTime={toTime}
+                    onChange={onRowCustomTimesChange}
+                  />
                 </div>
               {/if}
             </div>
@@ -319,6 +339,14 @@
                           </div>
                         {/if}
                       {/if}
+                      <PlanWorkRowCustomTimes
+                        rowKey={`${individualSkill}-${skillIndex}`}
+                        {shiftInfo}
+                        override={rowTimeOverrides[`${individualSkill}-${skillIndex}`]}
+                        globalFromTime={fromTime}
+                        globalToTime={toTime}
+                        onChange={onRowCustomTimesChange}
+                      />
                     </div>
                   {/each}
                 </div>
@@ -354,6 +382,14 @@
                     </div>
                   {/if}
                 {/if}
+                <PlanWorkRowCustomTimes
+                  rowKey={skillShort || skill.sc_name}
+                  {shiftInfo}
+                  override={rowTimeOverrides[skillShort || skill.sc_name]}
+                  globalFromTime={fromTime}
+                  globalToTime={toTime}
+                  onChange={onRowCustomTimesChange}
+                />
               </div>
             {/if}
           </div>
@@ -379,6 +415,14 @@
         </option>
       {/each}
     </select>
+    <PlanWorkRowCustomTimes
+      rowKey="general"
+      {shiftInfo}
+      override={rowTimeOverrides['general']}
+      globalFromTime={fromTime}
+      globalToTime={toTime}
+      onChange={onRowCustomTimesChange}
+    />
   </div>
 {/if}
 
@@ -468,20 +512,30 @@
     <!-- Selected Trainees List -->
     <div class="space-y-2 mb-3">
       {#each selectedTrainees as trainee, index}
-        <div class="flex items-center justify-between p-2 bg-gray-50 dark:bg-gray-800 rounded border theme-border">
-          <div class="flex items-center">
-            <span class="text-sm font-medium theme-text-primary mr-2">
-              {trainee.emp_name}
-            </span>
-            <span class="text-xs theme-text-secondary">({trainee.skill_short})</span>
+        <div class="p-2 bg-gray-50 dark:bg-gray-800 rounded border theme-border space-y-2">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center">
+              <span class="text-sm font-medium theme-text-primary mr-2">
+                {trainee.emp_name}
+              </span>
+              <span class="text-xs theme-text-secondary">({trainee.skill_short})</span>
+            </div>
+            <button
+              type="button"
+              on:click={() => onTraineeRemove(index)}
+              class="text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-300 text-sm font-medium"
+            >
+              Remove
+            </button>
           </div>
-          <button
-            type="button"
-            on:click={() => onTraineeRemove(index)}
-            class="text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-300 text-sm font-medium"
-          >
-            Remove
-          </button>
+          <PlanWorkRowCustomTimes
+            rowKey={`trainee-${index}`}
+            {shiftInfo}
+            override={rowTimeOverrides[`trainee-${index}`]}
+            globalFromTime={fromTime}
+            globalToTime={toTime}
+            onChange={onRowCustomTimesChange}
+          />
         </div>
       {/each}
     </div>

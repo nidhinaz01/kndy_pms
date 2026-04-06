@@ -3,6 +3,19 @@
  * Standardized function that returns break time in minutes
  */
 
+/** HH:MM or HH:MM:SS from DB → HH:MM for `Date` construction. */
+function normalizeWallTime(timeStr: string): string {
+  if (!timeStr) return '';
+  const s = String(timeStr).trim();
+  const parts = s.split(':');
+  if (parts.length >= 2) {
+    const h = Math.min(23, Math.max(0, parseInt(parts[0], 10) || 0));
+    const m = Math.min(59, Math.max(0, parseInt(parts[1], 10) || 0));
+    return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
+  }
+  return s;
+}
+
 /**
  * Calculate break time in minutes that overlaps with a work period
  * This is the standard function - all other break time calculations should use this
@@ -22,9 +35,11 @@ export function calculateBreakTimeInMinutes(
   }
 
   try {
+    const ws = normalizeWallTime(startTimeStr);
+    const we = normalizeWallTime(endTimeStr);
     // Convert times to Date objects for easier calculation
-    const workStart = new Date(`2000-01-01T${startTimeStr}`);
-    let workEnd = new Date(`2000-01-01T${endTimeStr}`);
+    const workStart = new Date(`2000-01-01T${ws}`);
+    let workEnd = new Date(`2000-01-01T${we}`);
     
     // Handle overnight shifts
     if (workEnd < workStart) {
@@ -35,8 +50,10 @@ export function calculateBreakTimeInMinutes(
     
     // Calculate overlap with each break time
     breakTimes.forEach((breakTime: { start_time: string; end_time: string }) => {
-      const breakStart = new Date(`2000-01-01T${breakTime.start_time}`);
-      let breakEnd = new Date(`2000-01-01T${breakTime.end_time}`);
+      const bs = normalizeWallTime(breakTime.start_time);
+      const be = normalizeWallTime(breakTime.end_time);
+      const breakStart = new Date(`2000-01-01T${bs}`);
+      let breakEnd = new Date(`2000-01-01T${be}`);
       
       // Handle overnight breaks
       if (breakEnd < breakStart) {
@@ -79,7 +96,8 @@ export function calculateBreakTimeForWorkPeriod(
   }
 
   try {
-    const [startHour, startMin] = startTimeStr.split(':').map(Number);
+    const normalizedStart = normalizeWallTime(startTimeStr);
+    const [startHour, startMin] = normalizedStart.split(':').map(Number);
     const startMinutes = startHour * 60 + startMin;
     const endMinutes = startMinutes + workDurationMinutes;
     
@@ -88,7 +106,7 @@ export function calculateBreakTimeForWorkPeriod(
     const endMins = endMinutes % 60;
     const endTimeStr = `${endHours.toString().padStart(2, '0')}:${endMins.toString().padStart(2, '0')}`;
     
-    return calculateBreakTimeInMinutes(startTimeStr, endTimeStr, breakTimes);
+    return calculateBreakTimeInMinutes(normalizedStart, endTimeStr, breakTimes);
   } catch (error) {
     console.error('Error calculating break time for work period:', error);
     return 0;

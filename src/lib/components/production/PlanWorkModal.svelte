@@ -3,13 +3,13 @@
   import Button from '$lib/components/common/Button.svelte';
   import { X } from 'lucide-svelte';
   import { supabase } from '$lib/supabaseClient';
-  import { calculatePlannedHours, calculateBreakTimeInSlot, autoCalculateEndTime, getIndividualSkills, getSkillShort, generateTimeSlots } from '$lib/utils/planWorkUtils';
+  import { calculatePlannedHours, calculateBreakTimeInSlot, autoCalculateEndTime, getIndividualSkills, getSkillShort, generateTimeSlots, getEffectiveRowTimes } from '$lib/utils/planWorkUtils';
   import { formatTime } from '$lib/utils/timeFormatUtils';
   import { checkTimeOverlap, checkTimeExcess, checkSkillMismatch } from '$lib/utils/planWorkValidation';
   import { loadWorkers, loadWorkContinuation, loadExistingPlans, loadShiftInfo, checkAlternativeSkillCombinations } from '$lib/services/planWorkService';
-  import { checkWorkerConflicts } from '$lib/services/planWorkConflictService';
   import { saveWorkPlanning } from '$lib/services/planWorkSaveService';
-  import type { Worker, SelectedWorker, WorkContinuation, ShiftInfo, PlanWorkWarnings, PlanWorkFormData } from '$lib/types/planWork';
+  import { checkWorkerConflicts, type WorkerAssignmentInterval } from '$lib/services/planWorkConflictService';
+  import type { Worker, SelectedWorker, WorkContinuation, ShiftInfo, PlanWorkWarnings, PlanWorkFormData, RowTimeOverride } from '$lib/types/planWork';
   import { initialPlanWorkFormData, initialWarnings } from '$lib/types/planWork';
   import WorkDetailsDisplay from './plan-work/WorkDetailsDisplay.svelte';
   import WorkerSelection from './plan-work/WorkerSelection.svelte';
@@ -58,8 +58,8 @@
     // CRITICAL: Clear selectedWorkers when modal first opens (even if same work)
     // This prevents stale data from previous modal sessions
     if (!previousIsOpen && isOpen) {
-      formData.selectedWorkers = {};
-      console.log('🧹 Cleared selectedWorkers on modal open');
+      formData = { ...formData, selectedWorkers: {}, selectedTrainees: [], traineeDeviationReason: '' };
+      console.log('🧹 Cleared selected workers and trainees on modal open');
     }
     previousIsOpen = isOpen;
     
@@ -79,7 +79,7 @@
         formData.toDate = selectedDate;
       }
       // Force a reactive update by creating a new object
-      formData = { ...formData, selectedWorkers: {}, selectedTrainees: [], traineeDeviationReason: '' };
+      formData = { ...formData, selectedWorkers: {}, selectedTrainees: [], traineeDeviationReason: '', rowTimeOverrides: {} };
       filteredAvailableWorkers = [];
       savedSelectedWorkers = {};
       hasPrefilledWorkers = false;
@@ -185,8 +185,17 @@
     savedSelectedWorkers = {}; // Fix 4: Clear saved workers when modal closes or work changes
   }
   
+  /** Additional trainees are saved with notes like `Trainee: Name` — not skill-mapping slots. */
+  function isAdditionalTraineePlan(plan: any): boolean {
+    const n = plan?.notes;
+    return typeof n === 'string' && n.trim().startsWith('Trainee:');
+  }
+
   function prefillFormFromExistingPlans(existingPlans: any[], fillWorkers: boolean = true) {
     if (!existingPlans || existingPlans.length === 0) return;
+
+    const mappingPlans = existingPlans.filter((p: any) => !isAdditionalTraineePlan(p));
+    const additionalTraineePlans = existingPlans.filter((p: any) => isAdditionalTraineePlan(p));
     
     // Get the first plan item to extract time information
     // All plans in a group should have the same from_time/to_time
@@ -289,7 +298,7 @@
     if (work?.skill_mappings && work.skill_mappings.length > 0) {
       // Get all unique skills from the existing plans
       const planSkills = new Set(
-        existingPlans
+        mappingPlans
           .map((p: any) => p.sc_required || p.hr_emp?.skill_short || p.skill_short)
           .filter(Boolean)
       );
@@ -365,7 +374,7 @@
         // Track which indices have been assigned
         const assignedIndices = new Set<number>();
         
-        existingPlans.forEach((plan: any) => {
+        mappingPlans.forEach((plan: any) => {
           const skillRequired = plan.sc_required || plan.hr_emp?.skill_short || plan.skill_short;
           const worker = plan.hr_emp;
           
@@ -393,7 +402,7 @@
       } else {
         // Single skill - use just the skill name as key
         const skillShort = getSkillShort(selectedMapping);
-        const firstPlan = existingPlans[0];
+        const firstPlan = mappingPlans[0];
         const worker = firstPlan?.hr_emp;
         
         if (worker) {
@@ -407,7 +416,7 @@
       }
     } else {
       // Fallback: if no mapping selected, use sc_required as key
-      existingPlans.forEach((plan: any) => {
+      mappingPlans.forEach((plan: any) => {
         const skillRequired = plan.sc_required || plan.skill_short;
         const worker = plan.hr_emp;
         
@@ -423,8 +432,86 @@
     
     if (fillWorkers) {
       formData.selectedWorkers = selectedWorkers;
+
+      const sortedTraineePlans = [...additionalTraineePlans].sort((a: any, b: any) => {
+        const idA = Number(a.id ?? a.planning_id ?? 0);
+        const idB = Number(b.id ?? b.planning_id ?? 0);
+        return idA - idB;
+      });
+      formData.selectedTrainees = sortedTraineePlans.map((plan: any) => {
+        const w = plan.hr_emp;
+        const nameFromNotes =
+          typeof plan.notes === 'string' ? plan.notes.replace(/^Trainee:\s*/i, '').trim() : '';
+        return {
+          emp_id: String(w?.emp_id ?? plan.worker_id ?? ''),
+          emp_name: w?.emp_name || nameFromNotes || 'Unknown',
+          skill_short: w?.skill_short || 'T'
+        };
+      });
+
+      const traineePlanIds = sortedTraineePlans
+        .map((p: any) => p.id ?? p.planning_id)
+        .filter((id: any) => id != null && id !== '');
+      if (traineePlanIds.length > 0 && !formData.traineeDeviationReason?.trim()) {
+        void (async () => {
+          const { data, error } = await supabase
+            .from('prdn_work_planning_deviations')
+            .select('reason')
+            .eq('deviation_type', 'trainee_addition')
+            .in('planning_id', traineePlanIds as number[])
+            .eq('is_active', true)
+            .eq('is_deleted', false)
+            .limit(1);
+          const reason = Array.isArray(data) && data[0]?.reason ? data[0].reason : null;
+          if (!error && reason) {
+            formData.traineeDeviationReason = reason;
+            formData = { ...formData };
+          }
+        })();
+      }
+
       // Ensure selected workers are in the available list
       ensureSelectedWorkersInAvailable();
+
+      // Per-row custom times when a saved plan differs from global (earliest–latest) window
+      if (existingPlans.length > 0) {
+        const norm = (timeStr: string): string => {
+          if (!timeStr) return '';
+          const parts = timeStr.split(':');
+          if (parts.length >= 2) {
+            return `${parts[0].padStart(2, '0')}:${parts[1].padStart(2, '0')}`;
+          }
+          return timeStr;
+        };
+        const gFrom = norm(formData.fromTime);
+        const gTo = norm(formData.toTime);
+        const overrides: Record<string, RowTimeOverride> = {};
+        for (const [key, sw] of Object.entries(selectedWorkers)) {
+          if (!sw || !(sw as SelectedWorker).emp_id) continue;
+          const skillShort = key === 'general' ? 'GEN' : key.includes('-') ? key.split('-')[0] : key;
+          const plan = mappingPlans.find((p: any) => {
+            const wid = p.worker_id || p.hr_emp?.emp_id;
+            const sc = p.sc_required || p.hr_emp?.skill_short;
+            return wid === (sw as SelectedWorker).emp_id && sc === skillShort;
+          });
+          if (!plan?.from_time || !plan?.to_time) continue;
+          const pf = norm(plan.from_time);
+          const pt = norm(plan.to_time);
+          if (pf !== gFrom || pt !== gTo) {
+            overrides[key] = { useCustom: true, fromTime: pf, toTime: pt };
+          }
+        }
+        sortedTraineePlans.forEach((plan: any, ti: number) => {
+          if (!plan?.from_time || !plan?.to_time) return;
+          const pf = norm(plan.from_time);
+          const pt = norm(plan.to_time);
+          if (pf !== gFrom || pt !== gTo) {
+            overrides[`trainee-${ti}`] = { useCustom: true, fromTime: pf, toTime: pt };
+          }
+        });
+        formData.rowTimeOverrides = { ...formData.rowTimeOverrides, ...overrides };
+        formData = { ...formData };
+      }
     }
     
     // Keep step at 1 (time selection) so user can see and modify times
@@ -451,6 +538,7 @@
   $: if (formData.selectedSkillMappingIndex !== previousSelectedSkillMappingIndex && previousSelectedSkillMappingIndex >= 0) {
     console.log('Clearing workers due to skill mapping change');
     formData.selectedWorkers = {};
+    formData.rowTimeOverrides = {};
     previousSelectedSkillMappingIndex = formData.selectedSkillMappingIndex;
   } else if (formData.selectedSkillMappingIndex >= 0) {
     previousSelectedSkillMappingIndex = formData.selectedSkillMappingIndex;
@@ -761,6 +849,18 @@
   function handleSkillMappingChange(index: number) {
     formData.selectedSkillMappingIndex = index;
     formData.selectedWorkers = {};
+    formData.rowTimeOverrides = {};
+  }
+
+  function handleRowCustomTimesChange(rowKey: string, next: RowTimeOverride | null) {
+    const rest = { ...formData.rowTimeOverrides };
+    if (next === null) {
+      delete rest[rowKey];
+    } else {
+      rest[rowKey] = next;
+    }
+    formData.rowTimeOverrides = rest;
+    formData = { ...formData };
   }
 
   function handleTraineeAdd(trainee: SelectedWorker) {
@@ -771,10 +871,16 @@
 
   function handleTraineeRemove(index: number) {
     formData.selectedTrainees = formData.selectedTrainees.filter((_, i) => i !== index);
+    const ro = { ...formData.rowTimeOverrides };
+    Object.keys(ro)
+      .filter((k) => k.startsWith('trainee-'))
+      .forEach((k) => delete ro[k]);
+    formData.rowTimeOverrides = ro;
     // Clear reason if no trainees left
     if (formData.selectedTrainees.length === 0) {
       formData.traineeDeviationReason = '';
     }
+    formData = { ...formData };
   }
 
   function handleTraineeReasonChange(reason: string) {
@@ -874,7 +980,8 @@
         // Verify this worker is selected for a skill that belongs to the current work
         const isCurrentWorkSkill = currentWorkSkillKeys.has(key) || 
                                    currentWorkSkillKeys.has(key.split('_')[1]) || // Check skill part after index
-                                   (currentWorkSkillKeys.size === 0 && key === 'GEN'); // Fallback for non-standard works
+                                   (currentWorkSkillKeys.size === 0 && key === 'GEN') ||
+                                   key === 'general'; // WorkerSelection fallback key for non–skill-mapped work
         
         if (isCurrentWorkSkill) {
           // Create a fresh copy of the worker object to avoid any reference issues
@@ -892,10 +999,9 @@
     console.log(`🔍 checkWorkerConflictsValidation: Current formData.selectedWorkers keys:`, Object.keys(formData.selectedWorkers));
     console.log(`🔍 checkWorkerConflictsValidation: Current work skill keys:`, Array.from(currentWorkSkillKeys));
     
-    // If no valid workers are selected, skip conflict check
-    if (Object.keys(validSelectedWorkers).length === 0) {
-      console.log('✅ checkWorkerConflictsValidation: No workers selected, skipping conflict check');
-      return false; // No workers selected, no conflicts to check
+    if (Object.keys(validSelectedWorkers).length === 0 && formData.selectedTrainees.length === 0) {
+      console.log('✅ checkWorkerConflictsValidation: No workers or trainees, skipping conflict check');
+      return false;
     }
     
     // Get plan IDs to exclude (for edit mode)
@@ -904,22 +1010,44 @@
     // Use dates from formData if available, otherwise fall back to selectedDate
     const fromDate = formData.fromDate || selectedDate;
     const toDate = formData.toDate || selectedDate;
-    
+
+    const assignments: WorkerAssignmentInterval[] = [];
+
+    for (const [key, worker] of Object.entries(validSelectedWorkers)) {
+      if (!worker || !(worker as any).emp_id) continue;
+      const eff = getEffectiveRowTimes(key, formData);
+      assignments.push({
+        worker,
+        fromDate: eff.fromDate || fromDate,
+        toDate: eff.toDate || toDate,
+        fromTime: eff.fromTime,
+        toTime: eff.toTime
+      });
+    }
+
+    for (let ti = 0; ti < formData.selectedTrainees.length; ti++) {
+      const trainee = formData.selectedTrainees[ti];
+      const eff = getEffectiveRowTimes(`trainee-${ti}`, formData);
+      assignments.push({
+        worker: trainee,
+        fromDate: eff.fromDate || fromDate,
+        toDate: eff.toDate || toDate,
+        fromTime: eff.fromTime,
+        toTime: eff.toTime
+      });
+    }
+
     const result = await checkWorkerConflicts(
-      validSelectedWorkers,
-      fromDate,
-      formData.fromTime,
-      toDate,
-      formData.toTime,
+      assignments,
       excludePlanIds.length > 0 ? excludePlanIds : undefined
     );
-    
+
     if (result.hasConflict) {
       alert(`${result.conflictDetails}\n\nCannot proceed. Please resolve the time conflicts before planning work.`);
-      return true; // Return true to indicate validation failed and prevent save
+      return true;
     }
-    
-    return false; // No conflicts, validation passed
+
+    return false;
   }
 
   async function handleSave() {
@@ -931,6 +1059,13 @@
     if (formData.selectedTrainees && formData.selectedTrainees.length > 0) {
       if (!formData.traineeDeviationReason || !formData.traineeDeviationReason.trim()) {
         alert('Please provide a reason for adding trainees.');
+        return;
+      }
+    }
+
+    for (const [key, o] of Object.entries(formData.rowTimeOverrides || {})) {
+      if (o?.useCustom && (!o.fromTime?.trim() || !o.toTime?.trim())) {
+        alert(`Please complete custom from/to times for "${key}" or turn off custom times.`);
         return;
       }
     }
@@ -1213,6 +1348,9 @@
         selectedWorkerIds.add(worker.emp_id);
       }
     });
+    (formData.selectedTrainees || []).forEach((t: SelectedWorker) => {
+      if (t?.emp_id) selectedWorkerIds.add(t.emp_id);
+    });
 
     // Check if any selected workers are missing from filteredAvailableWorkers
     selectedWorkerIds.forEach(empId => {
@@ -1224,10 +1362,13 @@
           filteredAvailableWorkers = [...filteredAvailableWorkers, worker];
           console.log(`➕ Added selected worker to available list: ${worker.emp_name} (${worker.emp_id})`);
         } else {
-          // Worker not in availableWorkers, try to get from selectedWorkers
-          const selectedWorker = Object.values(formData.selectedWorkers).find(
-            (w: SelectedWorker | null) => w && w.emp_id === empId
-          ) as SelectedWorker | null;
+          // Worker not in availableWorkers, try to get from selectedWorkers or trainees
+          const selectedWorker =
+            (Object.values(formData.selectedWorkers).find(
+              (w: SelectedWorker | null) => w && w.emp_id === empId
+            ) as SelectedWorker | null) ||
+            (formData.selectedTrainees || []).find((t) => t.emp_id === empId) ||
+            null;
           if (selectedWorker) {
             // Create a Worker object from SelectedWorker
             filteredAvailableWorkers = [...filteredAvailableWorkers, {
@@ -1399,6 +1540,9 @@
                     {selectedDate}
                     fromTime={formData.fromTime}
                     toTime={formData.toTime}
+                    shiftInfo={shiftInfo}
+                    rowTimeOverrides={formData.rowTimeOverrides}
+                    onRowCustomTimesChange={handleRowCustomTimesChange}
                     excludePlanIds={work?.existingDraftPlans?.map((p: any) => p.id).filter(Boolean) || []}
                     onWorkerChange={handleWorkerChange}
                     onTraineeAdd={handleTraineeAdd}
