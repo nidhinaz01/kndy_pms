@@ -790,7 +790,8 @@
           .from('prdn_reporting_manpower')
           .select('emp_id, attendance_status')
           .eq('stage_code', stageCode)
-          .eq('reporting_date', dateStr)
+          .lte('reporting_from_date', dateStr)
+          .gte('reporting_to_date', dateStr)
           .in('emp_id', selectedWorkerIds)
           .eq('is_deleted', false);
 

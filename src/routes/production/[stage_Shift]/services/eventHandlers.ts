@@ -2,8 +2,10 @@ import { supabase } from '$lib/supabaseClient';
 import { getWaitingWorkOrdersForEntry, getAvailableWorkOrdersForExit, recordWorkOrderEntry, recordWorkOrderExit } from '../../services/stageWorkOrderService';
 import { submitPlanning, submitReporting } from '$lib/api/production/planningReportingService';
 import { savePlannedAttendance, savePlannedStageReassignment, saveReportedManpower, saveReportedStageReassignment } from '$lib/api/production/manpowerPlanningReportingService';
+import type { ManpowerCOffSave } from '$lib/api/production/productionTypes';
 import { convertPlanToDraftReport } from '$lib/services/convertPlanToDraftReportService';
 import { validateReportingAttendance } from '$lib/utils/reportingAttendanceValidation';
+import { validateCOffWithinAttendanceWindow, validateNetHoursForCoffAllow } from '$lib/utils/attendanceCOffSpanUtils';
 
 /**
  * Update work status when skill competencies are deleted
@@ -81,6 +83,7 @@ export interface EventHandlerContext {
   setSelectedWorkForUnplannedReporting: (value: any) => void;
   setExpandedGroups: (value: string[] | ((prev: string[]) => string[])) => void;
   setSelectedRows: (value: Set<string> | ((prev: Set<string>) => Set<string>)) => void;
+  setSelectedDraftReportRows?: (value: Set<string> | ((prev: Set<string>) => Set<string>)) => void;
   setExpandedReportGroups: (value: string[] | ((prev: string[]) => string[])) => void;
   setDraftPlanLoading: (value: boolean) => void;
   setDraftReportLoading: (value: boolean) => void;
@@ -92,6 +95,7 @@ export interface EventHandlerContext {
   workOrdersData: any[];
   plannedWorksWithStatus: any[];
   selectedRows: Set<string>;
+  selectedDraftReportRows?: Set<string>;
   expandedGroups: string[];
   expandedReportGroups: string[];
   activeTab: string;
@@ -595,7 +599,9 @@ export async function handleMultiDelete(context: EventHandlerContext) {
     return;
   }
   const selectedCount = context.selectedRows.size;
-  const confirmed = confirm(`Are you sure you want to delete ${selectedCount} skill competency${selectedCount === 1 ? '' : 'ies'}?`);
+  const confirmed = confirm(
+    `Are you sure you want to delete ${selectedCount} skill ${selectedCount === 1 ? 'competency' : 'competencies'}?`
+  );
   if (!confirmed) return;
   try {
     const { getCurrentUsername, getCurrentTimestamp } = await import('$lib/utils/userUtils');
@@ -811,12 +817,13 @@ export function toggleGroup(context: EventHandlerContext, workCode: string) {
  * Toggle row selection
  */
 export function toggleRowSelection(context: EventHandlerContext, rowId: string) {
+  const id = String(rowId);
   context.setSelectedRows(prev => {
     const newSet = new Set(prev);
-    if (newSet.has(rowId)) {
-      newSet.delete(rowId);
+    if (newSet.has(id)) {
+      newSet.delete(id);
     } else {
-      newSet.add(rowId);
+      newSet.add(id);
     }
     return newSet;
   });
@@ -829,7 +836,7 @@ export function selectAllInGroup(context: EventHandlerContext, event: CustomEven
   const group = event.detail;
   context.setSelectedRows(prev => {
     const newSet = new Set(prev);
-    group.items.forEach((item: any) => newSet.add(item.id));
+    group.items.forEach((item: any) => newSet.add(String(item.id)));
     return newSet;
   });
 }
@@ -839,6 +846,116 @@ export function selectAllInGroup(context: EventHandlerContext, event: CustomEven
  */
 export function clearSelections(context: EventHandlerContext) {
   context.setSelectedRows(new Set());
+}
+
+/**
+ * Select all currently visible table rows (e.g. after search/filter) — Draft Plan / Plan tabs.
+ */
+export function selectAllVisibleRows(context: EventHandlerContext, event: CustomEvent<{ ids: string[] }>) {
+  const ids = event.detail?.ids?.map(String) ?? [];
+  context.setSelectedRows((prev) => {
+    const next = new Set(prev);
+    ids.forEach((id) => next.add(id));
+    return next;
+  });
+}
+
+/**
+ * Deselect all currently visible table rows.
+ */
+export function deselectVisibleRows(context: EventHandlerContext, event: CustomEvent<{ ids: string[] }>) {
+  const ids = event.detail?.ids?.map(String) ?? [];
+  context.setSelectedRows((prev) => {
+    const next = new Set(prev);
+    ids.forEach((id) => next.delete(id));
+    return next;
+  });
+}
+
+export function toggleDraftReportRowSelection(context: EventHandlerContext, rowId: string) {
+  if (!context.setSelectedDraftReportRows) return;
+  const id = String(rowId);
+  context.setSelectedDraftReportRows((prev) => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    return next;
+  });
+}
+
+export function selectAllDraftReportInGroup(context: EventHandlerContext, event: CustomEvent) {
+  if (!context.setSelectedDraftReportRows) return;
+  const group = event.detail;
+  context.setSelectedDraftReportRows((prev) => {
+    const next = new Set(prev);
+    (group.items || []).forEach((item: { id: string | number }) => next.add(String(item.id)));
+    return next;
+  });
+}
+
+export function clearDraftReportSelections(context: EventHandlerContext) {
+  context.setSelectedDraftReportRows?.(new Set());
+}
+
+export function selectAllVisibleDraftReportRows(context: EventHandlerContext, event: CustomEvent<{ ids: string[] }>) {
+  if (!context.setSelectedDraftReportRows) return;
+  const ids = event.detail?.ids?.map(String) ?? [];
+  context.setSelectedDraftReportRows((prev) => {
+    const next = new Set(prev);
+    ids.forEach((id) => next.add(id));
+    return next;
+  });
+}
+
+export function deselectVisibleDraftReportRows(context: EventHandlerContext, event: CustomEvent<{ ids: string[] }>) {
+  if (!context.setSelectedDraftReportRows) return;
+  const ids = event.detail?.ids?.map(String) ?? [];
+  context.setSelectedDraftReportRows((prev) => {
+    const next = new Set(prev);
+    ids.forEach((id) => next.delete(id));
+    return next;
+  });
+}
+
+/**
+ * Soft-delete multiple draft reports by reporting row id.
+ */
+export async function handleMultiDeleteDraftReports(context: EventHandlerContext) {
+  const rows = context.selectedDraftReportRows;
+  if (!rows || rows.size === 0) {
+    alert('Please select at least one report to delete');
+    return;
+  }
+  const selectedCount = rows.size;
+  const confirmed = confirm(
+    `Are you sure you want to delete ${selectedCount} draft report row${selectedCount === 1 ? '' : 's'}?`
+  );
+  if (!confirmed) return;
+
+  const reportIds = Array.from(rows).filter(Boolean);
+  if (reportIds.length === 0) return;
+
+  const { getCurrentUsername, getCurrentTimestamp } = await import('$lib/utils/userUtils');
+  const currentUser = getCurrentUsername();
+  const now = getCurrentTimestamp();
+
+  const { error } = await supabase
+    .from('prdn_work_reporting')
+    .update({
+      is_deleted: true,
+      modified_by: currentUser,
+      modified_dt: now
+    })
+    .in('id', reportIds);
+
+  if (!error) {
+    context.setSelectedDraftReportRows?.(new Set());
+    await context.loadDraftReportData();
+    alert(`Successfully deleted ${reportIds.length} report row${reportIds.length === 1 ? '' : 's'}.`);
+  } else {
+    console.error('Error deleting draft reports:', error);
+    alert('Error deleting reports: ' + error.message);
+  }
 }
 
 /**
@@ -967,6 +1084,22 @@ export function handleExitModalClose(context: EventHandlerContext) {
   context.setExitProgressMessage('');
 }
 
+function cOffPayloadFromEventDetail(
+  status: 'present' | 'absent',
+  detail: Record<string, unknown>
+): ManpowerCOffSave | null | undefined {
+  if (status === 'absent') return undefined;
+  const raw = detail.cOffValue;
+  const cOffValue = raw != null && raw !== '' ? Number(raw) : 0;
+  return {
+    cOffValue: Number.isFinite(cOffValue) ? cOffValue : 0,
+    cOffFromDate: (detail.cOffFromDate as string) || null,
+    cOffFromTime: (detail.cOffFromTime as string) || null,
+    cOffToDate: (detail.cOffToDate as string) || null,
+    cOffToTime: (detail.cOffToTime as string) || null
+  };
+}
+
 /**
  * Handle attendance marked
  */
@@ -979,6 +1112,47 @@ export async function handleAttendanceMarked(context: EventHandlerContext, event
   console.log('🔍 [handleAttendanceMarked] Received event detail (full):', JSON.stringify(event.detail, null, 2));
   console.log('🔍 [handleAttendanceMarked] Received event detail keys:', Object.keys(event.detail || {}));
   const { empId, stageCode, date, status, shiftCode, notes, plannedHours, fromTime, toTime, actualHours } = event.detail;
+  const dayStr = typeof date === 'string' ? date.split('T')[0] : '';
+  const attendanceFromDate =
+    status === 'present'
+      ? ((event.detail as Record<string, unknown>).attendanceFromDate as string)?.trim() || dayStr
+      : undefined;
+  const attendanceToDate =
+    status === 'present'
+      ? ((event.detail as Record<string, unknown>).attendanceToDate as string)?.trim() || attendanceFromDate
+      : undefined;
+  const cOff = cOffPayloadFromEventDetail(status, event.detail as Record<string, unknown>);
+
+  if (status === 'present' && cOff && Number(cOff.cOffValue) > 0) {
+    const netHours =
+      context.activeTab === 'manpower-plan'
+        ? plannedHours != null && plannedHours !== ''
+          ? Number(plannedHours)
+          : null
+        : actualHours != null && actualHours !== ''
+          ? Number(actualHours)
+          : null;
+    const netCheck = validateNetHoursForCoffAllow(netHours);
+    if (!netCheck.ok) {
+      alert(netCheck.message);
+      return;
+    }
+    const spanCheck = validateCOffWithinAttendanceWindow(Number(cOff.cOffValue), {
+      attendanceFromDate: attendanceFromDate ?? '',
+      attendanceToDate: attendanceToDate ?? attendanceFromDate ?? '',
+      attendanceFromTime: String(fromTime ?? '').trim(),
+      attendanceToTime: String(toTime ?? '').trim(),
+      cOffFromDate: String(cOff.cOffFromDate ?? '').trim(),
+      cOffFromTime: String(cOff.cOffFromTime ?? '').trim(),
+      cOffToDate: String(cOff.cOffToDate ?? '').trim(),
+      cOffToTime: String(cOff.cOffToTime ?? '').trim()
+    });
+    if (!spanCheck.ok) {
+      alert(spanCheck.message);
+      return;
+    }
+  }
+
   console.log('🔍 [handleAttendanceMarked] Extracted values:', {
     empId,
     stageCode,
@@ -1005,7 +1179,10 @@ export async function handleAttendanceMarked(context: EventHandlerContext, event
         notes, 
         plannedHours, 
         fromTime, 
-        toTime
+        toTime,
+        attendanceFromDate ?? null,
+        attendanceToDate ?? null,
+        cOff
       );
       if (!result.success) {
         alert('Error saving planned attendance: ' + (result.error || 'Unknown error'));
@@ -1027,7 +1204,10 @@ export async function handleAttendanceMarked(context: EventHandlerContext, event
         notes, 
         actualHours, 
         fromTime, 
-        toTime
+        toTime,
+        attendanceFromDate ?? null,
+        attendanceToDate ?? null,
+        cOff
       );
       if (!result.success) {
         alert('Error saving reported attendance: ' + (result.error || 'Unknown error'));
@@ -1054,7 +1234,47 @@ export async function handleBulkAttendanceMarked(context: EventHandlerContext, e
   }
 
   const { employees, date, status, shiftCode, notes, plannedHours, fromTime, toTime, actualHours } = event.detail;
-  
+  const bulkDay = typeof date === 'string' ? date.split('T')[0] : '';
+  const attendanceFromDate =
+    status === 'present'
+      ? ((event.detail as Record<string, unknown>).attendanceFromDate as string)?.trim() || bulkDay
+      : undefined;
+  const attendanceToDate =
+    status === 'present'
+      ? ((event.detail as Record<string, unknown>).attendanceToDate as string)?.trim() || attendanceFromDate
+      : undefined;
+  const cOff = cOffPayloadFromEventDetail(status, event.detail as Record<string, unknown>);
+
+  if (status === 'present' && cOff && Number(cOff.cOffValue) > 0) {
+    const netHours =
+      context.activeTab === 'manpower-plan'
+        ? plannedHours != null && plannedHours !== ''
+          ? Number(plannedHours)
+          : null
+        : actualHours != null && actualHours !== ''
+          ? Number(actualHours)
+          : null;
+    const netCheck = validateNetHoursForCoffAllow(netHours);
+    if (!netCheck.ok) {
+      alert(netCheck.message);
+      return;
+    }
+    const spanCheck = validateCOffWithinAttendanceWindow(Number(cOff.cOffValue), {
+      attendanceFromDate: attendanceFromDate ?? '',
+      attendanceToDate: attendanceToDate ?? attendanceFromDate ?? '',
+      attendanceFromTime: String(fromTime ?? '').trim(),
+      attendanceToTime: String(toTime ?? '').trim(),
+      cOffFromDate: String(cOff.cOffFromDate ?? '').trim(),
+      cOffFromTime: String(cOff.cOffFromTime ?? '').trim(),
+      cOffToDate: String(cOff.cOffToDate ?? '').trim(),
+      cOffToTime: String(cOff.cOffToTime ?? '').trim()
+    });
+    if (!spanCheck.ok) {
+      alert(spanCheck.message);
+      return;
+    }
+  }
+
   if (!employees || employees.length === 0) {
     alert('No employees selected for bulk attendance marking');
     return;
@@ -1077,7 +1297,10 @@ export async function handleBulkAttendanceMarked(context: EventHandlerContext, e
             notes, 
             plannedHours, 
             fromTime, 
-            toTime
+            toTime,
+            attendanceFromDate ?? null,
+            attendanceToDate ?? null,
+            cOff
           )
         )
       );
@@ -1098,7 +1321,10 @@ export async function handleBulkAttendanceMarked(context: EventHandlerContext, e
             notes, 
             actualHours, 
             fromTime, 
-            toTime
+            toTime,
+            attendanceFromDate ?? null,
+            attendanceToDate ?? null,
+            cOff
           )
         )
       );
@@ -1585,7 +1811,7 @@ export function handleEditReport(context: EventHandlerContext, event: CustomEven
       std_work_type_details: planning.std_work_type_details,
       prdn_wo_details: planning.prdn_wo_details,
       std_work_skill_mapping: planning.std_work_skill_mapping,
-      hr_emp: planning.hr_emp,
+      hr_emp: report.reporting_hr_emp ?? planning.hr_emp,
       // Store report ID for reference (needed for update when saving)
       reporting_id: report.id,
       planning_id: report.planning_id || planning.id,

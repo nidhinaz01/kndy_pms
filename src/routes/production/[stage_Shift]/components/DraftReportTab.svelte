@@ -9,7 +9,6 @@
   import OvertimeReportingModal from './OvertimeReportingModal.svelte';
   import { calculateOvertime } from '$lib/services/overtimeCalculationService';
   import type { WorkerOvertime } from '$lib/services/overtimeCalculationService';
-  import { supabase } from '$lib/supabaseClient';
   import { sortTableData, handleSortClick, type SortConfig } from '$lib/utils/tableSorting';
 
   export let draftReportData: any[] = [];
@@ -19,6 +18,7 @@
   export let shiftCode: string = '';
   export let selectedDate: string = '';
   export let reportingSubmissionStatus: any = null;
+  export let selectedRows: Set<string> = new Set();
 
   const dispatch = createEventDispatcher();
 
@@ -106,43 +106,17 @@
       const result = await calculateOvertime(stageCode, selectedDate, shiftCode);
       
       if (result.hasOvertime && result.workers.length > 0) {
-        // Success: OT detected and workers data available
         overtimeData = result.workers;
         showOvertimeModal = true;
-      } else if (hasOvertime) {
-        // OT was detected by secondary validation, but calculateOvertime returned false
-        // This usually means missing shift details or employee records
-        console.warn('OT detected via secondary validation but calculateOvertime returned false:', result.errors);
-        
-        let errorMessage = 'Overtime has been detected, but the system cannot calculate the exact overtime values automatically.\n\n';
-        errorMessage += 'Possible causes:\n';
-        errorMessage += '• Workers missing shift codes\n';
-        errorMessage += '• Shift details not configured\n';
-        errorMessage += '• Employee records missing or incomplete\n';
-        errorMessage += '• Reports missing worker assignments\n\n';
-        
-        if (result.errors && result.errors.length > 0) {
-          errorMessage += 'Errors encountered:\n';
-          result.errors.slice(0, 3).forEach((err: string) => {
-            errorMessage += `• ${err}\n`;
-          });
-          if (result.errors.length > 3) {
-            errorMessage += `• ... and ${result.errors.length - 3} more errors\n`;
-          }
-          errorMessage += '\n';
-        }
-        
-        errorMessage += 'Please:\n';
-        errorMessage += '1. Verify all workers have shift codes assigned\n';
-        errorMessage += '2. Check that shift details are configured in the system\n';
-        errorMessage += '3. Ensure all reports have valid worker assignments\n';
-        errorMessage += '4. Refresh the page and try again\n\n';
-        errorMessage += 'If the issue persists, you may need to manually update overtime values or contact support.';
-        
-        alert(errorMessage);
+      } else if (result.errors && result.errors.length > 0) {
+        const lines = result.errors.slice(0, 5).map((e: string) => `• ${e}`).join('\n');
+        alert(
+          `Overtime could not be calculated. Fix the issues below and try again.\n\n${lines}${
+            result.errors.length > 5 ? `\n• ... and ${result.errors.length - 5} more` : ''
+          }`
+        );
       } else {
-        // No OT detected
-        alert('No overtime detected. All workers are within their shift times.');
+        alert('No overtime detected for this stage, date, and shift.');
       }
     } catch (error) {
       console.error('Error calculating overtime:', error);
@@ -177,163 +151,47 @@
     dispatch('deleteReport', group);
   }
 
+  function handleMultiDeleteSelected() {
+    dispatch('multiDeleteDraftReports');
+  }
+
+  function toggleRowSelection(rowId: string) {
+    dispatch('toggleRowSelection', rowId);
+  }
+
+  function selectAllRowsInGroup(group: any) {
+    dispatch('selectAllInGroup', group);
+  }
+
+  function clearAllSelections() {
+    dispatch('clearSelections');
+  }
+
+  function dispatchSelectAllVisible() {
+    dispatch('selectAllVisible', { ids: visibleReportRowIds });
+  }
+
+  function dispatchDeselectVisible() {
+    dispatch('deselectVisible', { ids: visibleReportRowIds });
+  }
+
+  let reportSelectAllHeaderInput: HTMLInputElement | null = null;
+
+  $: visibleReportRowIds = sortedGroupedWorks.flatMap((g: { items?: { id: string | number }[] }) =>
+    (g.items || []).map((item: { id: string | number }) => String(item.id))
+  );
+  $: allVisibleReportSelected =
+    visibleReportRowIds.length > 0 && visibleReportRowIds.every((id) => selectedRows.has(id));
+  $: someVisibleReportSelected = visibleReportRowIds.some((id) => selectedRows.has(id));
+  $: if (reportSelectAllHeaderInput) {
+    reportSelectAllHeaderInput.indeterminate = someVisibleReportSelected && !allVisibleReportSelected;
+  }
+
   async function checkOvertime() {
     try {
       const result = await calculateOvertime(stageCode, selectedDate, shiftCode);
-      let detectedOvertime = result.hasOvertime;
-      
-      // Secondary validation: If calculateOvertime didn't detect OT, manually verify
-      // This catches cases where calculateOvertime fails due to missing data or errors
-      if (!detectedOvertime && draftReportData.length > 0) {
-        const reportsWithWorkers = draftReportData.filter((r: any) => r.worker_id !== null);
-        
-        if (reportsWithWorkers.length > 0) {
-          // Group reports by worker
-          const reportsByWorker = new Map<string, any[]>();
-          reportsWithWorkers.forEach((report: any) => {
-            const workerId = report.worker_id;
-            if (!reportsByWorker.has(workerId)) {
-              reportsByWorker.set(workerId, []);
-            }
-            reportsByWorker.get(workerId)!.push(report);
-          });
-          
-          // Get unique worker IDs to fetch their shift details
-          const workerIds = Array.from(reportsByWorker.keys());
-          const { data: workerShiftData } = await supabase
-            .from('hr_emp')
-            .select('emp_id, shift_code')
-            .in('emp_id', workerIds)
-            .eq('is_active', true)
-            .eq('is_deleted', false);
-          
-          const workerShiftMap = new Map<string, string | undefined>();
-          (workerShiftData || []).forEach((w: any) => {
-            workerShiftMap.set(w.emp_id, w.shift_code);
-          });
-          
-          // Get unique shift codes
-          const shiftCodes = new Set<string>();
-          workerShiftMap.forEach((shiftCode) => {
-            if (shiftCode) shiftCodes.add(shiftCode);
-          });
-          
-          // Fetch shift details
-          const shiftDetailsMap = new Map<string, { startTime: string; endTime: string; breakTimes: any[] }>();
-          for (const shiftCode of shiftCodes) {
-            const { data: shiftData } = await supabase
-              .from('hr_shift_master')
-              .select('shift_id, start_time, end_time')
-              .eq('shift_code', shiftCode)
-              .eq('is_active', true)
-              .eq('is_deleted', false)
-              .maybeSingle();
-            
-            if (shiftData) {
-              const { data: breaksData } = await supabase
-                .from('hr_shift_break_master')
-                .select('start_time, end_time')
-                .eq('shift_id', shiftData.shift_id)
-                .eq('is_active', true)
-                .eq('is_deleted', false)
-                .order('start_time', { ascending: true });
-              
-              shiftDetailsMap.set(shiftCode, {
-                startTime: shiftData.start_time,
-                endTime: shiftData.end_time,
-                breakTimes: breaksData || []
-              });
-            }
-          }
-          
-          // Helper function to convert time to minutes
-          const timeToMinutes = (timeStr: string): number => {
-            if (!timeStr) return 0;
-            const parts = timeStr.split(':');
-            const hours = parseInt(parts[0] || '0', 10);
-            const minutes = parseInt(parts[1] || '0', 10);
-            return hours * 60 + minutes;
-          };
-          
-          // Helper function to calculate break time
-          const calculateBreakTime = (startTime: string, endTime: string, breakTimes: any[]): number => {
-            if (!breakTimes || breakTimes.length === 0) return 0;
-            let totalBreak = 0;
-            const startMin = timeToMinutes(startTime);
-            let endMin = timeToMinutes(endTime);
-            if (endMin < startMin) endMin += 24 * 60;
-            
-            breakTimes.forEach((bt: any) => {
-              let breakStart = timeToMinutes(bt.start_time);
-              let breakEnd = timeToMinutes(bt.end_time);
-              if (breakEnd < breakStart) breakEnd += 24 * 60;
-              
-              const overlapStart = Math.max(startMin, breakStart);
-              const overlapEnd = Math.min(endMin, breakEnd);
-              if (overlapStart < overlapEnd) {
-                totalBreak += (overlapEnd - overlapStart);
-              }
-            });
-            return totalBreak;
-          };
-          
-          // Check each worker for potential OT
-          for (const [workerId, workerReports] of reportsByWorker.entries()) {
-            const shiftCode = workerShiftMap.get(workerId);
-            
-            // Calculate total worked time for this worker
-            let totalWorkedMinutes = 0;
-            workerReports.forEach((report: any) => {
-              const workedMinutes = report.hours_worked_today 
-                ? Math.round(report.hours_worked_today * 60)
-                : 0;
-              totalWorkedMinutes += workedMinutes;
-            });
-            
-            // Check if OT has been reported for this worker
-            const hasReportedOT = workerReports.some((r: any) => 
-              r.overtime_minutes !== null && 
-              r.overtime_minutes !== undefined &&
-              r.overtime_minutes > 0
-            );
-            
-            if (hasReportedOT) continue; // OT already reported, skip
-            
-            // If worker has shift details, calculate available work time
-            if (shiftCode) {
-              const shiftDetails = shiftDetailsMap.get(shiftCode);
-              if (shiftDetails) {
-                const shiftStartMin = timeToMinutes(shiftDetails.startTime);
-                let shiftEndMin = timeToMinutes(shiftDetails.endTime);
-                if (shiftEndMin < shiftStartMin) shiftEndMin += 24 * 60;
-                
-                const shiftDuration = shiftEndMin - shiftStartMin;
-                const breakMinutes = calculateBreakTime(shiftDetails.startTime, shiftDetails.endTime, shiftDetails.breakTimes);
-                const availableWorkMinutes = shiftDuration - breakMinutes;
-                
-                // If total worked time exceeds available work time, OT exists
-                if (totalWorkedMinutes > availableWorkMinutes) {
-                  detectedOvertime = true;
-                  break; // Found OT, no need to check other workers
-                }
-              } else {
-                // No shift details found - use conservative check (8 hours)
-                if (totalWorkedMinutes > 480) {
-                  detectedOvertime = true;
-                  break;
-                }
-              }
-            } else {
-              // No shift code - use conservative check (8 hours)
-              if (totalWorkedMinutes > 480) {
-                detectedOvertime = true;
-                break;
-              }
-            }
-          }
-        }
-      }
-      
+      const detectedOvertime = result.hasOvertime;
+
       hasOvertime = detectedOvertime;
       
       // Check if OT has been reported (all reports have overtime_minutes set)
@@ -352,15 +210,12 @@
           );
           otReported = allWorkersWithOTReported;
         } else {
-          // Secondary validation detected OT, check if any reports have OT values
-          const reportsWithOT = draftReportData.filter((report: any) => 
-            report.overtime_minutes !== null && 
-            report.overtime_minutes !== undefined && 
-            report.overtime_minutes > 0
+          otReported = draftReportData.some(
+            (report: any) =>
+              report.overtime_minutes !== null &&
+              report.overtime_minutes !== undefined &&
+              report.overtime_minutes > 0
           );
-          // If we have reports with OT, consider it partially reported
-          // But we can't fully verify without calculateOvertime workers list
-          otReported = reportsWithOT.length > 0;
         }
       } else {
         otReported = !hasOvertime;
@@ -542,6 +397,24 @@
     </div>
   {/if}
 
+  {#if selectedRows.size > 0 && canEdit}
+    <div class="mt-4 px-4 py-3 border theme-border rounded-lg bg-blue-50 dark:bg-blue-900/20">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div class="flex flex-wrap items-center gap-4">
+          <span class="text-sm theme-text-primary">
+            {selectedRows.size} report row{selectedRows.size === 1 ? '' : 's'} selected
+          </span>
+          <Button variant="danger" size="sm" on:click={handleMultiDeleteSelected}>
+            Delete Selected ({selectedRows.size})
+          </Button>
+        </div>
+        <Button variant="secondary" size="sm" on:click={clearAllSelections}>
+          Clear Selection
+        </Button>
+      </div>
+    </div>
+  {/if}
+
   {#if isLoading}
     <div class="text-center py-12">
       <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto mb-4"></div>
@@ -556,11 +429,36 @@
       </p>
     </div>
   {:else}
+    <div class="mt-4 px-4 py-2 theme-bg-secondary border theme-border rounded-lg">
+      <p class="text-xs theme-text-primary">
+        <strong class="theme-text-primary">Multi-selection:</strong> Use the checkboxes to select report rows. The header checkbox selects or clears all rows currently shown (including after search).
+      </p>
+    </div>
     <!-- Report Data Table -->
     <div class="overflow-x-auto">
       <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700" style="table-layout: fixed; width: 100%;">
         <thead class="theme-bg-secondary">
           <tr>
+            <th class="px-4 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider w-14">
+              <input
+                bind:this={reportSelectAllHeaderInput}
+                type="checkbox"
+                class="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                checked={allVisibleReportSelected}
+                disabled={!canEdit || visibleReportRowIds.length === 0}
+                title="Select all visible rows"
+                aria-label="Select all visible rows"
+                on:change={(e) => {
+                  if (!canEdit || visibleReportRowIds.length === 0) return;
+                  const target = e.target as HTMLInputElement;
+                  if (target?.checked) {
+                    dispatchSelectAllVisible();
+                  } else {
+                    dispatchDeselectVisible();
+                  }
+                }}
+              />
+            </th>
             <SortableHeader column="sortable_woNo" {sortConfig} onSort={handleSort} label="Work Order" headerClass="w-[100px]" />
             <SortableHeader column="sortable_pwoNo" {sortConfig} onSort={handleSort} label="PWO Number" headerClass="w-[120px]" />
             <SortableHeader column="sortable_workCode" {sortConfig} onSort={handleSort} label="Work Code" headerClass="w-[120px]" />
@@ -584,9 +482,36 @@
         <tbody class="theme-bg-primary divide-y divide-gray-200 dark:divide-gray-700">
           {#each sortedGroupedWorks as group (group.workCode + '_' + (group.woDetailsId || 'unknown'))}
             {@const typedGroup = group}
+            {@const allSelected = typedGroup.items.every((item: { id: string | number }) =>
+              selectedRows.has(String(item.id)))}
+            {@const someSelected = typedGroup.items.some((item: { id: string | number }) =>
+              selectedRows.has(String(item.id)))}
             <!-- Single Row per Work -->
             <tr class="hover:theme-bg-secondary transition-colors" 
                 class:lost-time={typedGroup.hasLostTime}>
+              <td class="px-4 py-2 whitespace-nowrap text-sm font-medium theme-text-primary">
+                <input
+                  type="checkbox"
+                  class="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                  checked={allSelected}
+                  disabled={!canEdit}
+                  title={someSelected && !allSelected ? 'Some rows in this work selected' : 'Select all rows for this work'}
+                  on:change={(e) => {
+                    if (!canEdit) return;
+                    e.stopPropagation();
+                    const target = e.target as HTMLInputElement;
+                    if (target?.checked) {
+                      selectAllRowsInGroup(typedGroup);
+                    } else {
+                      typedGroup.items.forEach((item: { id: string | number }) => {
+                        if (selectedRows.has(String(item.id))) {
+                          toggleRowSelection(String(item.id));
+                        }
+                      });
+                    }
+                  }}
+                />
+              </td>
               <td class="px-4 py-2 whitespace-nowrap text-sm font-medium {typedGroup.hasLostTime ? 'text-gray-800' : 'theme-text-primary'}">
                 {typedGroup.woNo}
               </td>
@@ -644,8 +569,8 @@
                           {deviation.reason}
                         </div>
                       {:else if report.worker_id}
-                        <span class="font-medium">{report.prdn_work_planning?.hr_emp?.emp_name || 'N/A'}</span>
-                        <span class="text-xs {report.lt_minutes_total > 0 ? 'text-gray-600' : 'theme-text-secondary'}"> ({report.prdn_work_planning?.hr_emp?.skill_short || 'N/A'})</span>
+                        <span class="font-medium">{report.reporting_hr_emp?.emp_name || report.worker_id || 'N/A'}</span>
+                        <span class="text-xs {report.lt_minutes_total > 0 ? 'text-gray-600' : 'theme-text-secondary'}"> ({report.reporting_hr_emp?.skill_short || 'N/A'})</span>
                       {:else}
                         <span class="text-gray-400 italic text-xs">No worker</span>
                       {/if}

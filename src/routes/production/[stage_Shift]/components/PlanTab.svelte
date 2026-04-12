@@ -172,7 +172,7 @@
         <div class="flex items-center justify-between">
           <div class="flex items-center space-x-4">
             <span class="text-sm theme-text-primary">
-              {selectedRows.size} skill competency{selectedRows.size === 1 ? '' : 'ies'} selected
+              {selectedRows.size} skill {selectedRows.size === 1 ? 'competency' : 'competencies'} selected
             </span>
             <Button 
               variant="primary" 

@@ -9,6 +9,8 @@
   let className = '';
   export { className as class };
   export let title = '';
+  /** Same text as visible label when used icon-only (screen readers, a11y) */
+  export let ariaLabel = '';
 
   const dispatch = createEventDispatcher();
 
@@ -35,6 +37,7 @@
   class:btn-warning={variant === 'warning'}
   {disabled}
   {title}
+  aria-label={ariaLabel || undefined}
   on:click={() => {
     if (!disabled) {
       dispatch('click');

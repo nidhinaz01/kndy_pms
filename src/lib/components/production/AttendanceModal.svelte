@@ -1,9 +1,11 @@
 <script lang="ts">
-  import { createEventDispatcher, onMount } from 'svelte';
+  import { createEventDispatcher } from 'svelte';
   import Button from '$lib/components/common/Button.svelte';
   import type { ProductionEmployee } from '$lib/api/production';
   import { supabase } from '$lib/supabaseClient';
   import { calculateBreakTimeInMinutes } from '$lib/utils/breakTimeUtils';
+  import { computeCOffToEndWithBreaks } from '$lib/utils/cOffWindowUtils';
+  import { validateCOffWithinAttendanceWindow, validateNetHoursForCoffAllow } from '$lib/utils/attendanceCOffSpanUtils';
 
   export let showModal: boolean = false;
   export let employee: ProductionEmployee | null = null;
@@ -22,6 +24,16 @@
   let toTime: string = '';
   let plannedHours: number | null = null; // For planning mode
   let actualHours: number | null = null; // For reporting mode
+
+  let cOffValue: number = 0;
+  let cOffFromDate: string = '';
+  let cOffFromTime: string = '';
+  let cOffToDate: string = '';
+  let cOffToTime: string = '';
+
+  /** Maps to planning_from_date / planning_to_date or reporting_from_date / reporting_to_date. */
+  let attendanceFromDate = '';
+  let attendanceToDate = '';
   
   // Flag to prevent recalculation when loading saved data
   let isLoadingSavedData = false;
@@ -52,6 +64,41 @@
   $: notesLabel = isNotesRequired 
     ? 'Reason (Required for partial attendance):' 
     : 'Notes (Optional):';
+
+  function dayFromSelected(): string {
+    return typeof selectedDate === 'string' ? selectedDate.split('T')[0] : '';
+  }
+
+  /** C-Off end: net work hours (0.5/1/1.5 day) plus shift breaks in the wall-clock window. */
+  function computeCOffToEnd(fromDate: string, fromTime: string, offValue: number): { toDate: string; toTime: string } {
+    return computeCOffToEndWithBreaks(fromDate, fromTime, offValue, shiftBreaks);
+  }
+
+  function syncCOffToEndFromStart() {
+    if (cOffValue <= 0) return;
+    if (!cOffFromDate?.trim() || !cOffFromTime?.trim()) return;
+    const { toDate, toTime } = computeCOffToEnd(cOffFromDate, cOffFromTime, cOffValue);
+    cOffToDate = toDate;
+    cOffToTime = toTime;
+  }
+
+  $: if (attendanceStatus === 'absent') {
+    cOffValue = 0;
+    cOffFromDate = '';
+    cOffFromTime = '';
+    cOffToDate = '';
+    cOffToTime = '';
+    attendanceFromDate = '';
+    attendanceToDate = '';
+  }
+
+  $: if (showModal && employee && attendanceStatus === 'present' && selectedDate) {
+    const ds = dayFromSelected();
+    if (ds) {
+      if (!attendanceFromDate) attendanceFromDate = ds;
+      if (!attendanceToDate) attendanceToDate = ds;
+    }
+  }
 
   // Load shift information when modal opens
   async function loadShiftInfo() {
@@ -304,6 +351,37 @@
       notes = employee.attendance_notes || '';
       fromTime = employee.attendance_from_time ? employee.attendance_from_time.substring(0,5) : '';
       toTime = employee.attendance_to_time ? employee.attendance_to_time.substring(0,5) : '';
+
+      const dayStr = dayFromSelected();
+      if (attendanceStatus === 'absent') {
+        cOffValue = 0;
+        cOffFromDate = '';
+        cOffFromTime = '';
+        cOffToDate = '';
+        cOffToTime = '';
+        attendanceFromDate = '';
+        attendanceToDate = '';
+      } else {
+        attendanceFromDate = employee.attendance_from_date
+          ? String(employee.attendance_from_date).split('T')[0]
+          : dayStr;
+        attendanceToDate = employee.attendance_to_date
+          ? String(employee.attendance_to_date).split('T')[0]
+          : dayStr;
+
+        const rawC = employee.c_off_value != null ? Number(employee.c_off_value) : 0;
+        cOffValue = [0, 0.5, 1, 1.5].includes(rawC) ? rawC : 0;
+        const fd = employee.c_off_from_date;
+        cOffFromDate = fd ? String(fd).split('T')[0] : '';
+        cOffFromTime = employee.c_off_from_time ? String(employee.c_off_from_time).substring(0, 5) : '';
+        const td = employee.c_off_to_date;
+        cOffToDate = td ? String(td).split('T')[0] : '';
+        cOffToTime = employee.c_off_to_time ? String(employee.c_off_to_time).substring(0, 5) : '';
+        if (cOffValue > 0 && cOffFromDate && cOffFromTime) {
+          if (!cOffToDate?.trim()) cOffToDate = cOffFromDate;
+          if (!cOffToTime?.trim()) syncCOffToEndFromStart();
+        }
+      }
       
       console.log('🔍 [AttendanceModal] Loaded times:', { fromTime, toTime });
       
@@ -334,6 +412,9 @@
         // After shift info is loaded, allow recalculation if times are manually changed
         isLoadingSavedData = false;
         console.log('🔍 [AttendanceModal] isLoadingSavedData set to false');
+        if (cOffValue > 0 && cOffFromDate?.trim() && cOffFromTime?.trim()) {
+          syncCOffToEndFromStart();
+        }
       });
     } else {
       console.log('🔍 [AttendanceModal] Skipping initialization - already initialized or user is editing', {
@@ -369,6 +450,35 @@
       return;
     }
 
+    if (attendanceStatus === 'present' && cOffValue > 0) {
+      const netHoursCheck = validateNetHoursForCoffAllow(currentHours);
+      if (!netHoursCheck.ok) {
+        alert(netHoursCheck.message);
+        return;
+      }
+      if (!cOffFromDate?.trim() || !cOffFromTime?.trim()) {
+        alert('C-Off: please set From Date and From Time when C-Off value is greater than zero.');
+        return;
+      }
+      syncCOffToEndFromStart();
+      const attFrom = attendanceFromDate?.trim() || dayFromSelected();
+      const attTo = attendanceToDate?.trim() || attFrom;
+      const spanCheck = validateCOffWithinAttendanceWindow(cOffValue, {
+        attendanceFromDate: attFrom,
+        attendanceToDate: attTo,
+        attendanceFromTime: (fromTime || '').trim(),
+        attendanceToTime: (toTime || '').trim(),
+        cOffFromDate: (cOffFromDate || '').trim(),
+        cOffFromTime: (cOffFromTime || '').trim(),
+        cOffToDate: (cOffToDate || '').trim(),
+        cOffToTime: (cOffToTime || '').trim()
+      });
+      if (!spanCheck.ok) {
+        alert(spanCheck.message);
+        return;
+      }
+    }
+
     isSubmitting = true;
     
     // Dispatch event to parent component
@@ -385,11 +495,18 @@
     if (attendanceStatus === 'present') {
       eventData.fromTime = fromTime;
       eventData.toTime = toTime;
+      eventData.attendanceFromDate = attendanceFromDate?.trim() || dayFromSelected();
+      eventData.attendanceToDate = attendanceToDate?.trim() || eventData.attendanceFromDate;
       if (isPlanningMode) {
         eventData.plannedHours = plannedHours;
       } else {
         eventData.actualHours = actualHours;
       }
+      eventData.cOffValue = cOffValue;
+      eventData.cOffFromDate = cOffFromDate?.trim() || undefined;
+      eventData.cOffFromTime = cOffFromTime?.trim() || undefined;
+      eventData.cOffToDate = cOffToDate?.trim() || undefined;
+      eventData.cOffToTime = cOffToTime?.trim() || undefined;
       console.log('🔍 [AttendanceModal] Added time/hours to eventData:', {
         fromTime: eventData.fromTime,
         toTime: eventData.toTime,
@@ -420,6 +537,13 @@
     } else {
       actualHours = null;
     }
+    cOffValue = 0;
+    cOffFromDate = '';
+    cOffFromTime = '';
+    cOffToDate = '';
+    cOffToTime = '';
+    attendanceFromDate = '';
+    attendanceToDate = '';
     isSubmitting = false;
   }
 
@@ -435,178 +559,239 @@
 </script>
 
 {#if showModal}
-  <!-- Simple Modal Overlay -->
-  <div style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.5); z-index: 1000; display: flex; align-items: center; justify-content: center;">
-    
-    <!-- Modal Content -->
-    <div class="theme-bg-primary theme-border rounded-lg shadow-lg" style="padding: 20px; min-width: 400px; max-width: 500px;">
-      
-      <!-- Header -->
-      <div style="display: flex; align-items: center; margin-bottom: 20px;">
-        <div class="bg-blue-500 rounded-full" style="width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; margin-right: 15px;">
-          <span style="color: white; font-size: 20px;">👤</span>
+  <!-- svelte-ignore a11y_click_events_have_key_events — backdrop dismiss; dialog handles keyboard -->
+  <div
+    class="fixed inset-0 z-[1000] flex items-center justify-center bg-black/50 p-3"
+    role="presentation"
+    on:click|self={handleClose}
+  >
+    <div
+      class="flex max-h-[min(92vh,900px)] min-h-0 w-full min-w-0 max-w-[1120px] flex-col rounded-lg border theme-border theme-bg-primary p-4 shadow-lg sm:px-[18px] sm:py-4"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="attendance-modal-title"
+      tabindex="-1"
+      on:click|stopPropagation
+    >
+      <div class="mb-3 flex shrink-0 items-center gap-3">
+        <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-blue-500">
+          <span class="text-xl text-white">👤</span>
         </div>
         <div>
-          <h3 class="theme-text-primary" style="margin: 0; font-size: 18px; font-weight: 600;">Mark Attendance</h3>
+          <h3 id="attendance-modal-title" class="m-0 text-lg font-semibold theme-text-primary">Mark Attendance</h3>
           {#if employee}
-            <p class="theme-text-secondary" style="margin: 5px 0 0 0; font-size: 14px;">
+            <p class="theme-text-secondary text-sm mt-1 m-0">
               {employee.emp_name} ({employee.emp_id})
             </p>
           {/if}
         </div>
       </div>
 
-      <!-- Employee Info -->
       {#if employee}
-        <div class="theme-bg-secondary theme-border rounded-lg" style="padding: 15px; margin-bottom: 20px;">
-          <p class="theme-text-primary" style="margin: 5px 0; font-size: 14px;">
-            <strong>Date:</strong> {new Date(selectedDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' })}
+        <div class="mb-3 shrink-0 rounded-lg border theme-border theme-bg-secondary p-2.5 sm:px-3">
+          <p class="theme-text-primary text-sm m-1">
+            <strong>Date:</strong>
+            {new Date(selectedDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' })}
           </p>
-          <p class="theme-text-primary" style="margin: 5px 0; font-size: 14px;">
-            <strong>Stage:</strong> {employee.current_stage}
+          <p class="theme-text-primary text-sm m-1">
+            <strong>Stage:</strong>
+            {employee.current_stage}
           </p>
         </div>
 
-        <!-- Form -->
-        <div style="margin-bottom: 20px;">
-          <!-- Attendance Status -->
-          <div style="margin-bottom: 20px;">
-            <fieldset>
-              <legend class="theme-text-primary" style="margin-bottom: 10px; font-weight: 500;">Attendance Status:</legend>
-              <div>
-                <label style="display: flex; align-items: center; margin-bottom: 8px;">
-                  <input 
-                    type="radio" 
-                    bind:group={attendanceStatus} 
-                    value="present"
-                    style="margin-right: 8px;"
-                  />
-                  <span class="theme-text-primary">Present</span>
+        <div class="mb-3 min-h-0 flex-1 overflow-auto">
+          <div class="flex flex-row flex-wrap items-stretch gap-3.5">
+            <section
+              class="min-w-[180px] max-w-full flex-1 basis-[200px] rounded-lg border border-sky-300/80 bg-sky-50 p-3 text-slate-900 dark:border-sky-400/50 dark:bg-sky-100 dark:text-slate-900"
+            >
+              <fieldset class="m-0 border-0 p-0">
+                <legend class="mb-2 text-sm font-semibold text-slate-900">Status</legend>
+                <label class="mb-2 flex cursor-pointer items-center gap-2">
+                  <input class="accent-blue-600" type="radio" bind:group={attendanceStatus} value="present" />
+                  <span class="text-sm text-slate-800">Present</span>
                 </label>
-                <label style="display: flex; align-items: center;">
-                  <input 
-                    type="radio" 
-                    bind:group={attendanceStatus} 
-                    value="absent"
-                    style="margin-right: 8px;"
-                  />
-                  <span class="theme-text-primary">Absent</span>
+                <label class="flex cursor-pointer items-center gap-2">
+                  <input class="accent-blue-600" type="radio" bind:group={attendanceStatus} value="absent" />
+                  <span class="text-sm text-slate-800">Absent</span>
                 </label>
-              </div>
-            </fieldset>
-          </div>
+              </fieldset>
+            </section>
 
-          <!-- Time and Hours Fields (only for Present) -->
-          {#if attendanceStatus === 'present'}
-            {#if isLoadingShiftInfo}
-              <div class="text-center" style="padding: 10px;">
-                <p class="theme-text-secondary text-sm">Loading shift information...</p>
-              </div>
-            {:else}
-              <div style="margin-bottom: 20px;">
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 15px;">
-                  <!-- From Time -->
-                  <div>
-                    <label for="from-time" class="theme-text-primary" style="display: block; margin-bottom: 5px; font-weight: 500; font-size: 14px;">From Time:</label>
-                    <input
-                      id="from-time"
-                      type="time"
-                      bind:value={fromTime}
-                      on:input={handleTimeChange}
-                      on:focus={handleTimeFocus}
-                      on:blur={handleTimeBlur}
-                      class="theme-bg-primary theme-border theme-text-primary rounded"
-                      style="width: 100%; padding: 8px; font-size: 14px;"
-                    />
+            <section
+              class="min-w-[180px] max-w-full flex-1 basis-[200px] rounded-lg border border-sky-300/80 bg-sky-50 p-3 text-slate-900 dark:border-sky-400/50 dark:bg-sky-100 dark:text-slate-900"
+            >
+              {#if attendanceStatus === 'present'}
+                {#if isLoadingShiftInfo}
+                  <p class="text-sm text-slate-600">Loading shift…</p>
+                {:else}
+                  <p class="mb-2 text-sm font-semibold text-slate-900">Shift times</p>
+                  <div class="mb-2 grid grid-cols-2 gap-2">
+                    <div>
+                      <label for="att-from-date" class="mb-1 block text-xs font-medium text-slate-700">From date</label>
+                      <input
+                        id="att-from-date"
+                        type="date"
+                        bind:value={attendanceFromDate}
+                        class="w-full rounded-md border px-2 py-1.5 text-sm theme-border theme-bg-primary theme-text-primary focus:border-transparent focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+                    <div>
+                      <label for="from-time" class="mb-1 block text-xs font-medium text-slate-700">From time</label>
+                      <input
+                        id="from-time"
+                        type="time"
+                        bind:value={fromTime}
+                        on:input={handleTimeChange}
+                        on:focus={handleTimeFocus}
+                        on:blur={handleTimeBlur}
+                        class="w-full rounded-md border px-2 py-1.5 text-sm theme-border theme-bg-primary theme-text-primary focus:border-transparent focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+                    <div>
+                      <label for="att-to-date" class="mb-1 block text-xs font-medium text-slate-700">To date</label>
+                      <input
+                        id="att-to-date"
+                        type="date"
+                        bind:value={attendanceToDate}
+                        class="w-full rounded-md border px-2 py-1.5 text-sm theme-border theme-bg-primary theme-text-primary focus:border-transparent focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+                    <div>
+                      <label for="to-time" class="mb-1 block text-xs font-medium text-slate-700">To time</label>
+                      <input
+                        id="to-time"
+                        type="time"
+                        bind:value={toTime}
+                        on:input={handleTimeChange}
+                        on:focus={handleTimeFocus}
+                        on:blur={handleTimeBlur}
+                        class="w-full rounded-md border px-2 py-1.5 text-sm theme-border theme-bg-primary theme-text-primary focus:border-transparent focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
                   </div>
-                  <!-- To Time -->
-                  <div>
-                    <label for="to-time" class="theme-text-primary" style="display: block; margin-bottom: 5px; font-weight: 500; font-size: 14px;">To Time:</label>
-                    <input
-                      id="to-time"
-                      type="time"
-                      bind:value={toTime}
-                      on:input={handleTimeChange}
-                      on:focus={handleTimeFocus}
-                      on:blur={handleTimeBlur}
-                      class="theme-bg-primary theme-border theme-text-primary rounded"
-                      style="width: 100%; padding: 8px; font-size: 14px;"
-                    />
-                  </div>
-                </div>
-                <!-- Hours Display (Planned for planning, Actual for reporting) -->
-                <div style="margin-bottom: 15px;">
-                  <span class="theme-text-primary" style="display: block; margin-bottom: 5px; font-weight: 500; font-size: 14px;">
-                    {isPlanningMode ? 'Planned Hours:' : 'Actual Hours:'}
-                  </span>
-                  <div class="theme-bg-secondary theme-border rounded" style="padding: 10px;">
-                    <span class="theme-text-primary font-medium">
-                      {currentHours !== null ? `${currentHours.toFixed(2)}h` : 'Calculating...'}
+                  <div
+                    class="rounded border border-dashed border-sky-400/70 bg-sky-200/50 p-2 text-slate-800 dark:border-sky-500/60 dark:bg-sky-200/40 dark:text-slate-900"
+                  >
+                    <span class="text-sm font-medium text-slate-900">
+                      {isPlanningMode ? 'Planned' : 'Actual'}: {currentHours !== null ? `${currentHours.toFixed(2)}h` : '…'}
                     </span>
-                    <span class="theme-text-secondary text-sm" style="margin-left: 10px;">
-                      (Full shift: {fullShiftHours.toFixed(2)}h)
-                      {#if !isPlanningMode && employee?.planned_hours}
-                        <span style="margin-left: 5px;">| Planned: {employee.planned_hours.toFixed(2)}h</span>
-                      {/if}
-                    </span>
+                    <span class="ml-1 text-xs text-slate-700">(full {fullShiftHours.toFixed(2)}h)</span>
+                    {#if !isPlanningMode && employee?.planned_hours}
+                      <span class="text-xs text-slate-700"> | Plan {employee.planned_hours.toFixed(2)}h</span>
+                    {/if}
                   </div>
-                </div>
-              </div>
-            {/if}
-          {/if}
+                {/if}
+              {:else}
+                <p class="text-sm text-slate-600">Dates and times apply when present.</p>
+              {/if}
+            </section>
 
-          <!-- Notes -->
-          <div>
-            <label for="notes" class="theme-text-primary" style="display: block; margin-bottom: 10px; font-weight: 500;">
-              {notesLabel}
-            </label>
-            <textarea
-              id="notes"
-              bind:value={notes}
-              rows="3"
-              class="theme-bg-primary theme-border theme-text-primary rounded"
-              style="width: 100%; padding: 8px; font-size: 14px;"
-              placeholder={isNotesRequired ? "Enter reason for partial attendance..." : "Add any notes about attendance..."}
-              required={isNotesRequired}
-            ></textarea>
-            {#if isNotesRequired && !notes.trim()}
-              <p class="text-red-500 dark:text-red-400 text-sm" style="margin-top: 5px;">
-                Reason is required for partial attendance
-              </p>
-            {/if}
+            <section
+              class="min-w-[180px] max-w-full flex-1 basis-[200px] rounded-lg border border-sky-300/80 bg-sky-50 p-3 text-slate-900 dark:border-sky-400/50 dark:bg-sky-100 dark:text-slate-900"
+            >
+              {#if attendanceStatus === 'present'}
+                <p class="mb-2 text-sm font-semibold text-slate-900">C-Off (optional)</p>
+                <label class="mb-1 block text-xs font-medium text-slate-700" for="coff-value">Value (days)</label>
+                <select
+                  id="coff-value"
+                  value={String(cOffValue)}
+                  on:change={(e) => {
+                    const v = parseFloat(e.currentTarget.value);
+                    cOffValue = [0, 0.5, 1, 1.5].includes(v) ? v : 0;
+                    if (cOffValue > 0) {
+                      if (!cOffFromDate?.trim()) cOffFromDate = dayFromSelected();
+                      if (!cOffFromTime?.trim() && fromTime?.trim()) cOffFromTime = fromTime.trim().substring(0, 5);
+                      syncCOffToEndFromStart();
+                    }
+                  }}
+                  class="mb-2 w-full rounded-md border px-2 py-1.5 text-sm theme-border theme-bg-primary theme-text-primary focus:border-transparent focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="0">0</option>
+                  <option value="0.5">0.5 (4h)</option>
+                  <option value="1">1 (8h)</option>
+                  <option value="1.5">1.5 (12h)</option>
+                </select>
+                {#if cOffValue > 0}
+                  <div class="grid grid-cols-2 gap-2">
+                    <div>
+                      <label for="coff-from-date" class="mb-1 block text-xs font-medium text-slate-700">From date *</label>
+                      <input
+                        id="coff-from-date"
+                        type="date"
+                        bind:value={cOffFromDate}
+                        on:change={syncCOffToEndFromStart}
+                        class="w-full rounded-md border px-2 py-1.5 text-sm theme-border theme-bg-primary theme-text-primary focus:border-transparent focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+                    <div>
+                      <label for="coff-from-time" class="mb-1 block text-xs font-medium text-slate-700">From time *</label>
+                      <input
+                        id="coff-from-time"
+                        type="time"
+                        bind:value={cOffFromTime}
+                        on:change={syncCOffToEndFromStart}
+                        class="w-full rounded-md border px-2 py-1.5 text-sm theme-border theme-bg-primary theme-text-primary focus:border-transparent focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+                    <div>
+                      <label for="coff-to-date" class="mb-1 block text-xs font-medium text-slate-700">To date</label>
+                      <input
+                        id="coff-to-date"
+                        type="date"
+                        bind:value={cOffToDate}
+                        class="w-full rounded-md border px-2 py-1.5 text-sm theme-border theme-bg-primary theme-text-primary focus:border-transparent focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+                    <div>
+                      <label for="coff-to-time" class="mb-1 block text-xs font-medium text-slate-700">To time</label>
+                      <input
+                        id="coff-to-time"
+                        type="time"
+                        bind:value={cOffToTime}
+                        class="w-full rounded-md border px-2 py-1.5 text-sm theme-border theme-bg-primary theme-text-primary focus:border-transparent focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+                  </div>
+                  <p class="m-0 mt-2 text-xs leading-snug text-slate-600">
+                    To end uses net hours (0.5 / 1 / 1.5 day) plus shift breaks in that window—editable. C-Off is
+                    only allowed when attendance (excluding breaks) is exactly 4, 8, or 12 hours. C-Off must fall
+                    entirely within attendance from/to date and time (extend attendance if needed).
+                  </p>
+                {/if}
+              {:else}
+                <p class="text-sm text-slate-600">C-Off cleared when absent.</p>
+              {/if}
+            </section>
+
+            <section
+              class="flex min-h-0 min-w-[200px] max-w-full flex-1 basis-[200px] flex-col rounded-lg border border-sky-300/80 bg-sky-50 p-3 text-slate-900 dark:border-sky-400/50 dark:bg-sky-100 dark:text-slate-900"
+            >
+              <label for="notes" class="mb-2 text-sm font-semibold text-slate-900">{notesLabel}</label>
+              <textarea
+                id="notes"
+                bind:value={notes}
+                rows="5"
+                class="min-h-[100px] w-full flex-1 rounded-md border border-slate-300 px-2 py-1.5 text-sm !bg-white !text-slate-900 placeholder:text-slate-400 focus:border-transparent focus:ring-2 focus:ring-blue-500 dark:border-slate-600 dark:!bg-slate-900 dark:!text-slate-100 dark:placeholder:text-slate-400"
+                placeholder={isNotesRequired ? 'Reason for partial attendance…' : 'Notes…'}
+                required={isNotesRequired}
+              ></textarea>
+              {#if isNotesRequired && !notes.trim()}
+                <p class="text-red-500 dark:text-red-400 text-xs mt-1 m-0">Reason required</p>
+              {/if}
+            </section>
           </div>
         </div>
 
-        <!-- Actions -->
-        <div class="flex justify-end gap-3">
-          <Button 
-            variant="secondary" 
-            size="md"
-            on:click={handleClose}
-          >
-            Cancel
-          </Button>
-          <Button 
-            variant="primary" 
-            size="md"
-            on:click={handleSubmit}
-            disabled={isSubmitting}
-          >
-            {isSubmitting ? 'Saving...' : 'Save Attendance'}
+        <div class="flex shrink-0 justify-end gap-3 border-t theme-border pt-2">
+          <Button variant="secondary" size="md" on:click={handleClose}>Cancel</Button>
+          <Button variant="primary" size="md" on:click={handleSubmit} disabled={isSubmitting}>
+            {isSubmitting ? 'Saving…' : 'Save'}
           </Button>
         </div>
       {:else}
-        <div class="text-center" style="padding: 20px;">
-          <p class="text-red-500 dark:text-red-400">No employee selected. Please try again.</p>
-        </div>
-        <div class="flex justify-center">
-          <Button 
-            variant="secondary" 
-            size="md"
-            on:click={handleClose}
-          >
-            Close
-          </Button>
+        <div class="text-center p-5">
+          <p class="text-red-500 dark:text-red-400">No employee selected.</p>
+          <Button variant="secondary" size="md" class="mt-3" on:click={handleClose}>Close</Button>
         </div>
       {/if}
     </div>

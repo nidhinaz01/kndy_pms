@@ -16,7 +16,7 @@ INSERT INTO menu (menu_id, menu_name, menu_path, parent_menu_id, menu_order, is_
 VALUES (
   gen_random_uuid(),
   'Daily Production Status',
-  '/reports/daily-production-status',
+  '/reports/production/daily-production-status',
   NULL,  -- TODO: set to Reports parent menu_id
   10,
   true,

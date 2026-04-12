@@ -29,6 +29,14 @@ export function filterEmployees(
   });
 }
 
+/** Display `c_off_value` from DB (0.0, 0.5, 1.0, 1.5) with one decimal place. */
+export function formatManpowerCOffValueDisplay(value: number | string | null | undefined): string {
+  if (value == null || value === '') return '0.0';
+  const n = typeof value === 'number' ? value : parseFloat(String(value));
+  if (!Number.isFinite(n)) return '0.0';
+  return n.toFixed(1);
+}
+
 export function calculateTotals(employees: ProductionEmployee[]) {
   return {
     totalEmployees: employees.length,
@@ -84,6 +92,19 @@ export function isAttendanceLocked(employee: ProductionEmployee): boolean {
   const hasWorkRecorded = !!(employee.hours_reported && employee.hours_reported > 0);
   
   return hasPlannedHours || hasReassignments || hasWorkRecorded;
+}
+
+/**
+ * True when the latest planning/reporting submission for a stage+shift+date
+ * is no longer editable, so reassignments *into* that stage should be blocked in the UI.
+ * Treat missing submission as draft (not locked). Rejected submissions stay editable → not locked.
+ */
+export function isDestinationStageSubmissionLocked(
+  submissionRow: { status?: string } | null | undefined
+): boolean {
+  if (!submissionRow?.status) return false;
+  const s = submissionRow.status;
+  return s === 'pending_approval' || s === 'approved' || s === 'resubmitted';
 }
 
 /**

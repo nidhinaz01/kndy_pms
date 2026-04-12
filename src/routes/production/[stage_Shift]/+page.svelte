@@ -99,6 +99,7 @@
   let plannedWorksWithStatus: any[] = [];
   let expandedGroups: string[] = [];
   let selectedRows: Set<string> = new Set();
+  let selectedDraftReportRows: Set<string> = new Set();
   let shiftBreakTimes: Array<{ start_time: string; end_time: string }> = [];
   let manpowerReportData: ProductionEmployee[] = [];
   let isManpowerReportLoading = false;
@@ -224,6 +225,8 @@
     selectedWorksForCancellation,
     setExpandedGroups: (v) => expandedGroups = typeof v === 'function' ? v(expandedGroups) : v,
     setSelectedRows: (v) => selectedRows = typeof v === 'function' ? v(selectedRows) : v,
+    setSelectedDraftReportRows: (v) =>
+      (selectedDraftReportRows = typeof v === 'function' ? v(selectedDraftReportRows) : v),
     setExpandedReportGroups: (v) => expandedReportGroups = typeof v === 'function' ? v(expandedReportGroups) : v,
     setDraftPlanLoading: (v) => isDraftPlanLoading = v,
     setDraftReportLoading: (v) => isDraftReportLoading = v,
@@ -233,6 +236,7 @@
     workOrdersData,
     plannedWorksWithStatus,
     selectedRows,
+    selectedDraftReportRows,
     expandedGroups,
     expandedReportGroups,
     activeTab,
@@ -256,6 +260,9 @@
   // Tab change handler
   async function handleTabChange(tabId: string) {
     try {
+      if (tabId !== 'draft-report') {
+        selectedDraftReportRows = new Set();
+      }
       activeTab = tabId;
       if (tabId === 'work-orders') {
         await dataLoading.loadWorkOrdersData(dataLoadingContext);
@@ -514,6 +521,8 @@
         on:toggleRowSelection={(e) => eventHandlers.toggleRowSelection(eventHandlerContext, e.detail)}
         on:selectAllInGroup={(e) => eventHandlers.selectAllInGroup(eventHandlerContext, e)}
         on:clearSelections={() => eventHandlers.clearSelections(eventHandlerContext)}
+        on:selectAllVisible={(e) => eventHandlers.selectAllVisibleRows(eventHandlerContext, e)}
+        on:deselectVisible={(e) => eventHandlers.deselectVisibleRows(eventHandlerContext, e)}
       />
     {:else if activeTab === 'plan'}
       <PlanTab 
@@ -561,12 +570,24 @@
         {shiftCode}
         {selectedDate}
         {reportingSubmissionStatus}
+        selectedRows={selectedDraftReportRows}
         on:submit={() => eventHandlers.handleSubmitReporting(eventHandlerContext)}
         on:refresh={() => dataLoading.loadDraftReportData(dataLoadingContext)}
         on:reportOvertime={(e) => eventHandlers.handleReportOvertime(eventHandlerContext, e)}
         on:reportUnplannedWork={() => eventHandlers.handleReportUnplannedWork(eventHandlerContext)}
         on:editReport={(e) => eventHandlers.handleEditReport(eventHandlerContext, e)}
         on:deleteReport={(e) => eventHandlers.handleDeleteReport(eventHandlerContext, e)}
+        on:multiDeleteDraftReports={() =>
+          eventHandlers.handleMultiDeleteDraftReports(eventHandlerContext)}
+        on:toggleRowSelection={(e) =>
+          eventHandlers.toggleDraftReportRowSelection(eventHandlerContext, e.detail)}
+        on:selectAllInGroup={(e) =>
+          eventHandlers.selectAllDraftReportInGroup(eventHandlerContext, e)}
+        on:clearSelections={() => eventHandlers.clearDraftReportSelections(eventHandlerContext)}
+        on:selectAllVisible={(e) =>
+          eventHandlers.selectAllVisibleDraftReportRows(eventHandlerContext, e)}
+        on:deselectVisible={(e) =>
+          eventHandlers.deselectVisibleDraftReportRows(eventHandlerContext, e)}
       />
     {:else if activeTab === 'report'}
       <ReportTab 

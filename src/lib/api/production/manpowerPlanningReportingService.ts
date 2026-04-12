@@ -5,6 +5,61 @@
 import { supabase } from '$lib/supabaseClient';
 import { getCurrentUsername, getCurrentTimestamp } from '$lib/utils/userUtils';
 import { calculateBreakTimeInMinutes } from '$lib/utils/breakTimeUtils';
+import type { ManpowerCOffSave } from './productionTypes';
+
+/**
+ * Row date span for manpower attendance — same as planning_from/to / reporting_from/to.
+ * Absent rows stay pinned to the anchor day; present uses modal dates or defaults to anchor.
+ */
+function manpowerRowDateSpan(
+  attendanceStatus: 'present' | 'absent',
+  anchorDay: string,
+  spanFrom?: string | null,
+  spanTo?: string | null
+): { from: string; to: string } {
+  const day = typeof anchorDay === 'string' ? anchorDay.split('T')[0] : '';
+  if (attendanceStatus === 'absent') {
+    return { from: day, to: day };
+  }
+  const fd = (spanFrom && String(spanFrom).trim()) || day;
+  const td = (spanTo && String(spanTo).trim()) || fd;
+  return { from: fd, to: td };
+}
+
+/** DB columns for c_off_* on prdn_planning_manpower / prdn_reporting_manpower. */
+function manpowerCOffColumns(
+  attendanceStatus: 'present' | 'absent',
+  cOff?: ManpowerCOffSave | null
+): Record<string, unknown> {
+  if (attendanceStatus === 'absent') {
+    return {
+      c_off_value: 0.0,
+      c_off_from_date: null,
+      c_off_from_time: null,
+      c_off_to_date: null,
+      c_off_to_time: null
+    };
+  }
+  const raw = cOff?.cOffValue != null ? Number(cOff.cOffValue) : 0;
+  const allowed = [0, 0.5, 1, 1.5];
+  const v = allowed.includes(raw) ? raw : 0;
+  if (v <= 0) {
+    return {
+      c_off_value: 0.0,
+      c_off_from_date: null,
+      c_off_from_time: null,
+      c_off_to_date: null,
+      c_off_to_time: null
+    };
+  }
+  return {
+    c_off_value: v,
+    c_off_from_date: cOff?.cOffFromDate ?? null,
+    c_off_from_time: cOff?.cOffFromTime ?? null,
+    c_off_to_date: cOff?.cOffToDate ?? null,
+    c_off_to_time: cOff?.cOffToTime ?? null
+  };
+}
 
 /**
  * Helper function to calculate full shift hours (shift duration minus breaks)
@@ -82,7 +137,10 @@ export async function savePlannedAttendance(
   notes?: string,
   plannedHours?: number,
   fromTime?: string,
-  toTime?: string
+  toTime?: string,
+  attendanceFromDate?: string | null,
+  attendanceToDate?: string | null,
+  cOff?: ManpowerCOffSave | null
 ): Promise<{ success: boolean; error?: string }> {
   console.log('🔍 [savePlannedAttendance] Called with:', {
     empId,
@@ -93,7 +151,9 @@ export async function savePlannedAttendance(
     notes,
     plannedHours,
     fromTime,
-    toTime
+    toTime,
+    attendanceFromDate,
+    attendanceToDate
   });
   
   try {
@@ -135,16 +195,21 @@ export async function savePlannedAttendance(
       .eq('emp_id', empId)
       .eq('stage_code', stageCode)
       .eq('shift_code', shiftCode)
-      .eq('planning_date', planningDate)
+      .lte('planning_from_date', planningDate)
+      .gte('planning_to_date', planningDate)
       .eq('status', 'draft')
       .eq('is_deleted', false)
       .maybeSingle();
 
+    const planSpan = manpowerRowDateSpan(attendanceStatus, planningDate, attendanceFromDate, attendanceToDate);
     const updateData: any = {
       attendance_status: attendanceStatus,
       notes: notes?.trim() || null,
       modified_by: currentUser,
-      modified_dt: now
+      modified_dt: now,
+      planning_from_date: planSpan.from,
+      planning_to_date: planSpan.to,
+      ...manpowerCOffColumns(attendanceStatus, cOff)
     };
 
     // Add time/hours fields only for present employees
@@ -181,19 +246,22 @@ export async function savePlannedAttendance(
         console.log('🔍 [savePlannedAttendance] Update successful');
       }
     } else {
+      const insertSpan = manpowerRowDateSpan(attendanceStatus, planningDate, attendanceFromDate, attendanceToDate);
       // Create new record
       const insertData: any = {
         emp_id: empId,
         stage_code: stageCode,
         shift_code: shiftCode,
-        planning_date: planningDate,
+        planning_from_date: insertSpan.from,
+        planning_to_date: insertSpan.to,
         attendance_status: attendanceStatus,
         notes: notes?.trim() || null,
         status: 'draft',
         created_by: currentUser,
         created_dt: now,
         modified_by: currentUser,
-        modified_dt: now
+        modified_dt: now,
+        ...manpowerCOffColumns(attendanceStatus, cOff)
       };
 
       // Add time/hours fields only for present employees
@@ -219,18 +287,23 @@ export async function savePlannedAttendance(
       .eq('emp_id', empId)
       .eq('stage_code', stageCode)
       .eq('shift_code', shiftCode)
-      .eq('reporting_date', reportingDate)
+      .lte('reporting_from_date', reportingDate)
+      .gte('reporting_to_date', reportingDate)
       .eq('status', 'draft')
       .eq('is_deleted', false)
       .maybeSingle();
 
+    const reportSpan = manpowerRowDateSpan(attendanceStatus, reportingDate, attendanceFromDate, attendanceToDate);
     const reportingPayload: any = {
       attendance_status: attendanceStatus,
       ltp_hours: 0,
       ltnp_hours: 0,
       notes: notes?.trim() || null,
       modified_by: currentUser,
-      modified_dt: now
+      modified_dt: now,
+      reporting_from_date: reportSpan.from,
+      reporting_to_date: reportSpan.to,
+      ...manpowerCOffColumns(attendanceStatus, cOff)
     };
     if (attendanceStatus === 'present') {
       reportingPayload.actual_hours = plannedHours;
@@ -252,11 +325,13 @@ export async function savePlannedAttendance(
         // Do not fail the whole operation; planning was saved
       }
     } else {
+      const insertReportSpan = manpowerRowDateSpan(attendanceStatus, reportingDate, attendanceFromDate, attendanceToDate);
       const insertReporting: any = {
         emp_id: empId,
         stage_code: stageCode,
         shift_code: shiftCode,
-        reporting_date: reportingDate,
+        reporting_from_date: insertReportSpan.from,
+        reporting_to_date: insertReportSpan.to,
         attendance_status: attendanceStatus,
         ltp_hours: 0,
         ltnp_hours: 0,
@@ -265,7 +340,8 @@ export async function savePlannedAttendance(
         created_by: currentUser,
         created_dt: now,
         modified_by: currentUser,
-        modified_dt: now
+        modified_dt: now,
+        ...manpowerCOffColumns(attendanceStatus, cOff)
       };
       if (attendanceStatus === 'present') {
         insertReporting.actual_hours = plannedHours;
@@ -420,7 +496,10 @@ export async function saveReportedManpower(
   notes?: string,
   actualHours?: number,
   fromTime?: string,
-  toTime?: string
+  toTime?: string,
+  attendanceFromDate?: string | null,
+  attendanceToDate?: string | null,
+  cOff?: ManpowerCOffSave | null
 ): Promise<{ success: boolean; error?: string }> {
   try {
     const currentUser = getCurrentUsername();
@@ -456,7 +535,8 @@ export async function saveReportedManpower(
           .eq('emp_id', empId)
           .eq('stage_code', stageCode)
           .eq('shift_code', shiftCode)
-          .eq('planning_date', reportingDate)
+          .lte('planning_from_date', reportingDate)
+          .gte('planning_to_date', reportingDate)
           .eq('attendance_status', 'present')
           .eq('is_deleted', false)
           .order('id', { ascending: false })
@@ -496,18 +576,24 @@ export async function saveReportedManpower(
       .select('id')
       .eq('emp_id', empId)
       .eq('stage_code', stageCode)
-      .eq('reporting_date', reportingDate)
+      .eq('shift_code', shiftCode)
+      .lte('reporting_from_date', reportingDate)
+      .gte('reporting_to_date', reportingDate)
       .eq('status', 'draft')
       .eq('is_deleted', false)
       .maybeSingle();
 
+    const reportingSpan = manpowerRowDateSpan(attendanceStatus, reportingDate, attendanceFromDate, attendanceToDate);
     const updateData: any = {
       attendance_status: attendanceStatus,
       ltp_hours: ltpHours,
       ltnp_hours: ltnpHours,
       notes: notes?.trim() || null,
       modified_by: currentUser,
-      modified_dt: now
+      modified_dt: now,
+      reporting_from_date: reportingSpan.from,
+      reporting_to_date: reportingSpan.to,
+      ...manpowerCOffColumns(attendanceStatus, cOff)
     };
 
     // Add time/hours fields only for present employees
@@ -530,12 +616,14 @@ export async function saveReportedManpower(
 
       if (error) throw error;
     } else {
+      const insertRepSpan = manpowerRowDateSpan(attendanceStatus, reportingDate, attendanceFromDate, attendanceToDate);
       // Create new record
       const insertData: any = {
         emp_id: empId,
         stage_code: stageCode,
         shift_code: shiftCode,
-        reporting_date: reportingDate,
+        reporting_from_date: insertRepSpan.from,
+        reporting_to_date: insertRepSpan.to,
         attendance_status: attendanceStatus,
         ltp_hours: ltpHours,
         ltnp_hours: ltnpHours,
@@ -544,7 +632,8 @@ export async function saveReportedManpower(
         created_by: currentUser,
         created_dt: now,
         modified_by: currentUser,
-        modified_dt: now
+        modified_dt: now,
+        ...manpowerCOffColumns(attendanceStatus, cOff)
       };
 
       // Add time/hours fields only for present employees

@@ -113,10 +113,30 @@
     dispatch('clearSelections');
   }
 
+  function dispatchSelectAllVisible() {
+    dispatch('selectAllVisible', { ids: visiblePlanRowIds });
+  }
+
+  function dispatchDeselectVisible() {
+    dispatch('deselectVisible', { ids: visiblePlanRowIds });
+  }
+
+  let planSelectAllHeaderInput: HTMLInputElement | null = null;
+
+  $: visiblePlanRowIds = sortedGroupedWorks.flatMap((g: { items?: { id: string | number }[] }) =>
+    (g.items || []).map((item: { id: string | number }) => String(item.id))
+  );
+  $: allVisiblePlanSelected =
+    visiblePlanRowIds.length > 0 && visiblePlanRowIds.every((id) => selectedRows.has(id));
+  $: someVisiblePlanSelected = visiblePlanRowIds.some((id) => selectedRows.has(id));
+  $: if (planSelectAllHeaderInput) {
+    planSelectAllHeaderInput.indeterminate = someVisiblePlanSelected && !allVisiblePlanSelected;
+  }
+
   // Expanded groups functionality removed - kept for compatibility
   $: expandedGroupsSet = new Set(expandedGroups);
 
-  $: selectedWorks = allDraftPlans.filter(work => selectedRows.has(work.id));
+  $: selectedWorks = allDraftPlans.filter((work) => selectedRows.has(String(work.id)));
 
   // Check for previous rejected submissions to determine "Resubmitted" status
   $: if (stageCode && selectedDate && planningSubmissionStatus) {
@@ -263,7 +283,7 @@
       <div class="flex items-center justify-between">
         <div class="flex items-center space-x-4">
           <span class="text-sm theme-text-primary">
-            {selectedRows.size} skill competency{selectedRows.size === 1 ? '' : 'ies'} selected
+            {selectedRows.size} skill {selectedRows.size === 1 ? 'competency' : 'competencies'} selected
           </span>
           <Button 
             variant="danger" 
@@ -305,7 +325,26 @@
       <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700" style="table-layout: auto; word-wrap: break-word;">
         <thead class="theme-bg-secondary">
           <tr>
-            <th class="px-6 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider">Select</th>
+            <th class="px-6 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider w-14">
+              <input
+                bind:this={planSelectAllHeaderInput}
+                type="checkbox"
+                class="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                checked={allVisiblePlanSelected}
+                disabled={!canEdit || visiblePlanRowIds.length === 0}
+                title="Select all visible rows"
+                aria-label="Select all visible rows"
+                on:change={(e) => {
+                  if (!canEdit || visiblePlanRowIds.length === 0) return;
+                  const target = e.target as HTMLInputElement;
+                  if (target?.checked) {
+                    dispatchSelectAllVisible();
+                  } else {
+                    dispatchDeselectVisible();
+                  }
+                }}
+              />
+            </th>
             <SortableHeader column="sortable_woNo" {sortConfig} onSort={handleSort} label="Work Order" />
             <SortableHeader column="sortable_pwoNo" {sortConfig} onSort={handleSort} label="PWO Number" />
             <SortableHeader column="sortable_workCode" {sortConfig} onSort={handleSort} label="Work Code" />
@@ -325,8 +364,8 @@
         <tbody class="theme-bg-primary divide-y divide-gray-200 dark:divide-gray-700">
           {#each sortedGroupedWorks as group}
             {@const typedGroup = group}
-            {@const allSelected = typedGroup.items.every((item: any) => selectedRows.has(item.id))}
-            {@const someSelected = typedGroup.items.some((item: any) => selectedRows.has(item.id))}
+            {@const allSelected = typedGroup.items.every((item: any) => selectedRows.has(String(item.id)))}
+            {@const someSelected = typedGroup.items.some((item: any) => selectedRows.has(String(item.id)))}
             <!-- Single Row per Work -->
             <tr class="hover:theme-bg-secondary transition-colors">
               <td class="px-6 py-4 whitespace-nowrap text-sm font-medium theme-text-primary">
@@ -344,8 +383,8 @@
                     } else {
                       // Uncheck all items in the group by toggling each one
                       typedGroup.items.forEach((item: any) => {
-                        if (selectedRows.has(item.id)) {
-                          toggleRowSelection(item.id);
+                        if (selectedRows.has(String(item.id))) {
+                          toggleRowSelection(String(item.id));
                         }
                       });
                     }

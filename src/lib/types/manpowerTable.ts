@@ -14,6 +14,7 @@ export interface ManpowerTableState {
   showAttendanceModal: boolean;
   showReassignmentModal: boolean;
   showJourneyModal: boolean;
+  showWorksModal: boolean;
   showBulkAttendanceModal: boolean;
   selectedEmployee: ProductionEmployee | null;
   bulkAttendanceStatus: 'present' | 'absent';
@@ -21,6 +22,11 @@ export interface ManpowerTableState {
   bulkFromTime: string;
   bulkToTime: string;
   bulkPlannedHours: number | null;
+  bulkCOffValue: number;
+  bulkCOffFromDate: string;
+  bulkCOffFromTime: string;
+  bulkCOffToDate: string;
+  bulkCOffToTime: string;
   isBulkSubmitting: boolean;
 }
 
@@ -39,6 +45,7 @@ export const initialManpowerTableState: ManpowerTableState = {
   showAttendanceModal: false,
   showReassignmentModal: false,
   showJourneyModal: false,
+  showWorksModal: false,
   showBulkAttendanceModal: false,
   selectedEmployee: null,
   bulkAttendanceStatus: 'present',
@@ -46,6 +53,11 @@ export const initialManpowerTableState: ManpowerTableState = {
   bulkFromTime: '',
   bulkToTime: '',
   bulkPlannedHours: null,
+  bulkCOffValue: 0,
+  bulkCOffFromDate: '',
+  bulkCOffFromTime: '',
+  bulkCOffToDate: '',
+  bulkCOffToTime: '',
   isBulkSubmitting: false
 };
 

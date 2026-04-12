@@ -1,10 +1,16 @@
 /**
  * Overtime calculation service
- * Calculates overtime per worker per work chronologically
+ * Calculates overtime per worker per work chronologically.
+ *
+ * Draft reporting OT: work that falls in the wall-clock window
+ *   [ max(shift end, C-Off end), attendance end ]
+ * intersected with each worker's attendance span from prdn_reporting_manpower
+ * (reporting_from_date/from_time → reporting_to_date/to_time), anchored on the reporting date.
  */
 
 import { supabase } from '$lib/supabaseClient';
 import { calculateBreakTimeInMinutes } from '$lib/utils/breakTimeUtils';
+import { getAttendanceWallWindowMs, parseWallDateTimeMs } from '$lib/utils/attendanceCOffSpanUtils';
 
 export interface OvertimeWork {
   reportingId: number;
@@ -29,6 +35,8 @@ export interface WorkerOvertime {
   shiftMinutes: number;
   breakMinutes: number;
   availableWorkMinutes: number;
+  /** Wall-clock minutes where OT can accrue (after shift & C-Off, inside attendance); optional for UI. */
+  otAccrualWindowMinutes?: number;
   overtimeMinutes: number;
   overtimeAmount: number;
   works: OvertimeWork[];
@@ -60,6 +68,36 @@ function minutesToTime(minutes: number): string {
   return `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}`;
 }
 
+function normalizeDateStr(d: string | null | undefined): string {
+  return (d || '').split('T')[0].trim();
+}
+
+function timeHm(t: string | null | undefined): string {
+  if (t == null || t === '') return '';
+  return String(t).trim().substring(0, 5);
+}
+
+/** Overlap length in minutes between two [startMs, endMs] intervals (inclusive start, exclusive end style via ms diff). */
+function intersectionWallMinutes(startA: number, endA: number, startB: number, endB: number): number {
+  const s = Math.max(startA, startB);
+  const e = Math.min(endA, endB);
+  return Math.max(0, (e - s) / 60000);
+}
+
+type ReportingManpowerRow = {
+  emp_id: string;
+  attendance_status?: string | null;
+  reporting_from_date?: string | null;
+  reporting_to_date?: string | null;
+  from_time?: string | null;
+  to_time?: string | null;
+  c_off_value?: number | string | null;
+  c_off_from_date?: string | null;
+  c_off_from_time?: string | null;
+  c_off_to_date?: string | null;
+  c_off_to_time?: string | null;
+};
+
 /**
  * Calculate overtime for all workers in a stage on a given date
  */
@@ -87,6 +125,8 @@ export async function calculateOvertime(
           id,
           planning_id,
           worker_id,
+          from_date,
+          to_date,
           from_time,
           to_time,
           hours_worked_today,
@@ -191,6 +231,29 @@ export async function calculateOvertime(
       });
     }
 
+    const workerIdsList = Array.from(reportsByWorker.keys());
+    const manpowerByEmp = new Map<string, ReportingManpowerRow>();
+    if (workerIdsList.length > 0) {
+      const { data: mpRows, error: mpErr } = await supabase
+        .from('prdn_reporting_manpower')
+        .select(
+          'emp_id, attendance_status, reporting_from_date, from_time, reporting_to_date, to_time, c_off_value, c_off_from_date, c_off_from_time, c_off_to_date, c_off_to_time'
+        )
+        .eq('stage_code', stageCode)
+        .eq('shift_code', shiftCode)
+        .lte('reporting_from_date', dateStr)
+        .gte('reporting_to_date', dateStr)
+        .in('status', ['draft', 'pending_approval'])
+        .eq('is_deleted', false)
+        .in('emp_id', workerIdsList);
+
+      if (mpErr) {
+        errors.push(`Error fetching reporting manpower: ${mpErr.message}`);
+      } else {
+        (mpRows || []).forEach((r: ReportingManpowerRow) => manpowerByEmp.set(r.emp_id, r));
+      }
+    }
+
     // 4. Calculate overtime for each worker
     for (const [workerId, workerReports] of reportsByWorker.entries()) {
       const shiftCode = workerShiftMap.get(workerId);
@@ -207,47 +270,31 @@ export async function calculateOvertime(
 
       const workerName = workerReports[0]?.hr_emp?.emp_name || workerId;
 
-      // Sort reports chronologically by from_time
       const sortedReports = [...workerReports].sort((a, b) => {
         return timeToMinutes(a.from_time) - timeToMinutes(b.from_time);
       });
 
-      // Calculate total worked time (chronologically)
       let totalWorkedMinutes = 0;
-      const workSlots: Array<{ from: string; to: string; report: any }> = [];
-
       sortedReports.forEach((report: any) => {
         const fromMinutes = timeToMinutes(report.from_time);
         const toMinutes = timeToMinutes(report.to_time);
-        
-        // Handle overnight shifts
         let workDurationMinutes = toMinutes - fromMinutes;
         if (workDurationMinutes < 0) {
-          workDurationMinutes += 24 * 60; // Add 24 hours for overnight
+          workDurationMinutes += 24 * 60;
         }
-
-        // Use hours_worked_today if available, otherwise calculate from time range
-        const workedMinutes = report.hours_worked_today 
+        const workedMinutes = report.hours_worked_today
           ? Math.round(report.hours_worked_today * 60)
           : workDurationMinutes;
-
         totalWorkedMinutes += workedMinutes;
-        workSlots.push({
-          from: report.from_time,
-          to: report.to_time,
-          report
-        });
       });
 
-      // Calculate shift time (excluding breaks)
       const shiftStartMinutes = timeToMinutes(shiftDetails.shiftStartTime);
       const shiftEndMinutes = timeToMinutes(shiftDetails.shiftEndTime);
       let shiftDurationMinutes = shiftEndMinutes - shiftStartMinutes;
       if (shiftDurationMinutes < 0) {
-        shiftDurationMinutes += 24 * 60; // Overnight shift
+        shiftDurationMinutes += 24 * 60;
       }
 
-      // Calculate total break time in shift
       const totalBreakMinutes = calculateBreakTimeInMinutes(
         shiftDetails.shiftStartTime,
         shiftDetails.shiftEndTime,
@@ -256,85 +303,202 @@ export async function calculateOvertime(
 
       const availableWorkMinutes = shiftDurationMinutes - totalBreakMinutes;
 
-      // Check if overtime exists
-      if (totalWorkedMinutes <= availableWorkMinutes) {
-        // No overtime
-        continue;
-      }
+      let overtimeWorks: OvertimeWork[] = [];
+      let overtimeMinutes = 0;
+      let otAccrualWindowMinutes: number | undefined;
+      let availableWorkMinutesDisplay = availableWorkMinutes;
 
-      const overtimeMinutes = totalWorkedMinutes - availableWorkMinutes;
+      const mp = manpowerByEmp.get(workerId);
+      /** Present worker with a parsable attendance wall window — OT is derived from this, not legacy shift totals. */
+      let reportingRulesApply = false;
+      let reportingOtMinutesAtLeastOne = false;
 
-      // 5. Identify which works were done in overtime (chronologically)
-      // We need to find where the shift time ends and calculate OT for works after that
-      let cumulativeWorkedMinutes = 0;
-      const overtimeWorks: OvertimeWork[] = [];
-      let overtimeStartIndex = -1;
+      if (mp && mp.attendance_status === 'present' && mp.from_time && mp.to_time) {
+        const att = getAttendanceWallWindowMs({
+          attendanceFromDate: normalizeDateStr(String(mp.reporting_from_date)),
+          attendanceToDate: normalizeDateStr(String(mp.reporting_to_date || mp.reporting_from_date)),
+          attendanceFromTime: timeHm(String(mp.from_time)),
+          attendanceToTime: timeHm(String(mp.to_time))
+        });
 
-      // Find where overtime starts
-      for (let i = 0; i < sortedReports.length; i++) {
-        const report = sortedReports[i];
-        const workedMinutes = report.hours_worked_today 
-          ? Math.round(report.hours_worked_today * 60)
-          : (timeToMinutes(report.to_time) - timeToMinutes(report.from_time));
-
-        if (cumulativeWorkedMinutes + workedMinutes > availableWorkMinutes) {
-          overtimeStartIndex = i;
-          break;
-        }
-        cumulativeWorkedMinutes += workedMinutes;
-      }
-
-      // Calculate OT for each work that extends into overtime
-      if (overtimeStartIndex >= 0) {
-        let remainingOvertimeMinutes = overtimeMinutes;
-
-        for (let i = overtimeStartIndex; i < sortedReports.length; i++) {
-          const report = sortedReports[i];
-          const workedMinutes = report.hours_worked_today 
-            ? Math.round(report.hours_worked_today * 60)
-            : (timeToMinutes(report.to_time) - timeToMinutes(report.from_time));
-
-          let workOvertimeMinutes = 0;
-
-          if (i === overtimeStartIndex) {
-            // First work in OT: calculate how much of it is OT
-            const workMinutesBeforeOT = availableWorkMinutes - cumulativeWorkedMinutes;
-            workOvertimeMinutes = workedMinutes - workMinutesBeforeOT;
-          } else {
-            // Subsequent works: all are OT
-            workOvertimeMinutes = workedMinutes;
+        if (att) {
+          reportingRulesApply = true;
+          const ss = timeHm(shiftDetails.shiftStartTime);
+          const se = timeHm(shiftDetails.shiftEndTime);
+          const shiftStartMs = parseWallDateTimeMs(dateStr, ss);
+          let shiftEndMs = parseWallDateTimeMs(dateStr, se);
+          if (shiftStartMs != null && shiftEndMs != null && shiftEndMs <= shiftStartMs) {
+            shiftEndMs += 86400000;
           }
 
-          // Distribute remaining OT proportionally if multiple works extend beyond shift
-          if (remainingOvertimeMinutes > 0 && workOvertimeMinutes > 0) {
-            // Ensure we don't exceed total OT
-            workOvertimeMinutes = Math.min(workOvertimeMinutes, remainingOvertimeMinutes);
-            remainingOvertimeMinutes -= workOvertimeMinutes;
-
-            // Get work details
-            const workCode = report.prdn_work_planning?.derived_sw_code 
-              || report.prdn_work_planning?.other_work_code 
-              || 'N/A';
-            const workName = report.prdn_work_planning?.std_work_type_details?.std_work_details?.sw_name || 'N/A';
-
-            // Calculate OT amount (will be calculated later with employee salary)
-            overtimeWorks.push({
-              reportingId: report.id,
-              planningId: report.planning_id,
-              workCode,
-              workName,
-              fromTime: report.from_time,
-              toTime: report.to_time,
-              hoursWorkedToday: report.hours_worked_today || 0,
-              overtimeMinutes: workOvertimeMinutes,
-              overtimeAmount: 0 // Will be calculated later
+          let otAccrualStartMs: number | null = shiftEndMs;
+          const coffVal = Number(mp.c_off_value);
+          if (
+            Number.isFinite(coffVal) &&
+            coffVal > 0 &&
+            mp.c_off_from_date &&
+            mp.c_off_from_time &&
+            mp.c_off_to_date &&
+            mp.c_off_to_time
+          ) {
+            const coff = getAttendanceWallWindowMs({
+              attendanceFromDate: normalizeDateStr(String(mp.c_off_from_date)),
+              attendanceToDate: normalizeDateStr(String(mp.c_off_to_date || mp.c_off_from_date)),
+              attendanceFromTime: timeHm(String(mp.c_off_from_time)),
+              attendanceToTime: timeHm(String(mp.c_off_to_time))
             });
+            if (coff && shiftEndMs != null) {
+              otAccrualStartMs = Math.max(shiftEndMs, coff.endMs);
+            }
+          }
+
+          if (shiftEndMs != null && otAccrualStartMs != null) {
+            const otWinStartMs = Math.max(att.startMs, otAccrualStartMs);
+            const otWinEndMs = att.endMs;
+            if (otWinStartMs < otWinEndMs) {
+              otAccrualWindowMinutes = (otWinEndMs - otWinStartMs) / 60000;
+              availableWorkMinutesDisplay = otAccrualWindowMinutes;
+
+              for (const report of sortedReports) {
+                const repFromDate = normalizeDateStr(String(report.from_date || dateStr));
+                const repToDate = normalizeDateStr(
+                  String(report.to_date || report.from_date || dateStr)
+                );
+                const repWin = getAttendanceWallWindowMs({
+                  attendanceFromDate: repFromDate,
+                  attendanceToDate: repToDate || repFromDate,
+                  attendanceFromTime: timeHm(String(report.from_time)),
+                  attendanceToTime: timeHm(String(report.to_time))
+                });
+                if (!repWin) continue;
+
+                const overlapMin = intersectionWallMinutes(
+                  repWin.startMs,
+                  repWin.endMs,
+                  otWinStartMs,
+                  otWinEndMs
+                );
+                if (overlapMin <= 0) continue;
+
+                const clockSpanMin = (repWin.endMs - repWin.startMs) / 60000;
+                const rawWorked =
+                  report.hours_worked_today != null && report.hours_worked_today !== ''
+                    ? Math.round(Number(report.hours_worked_today) * 60)
+                    : Math.max(0, clockSpanMin);
+                const otPartMin =
+                  clockSpanMin > 0 ? Math.min(overlapMin, rawWorked * (overlapMin / clockSpanMin)) : 0;
+
+                if (otPartMin > 0.25) {
+                  const workCode =
+                    report.prdn_work_planning?.derived_sw_code ||
+                    report.prdn_work_planning?.other_work_code ||
+                    'N/A';
+                  const workName =
+                    report.prdn_work_planning?.std_work_type_details?.std_work_details?.sw_name || 'N/A';
+                  overtimeWorks.push({
+                    reportingId: report.id,
+                    planningId: report.planning_id,
+                    workCode,
+                    workName,
+                    fromTime: report.from_time,
+                    toTime: report.to_time,
+                    hoursWorkedToday: report.hours_worked_today || 0,
+                    overtimeMinutes: Math.round(otPartMin),
+                    overtimeAmount: 0
+                  });
+                }
+              }
+
+              overtimeMinutes = overtimeWorks.reduce((s, w) => s + w.overtimeMinutes, 0);
+              reportingOtMinutesAtLeastOne = overtimeMinutes >= 1;
+            }
           }
         }
       }
 
-      // 6. Calculate OT amount for each work
-      // Get employee salary/basic_da
+      if (!reportingOtMinutesAtLeastOne) {
+        if (reportingRulesApply) {
+          // Valid attendance on reporting manpower: OT only inside the wall OT window; do not fall back to shift-net legacy.
+          continue;
+        }
+
+        overtimeWorks = [];
+        overtimeMinutes = 0;
+        otAccrualWindowMinutes = undefined;
+        availableWorkMinutesDisplay = availableWorkMinutes;
+
+        if (totalWorkedMinutes <= availableWorkMinutes) {
+          continue;
+        }
+
+        overtimeMinutes = totalWorkedMinutes - availableWorkMinutes;
+
+        let cumulativeWorkedMinutes = 0;
+        let overtimeStartIndex = -1;
+
+        for (let i = 0; i < sortedReports.length; i++) {
+          const report = sortedReports[i];
+          const workedMinutes = report.hours_worked_today
+            ? Math.round(report.hours_worked_today * 60)
+            : timeToMinutes(report.to_time) - timeToMinutes(report.from_time);
+
+          if (cumulativeWorkedMinutes + workedMinutes > availableWorkMinutes) {
+            overtimeStartIndex = i;
+            break;
+          }
+          cumulativeWorkedMinutes += workedMinutes;
+        }
+
+        if (overtimeStartIndex >= 0) {
+          let remainingOvertimeMinutes = overtimeMinutes;
+
+          for (let i = overtimeStartIndex; i < sortedReports.length; i++) {
+            const report = sortedReports[i];
+            const workedMinutes = report.hours_worked_today
+              ? Math.round(report.hours_worked_today * 60)
+              : timeToMinutes(report.to_time) - timeToMinutes(report.from_time);
+
+            let workOvertimeMinutes = 0;
+
+            if (i === overtimeStartIndex) {
+              const workMinutesBeforeOT = availableWorkMinutes - cumulativeWorkedMinutes;
+              workOvertimeMinutes = workedMinutes - workMinutesBeforeOT;
+            } else {
+              workOvertimeMinutes = workedMinutes;
+            }
+
+            if (remainingOvertimeMinutes > 0 && workOvertimeMinutes > 0) {
+              workOvertimeMinutes = Math.min(workOvertimeMinutes, remainingOvertimeMinutes);
+              remainingOvertimeMinutes -= workOvertimeMinutes;
+
+              const workCode =
+                report.prdn_work_planning?.derived_sw_code ||
+                report.prdn_work_planning?.other_work_code ||
+                'N/A';
+              const workName =
+                report.prdn_work_planning?.std_work_type_details?.std_work_details?.sw_name || 'N/A';
+
+              overtimeWorks.push({
+                reportingId: report.id,
+                planningId: report.planning_id,
+                workCode,
+                workName,
+                fromTime: report.from_time,
+                toTime: report.to_time,
+                hoursWorkedToday: report.hours_worked_today || 0,
+                overtimeMinutes: workOvertimeMinutes,
+                overtimeAmount: 0
+              });
+            }
+          }
+        }
+
+        overtimeMinutes = overtimeWorks.reduce((s, w) => s + w.overtimeMinutes, 0);
+        if (overtimeMinutes < 1) {
+          continue;
+        }
+      }
+
       const { data: empData, error: empError } = await supabase
         .from('hr_emp')
         .select('basic_da, salary')
@@ -348,27 +512,23 @@ export async function calculateOvertime(
         continue;
       }
 
-      // Get number of days in reporting month
       const reportingDateObj = new Date(dateStr);
       const year = reportingDateObj.getFullYear();
       const month = reportingDateObj.getMonth() + 1;
       const daysInMonth = new Date(year, month, 0).getDate();
 
-      // Calculate OT rate per minute (overtime is paid at double the regular rate)
       const monthlySalary = empData.basic_da || empData.salary || 0;
-      const otRatePerMinute = (monthlySalary / daysInMonth / 480) * 2; // 480 minutes = 8 hours, × 2 for double rate
+      const otRatePerMinute = (monthlySalary / daysInMonth / 480) * 2;
 
-      // Calculate OT amount for each work
       let totalOvertimeAmount = 0;
       overtimeWorks.forEach(work => {
-        work.overtimeAmount = Math.round((work.overtimeMinutes * otRatePerMinute) * 100) / 100;
+        work.overtimeAmount = Math.round(work.overtimeMinutes * otRatePerMinute * 100) / 100;
         totalOvertimeAmount += work.overtimeAmount;
       });
-      
-      // Round total overtime amount
+
       totalOvertimeAmount = Math.round(totalOvertimeAmount * 100) / 100;
 
-      workers.push({
+      const workerPayload: WorkerOvertime = {
         workerId,
         workerName,
         shiftCode,
@@ -378,11 +538,15 @@ export async function calculateOvertime(
         totalWorkedMinutes,
         shiftMinutes: shiftDurationMinutes,
         breakMinutes: totalBreakMinutes,
-        availableWorkMinutes,
+        availableWorkMinutes: availableWorkMinutesDisplay,
         overtimeMinutes,
         overtimeAmount: Math.round(totalOvertimeAmount * 100) / 100,
         works: overtimeWorks
-      });
+      };
+      if (otAccrualWindowMinutes != null) {
+        workerPayload.otAccrualWindowMinutes = otAccrualWindowMinutes;
+      }
+      workers.push(workerPayload);
     }
 
     return {

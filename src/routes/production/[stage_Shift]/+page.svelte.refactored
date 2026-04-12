@@ -359,7 +359,9 @@
       return;
     }
     const selectedWorks = plannedWorksWithStatus.filter(work => selectedRows.has(work.id));
-    const confirmed = confirm(`Are you sure you want to delete ${selectedWorks.length} skill competency${selectedWorks.length === 1 ? '' : 'ies'}?`);
+    const confirmed = confirm(
+      `Are you sure you want to delete ${selectedWorks.length} skill ${selectedWorks.length === 1 ? 'competency' : 'competencies'}?`
+    );
     if (!confirmed) return;
     try {
       const { getCurrentUsername, getCurrentTimestamp } = await import('$lib/utils/userUtils');

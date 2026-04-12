@@ -5,11 +5,13 @@
   import AttendanceModal from './AttendanceModal.svelte';
   import StageReassignmentModal from './StageReassignmentModal.svelte';
   import StageJourneyModal from './StageJourneyModal.svelte';
+  import EmployeeWorksModal from './EmployeeWorksModal.svelte';
   import { filterEmployees, calculateTotals, isPlanningAttendanceLocked } from '$lib/utils/manpowerTableUtils';
   import type { ManpowerTableFilters, ManpowerTableState } from '$lib/types/manpowerTable';
   import { initialManpowerTableFilters, initialManpowerTableState } from '$lib/types/manpowerTable';
   import { sortTableData, handleSortClick, type SortConfig } from '$lib/utils/tableSorting';
   import ManpowerTableHeader from './manpower-table/ManpowerTableHeader.svelte';
+  import ManpowerRowActionsLegend from './manpower-table/ManpowerRowActionsLegend.svelte';
   import ManpowerTableFiltersComponent from './manpower-table/ManpowerTableFilters.svelte';
   import ManpowerTableBody from './manpower-table/ManpowerTableBody.svelte';
   import ManpowerTableSummary from './manpower-table/ManpowerTableSummary.svelte';
@@ -159,6 +161,12 @@
     state.bulkFromTime = '';
     state.bulkToTime = '';
     state.bulkPlannedHours = null;
+    state.bulkCOffValue = 0;
+    const dayStr = typeof selectedDate === 'string' ? selectedDate.split('T')[0] : '';
+    state.bulkCOffFromDate = dayStr;
+    state.bulkCOffFromTime = '';
+    state.bulkCOffToDate = '';
+    state.bulkCOffToTime = '';
   }
 
   async function handleBulkAttendanceSubmit() {
@@ -225,7 +233,6 @@
         }
       }
     }
-
     state.isBulkSubmitting = true;
 
     // When parent provides full list (e.g. all pages) and controls selection, use it so "Select All" marks everyone
@@ -245,9 +252,17 @@
 
     // Add time/hours fields only for present employees
     if (state.bulkAttendanceStatus === 'present') {
+      const bulkDay = typeof selectedDate === 'string' ? selectedDate.split('T')[0] : '';
+      eventData.attendanceFromDate = bulkDay;
+      eventData.attendanceToDate = bulkDay;
       eventData.plannedHours = state.bulkPlannedHours;
       eventData.fromTime = state.bulkFromTime;
       eventData.toTime = state.bulkToTime;
+      eventData.cOffValue = state.bulkCOffValue;
+      eventData.cOffFromDate = state.bulkCOffFromDate?.trim() || undefined;
+      eventData.cOffFromTime = state.bulkCOffFromTime?.trim() || undefined;
+      eventData.cOffToDate = state.bulkCOffToDate?.trim() || undefined;
+      eventData.cOffToTime = state.bulkCOffToTime?.trim() || undefined;
     }
     
     dispatch('bulkAttendanceMarked', eventData);
@@ -263,6 +278,11 @@
     state.bulkFromTime = '';
     state.bulkToTime = '';
     state.bulkPlannedHours = null;
+    state.bulkCOffValue = 0;
+    state.bulkCOffFromDate = '';
+    state.bulkCOffFromTime = '';
+    state.bulkCOffToDate = '';
+    state.bulkCOffToTime = '';
     state.showBulkAttendanceModal = false;
     state.isBulkSubmitting = false;
   }
@@ -274,6 +294,11 @@
     state.bulkFromTime = '';
     state.bulkToTime = '';
     state.bulkPlannedHours = null;
+    state.bulkCOffValue = 0;
+    state.bulkCOffFromDate = '';
+    state.bulkCOffFromTime = '';
+    state.bulkCOffToDate = '';
+    state.bulkCOffToTime = '';
   }
 
   function handleAttendanceToggle(employee: ProductionEmployee) {
@@ -289,8 +314,15 @@
   }
 
   function handleViewJourney(employee: ProductionEmployee) {
+    state.showWorksModal = false;
     state.selectedEmployee = { ...employee };
     state.showJourneyModal = true;
+  }
+
+  function handleViewWorks(employee: ProductionEmployee) {
+    state.showJourneyModal = false;
+    state.selectedEmployee = { ...employee };
+    state.showWorksModal = true;
   }
 
   function handleJourneyDelete(event: CustomEvent) {
@@ -333,6 +365,11 @@
     state.selectedEmployee = null;
   }
 
+  function handleWorksModalClose() {
+    state.showWorksModal = false;
+    state.selectedEmployee = null;
+  }
+
   function closeAttendanceModal() {
     state.showAttendanceModal = false;
     state.selectedEmployee = null;
@@ -346,26 +383,37 @@
 
 <div class="theme-bg-primary rounded-lg shadow border theme-border">
   {#if !hideHeader}
-    <div class="flex items-center justify-between space-x-2 p-3 border-b theme-bg-primary rounded-t-xl shadow">
-      <ManpowerTableHeader
-        {filters}
-        showFilters={state.showFilters}
-        {selectedCount}
-        onSearchChange={handleSearchChange}
-        onToggleFilters={handleToggleFilters}
-        onExport={handleExport}
-        onBulkAttendance={openBulkAttendanceModal}
-        onSelectAll={selectAllEmployees}
-        {allSelected}
-        eligibleCount={eligibleEmployeesCount}
-        hideSearch={!showInternalSearch}
-        hideActions={hideActions}
-      />
-      {#if !hideActions}
-        <Button variant="secondary" size="sm" on:click={handleRefresh} disabled={isLoading}>
-          {isLoading ? 'Loading...' : 'Refresh'}
-        </Button>
-      {/if}
+    <div
+      class="flex flex-wrap items-center justify-between gap-2 border-b theme-bg-primary p-3 shadow rounded-t-xl"
+    >
+      <div class="min-w-0 flex-1 basis-full sm:basis-auto">
+        <ManpowerTableHeader
+          {filters}
+          showFilters={state.showFilters}
+          {selectedCount}
+          onSearchChange={handleSearchChange}
+          onToggleFilters={handleToggleFilters}
+          onExport={handleExport}
+          onBulkAttendance={openBulkAttendanceModal}
+          onSelectAll={selectAllEmployees}
+          {allSelected}
+          eligibleCount={eligibleEmployeesCount}
+          hideSearch={!showInternalSearch}
+          hideActions={hideActions}
+        />
+      </div>
+      <div
+        class="flex basis-full flex-wrap items-center justify-end gap-2 sm:ml-auto sm:basis-auto sm:gap-3"
+      >
+        <ManpowerRowActionsLegend />
+        {#if !hideActions}
+          <div class="border-l theme-border pl-2 sm:pl-3">
+            <Button variant="secondary" size="sm" on:click={handleRefresh} disabled={isLoading}>
+              {isLoading ? 'Loading...' : 'Refresh'}
+            </Button>
+          </div>
+        {/if}
+      </div>
     </div>
   {/if}
 
@@ -406,6 +454,7 @@
           onAttendanceToggle={handleAttendanceToggle}
           onStageReassignment={handleStageReassignment}
           onViewJourney={handleViewJourney}
+          onViewWorks={handleViewWorks}
           onSelectAll={selectAllEmployees}
           onClearAll={clearSelection}
           {allSelected}
@@ -428,6 +477,7 @@
     showModal={state.showReassignmentModal}
     employee={state.selectedEmployee}
     {selectedDate}
+    reassignmentMode="planning"
     on:stageReassigned={handleStageReassigned}
     on:close={closeReassignmentModal}
   />
@@ -443,6 +493,14 @@
     on:deleteJourney={handleJourneyDelete}
   />
 
+  <EmployeeWorksModal
+    showModal={state.showWorksModal}
+    employee={state.selectedEmployee}
+    {selectedDate}
+    mode="planning"
+    on:close={handleWorksModalClose}
+  />
+
   <BulkAttendanceModal
     showModal={state.showBulkAttendanceModal}
     {selectedCount}
@@ -453,6 +511,11 @@
     bind:fromTime={state.bulkFromTime}
     bind:toTime={state.bulkToTime}
     bind:plannedHours={state.bulkPlannedHours}
+    bind:bulkCOffValue={state.bulkCOffValue}
+    bind:bulkCOffFromDate={state.bulkCOffFromDate}
+    bind:bulkCOffFromTime={state.bulkCOffFromTime}
+    bind:bulkCOffToDate={state.bulkCOffToDate}
+    bind:bulkCOffToTime={state.bulkCOffToTime}
     isSubmitting={state.isBulkSubmitting}
     onStatusChange={(status) => state.bulkAttendanceStatus = status}
     onNotesChange={(notes) => state.bulkNotes = notes}

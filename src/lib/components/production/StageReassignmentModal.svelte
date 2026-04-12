@@ -4,10 +4,13 @@
   import { fetchAvailableStages, fetchStagesForShift, fetchShiftDetails } from '$lib/api/production';
   import type { ProductionEmployee } from '$lib/api/production';
   import { supabase } from '$lib/supabaseClient';
+  import { isDestinationStageSubmissionLocked } from '$lib/utils/manpowerTableUtils';
 
   export let showModal: boolean = false;
   export let employee: ProductionEmployee | null = null;
   export let selectedDate: string = '';
+  /** Which submission table to check for the *destination* stage+shift+date */
+  export let reassignmentMode: 'planning' | 'reporting' = 'planning';
 
   const dispatch = createEventDispatcher();
 
@@ -24,6 +27,11 @@
   let isSubmitting = false;
   let isLoadingStages = false;
   let isLoadingShift = false;
+
+  let destinationLockError = '';
+  let destinationCheckInFlight = false;
+  let destFetchSeq = 0;
+  let destStatusFetchKey = '';
 
   // Validation state
   let fromTimeError: string = '';
@@ -64,8 +72,65 @@
       loadStages();
     }
   }
+  $: destLockKey =
+    showModal && employee?.shift_code?.trim() && selectedStage && selectedDate
+      ? `${reassignmentMode}|${selectedStage}|${employee.shift_code.trim()}|${selectedDate.split('T')[0]}`
+      : '';
+
   $: if (!showModal) {
     lastStagesLoadKey = '';
+    destStatusFetchKey = '';
+    destinationLockError = '';
+    destinationCheckInFlight = false;
+  }
+
+  $: if (destLockKey && destLockKey !== destStatusFetchKey) {
+    destStatusFetchKey = destLockKey;
+    void loadDestinationSubmissionLock(destLockKey);
+  } else if (!destLockKey && showModal) {
+    destinationLockError = '';
+    destinationCheckInFlight = false;
+    destStatusFetchKey = '';
+  }
+
+  async function loadDestinationSubmissionLock(key: string) {
+    const seq = ++destFetchSeq;
+    destinationCheckInFlight = true;
+    destinationLockError = '';
+    const parts = key.split('|');
+    const mode = parts[0] as 'planning' | 'reporting';
+    const stage = parts[1];
+    const shift = parts[2];
+    const dateStr = parts[3];
+    try {
+      const { getPlanningSubmissionStatus, getReportingSubmissionStatus } = await import(
+        '../../../routes/production/[stage_Shift]/services/pageDataService'
+      );
+      const row =
+        mode === 'planning'
+          ? await getPlanningSubmissionStatus(stage, shift, dateStr)
+          : await getReportingSubmissionStatus(stage, shift, dateStr);
+      if (seq !== destFetchSeq) return;
+      if (isDestinationStageSubmissionLocked(row)) {
+        const doc = mode === 'planning' ? 'plan' : 'report';
+        const st = row?.status;
+        const statusWords =
+          st === 'pending_approval'
+            ? 'submitted (pending approval)'
+            : st === 'approved'
+              ? 'approved'
+              : st === 'resubmitted'
+                ? 'resubmitted'
+                : String(st);
+        destinationLockError = `Reassignment to ${stage} is not permitted: the ${doc} for ${stage}–${shift} on this date is ${statusWords}. Reassignment is only allowed when the ${doc} is still in draft (or not yet created).`;
+      }
+    } catch (e) {
+      if (seq === destFetchSeq) {
+        destinationLockError = 'Could not verify destination stage. Please try again.';
+      }
+    } finally {
+      if (seq === destFetchSeq) destinationCheckInFlight = false;
+    }
   }
 
   // Watch for modal opening and load shift details (only if attendance times are not available)
@@ -294,6 +359,14 @@
       return;
     }
 
+    await loadDestinationSubmissionLock(
+      `${reassignmentMode}|${selectedStage}|${employee.shift_code.trim()}|${selectedDate.split('T')[0]}`
+    );
+    if (destinationLockError) {
+      console.error('Destination stage submission locked:', destinationLockError);
+      return;
+    }
+
     isSubmitting = true;
     
     // Reassignments are always from the employee's home stage (original_stage), not current_stage.
@@ -325,6 +398,7 @@
   }
 
   function handleClose() {
+    destFetchSeq++;
     dispatch('close');
   }
 
@@ -508,6 +582,12 @@
                 {/each}
               </select>
             {/if}
+            {#if destinationCheckInFlight && selectedStage}
+              <p class="theme-text-secondary mt-2 text-sm">Checking destination {reassignmentMode === 'planning' ? 'plan' : 'report'} status…</p>
+            {/if}
+            {#if destinationLockError}
+              <p class="mt-2 text-sm font-medium text-red-600 dark:text-red-400">{destinationLockError}</p>
+            {/if}
           </div>
 
           <!-- Time Selection -->
@@ -607,7 +687,7 @@
             variant="primary" 
             size="md"
             on:click={handleSubmit}
-            disabled={isSubmitting || !selectedStage || !fromTime || !toTime || selectedStage === (employee.original_stage || employee.current_stage) || !!fromTimeError || !!toTimeError || !!overlapError || !!workPlanConflictError}
+            disabled={isSubmitting || destinationCheckInFlight || !!destinationLockError || !selectedStage || !fromTime || !toTime || selectedStage === (employee.original_stage || employee.current_stage) || !!fromTimeError || !!toTimeError || !!overlapError || !!workPlanConflictError}
           >
             {isSubmitting ? 'Reassigning...' : 'Reassign Employee'}
           </Button>

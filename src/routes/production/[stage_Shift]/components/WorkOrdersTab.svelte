@@ -20,18 +20,45 @@
 
   const dispatch = createEventDispatcher();
 
-  // Sorting state
-  let sortConfig: SortConfig = { column: null, direction: null };
+  let searchTerm = '';
 
-  // Apply sorting to work orders data
+  // Sorting state — default to Work Order (first column) ascending on load
+  let sortConfig: SortConfig = { column: 'sortable_wo_no', direction: 'asc' };
+
+  function workOrderMatchesSearch(wo: any, q: string): boolean {
+    if (!q) return true;
+    const d = wo.prdn_wo_details;
+    const statusStr = getWorkOrderStatus(wo).status || '';
+    const fields = [
+      d?.wo_no,
+      d?.pwo_no,
+      d?.wo_model,
+      d?.customer_name,
+      statusStr,
+      getDocumentReleaseDate(wo, stageCode),
+      getPlannedStartDate(wo),
+      getActualStartDate(wo),
+      getPlannedEndDate(wo),
+      getActualEndDate(wo)
+    ];
+    return fields.some((v) => String(v ?? '').toLowerCase().includes(q));
+  }
+
+  $: filteredWorkOrdersData = (() => {
+    const q = searchTerm.trim().toLowerCase();
+    if (!q) return workOrdersData;
+    return workOrdersData.filter((wo) => workOrderMatchesSearch(wo, q));
+  })();
+
+  // Apply sorting to filtered work orders
   // Note: We need to enrich the data with sortable fields first
   $: sortedWorkOrdersData = (() => {
     if (!sortConfig.column || !sortConfig.direction) {
-      return workOrdersData;
+      return filteredWorkOrdersData;
     }
     
     // Create enriched data with sortable fields
-    const enriched = workOrdersData.map(wo => ({
+    const enriched = filteredWorkOrdersData.map(wo => ({
       ...wo,
       // Add sortable fields for computed values
       sortable_wo_no: wo.prdn_wo_details?.wo_no || '',
@@ -97,6 +124,20 @@
         <span class="theme-text-primary">Significant Delay (5+ days)</span>
       </div>
     </div>
+
+    {#if workOrdersData.length > 0}
+      <div class="mb-4 flex flex-wrap items-center gap-3">
+        <label for="work-orders-search" class="text-sm font-medium theme-text-primary shrink-0">Search</label>
+        <input
+          id="work-orders-search"
+          type="search"
+          bind:value={searchTerm}
+          placeholder="WO, PWO, model, customer, status, dates…"
+          autocomplete="off"
+          class="theme-bg-primary theme-border theme-text-primary max-w-md min-w-[12rem] flex-1 rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+        />
+      </div>
+    {/if}
   </div>
   
   {#if isLoading}
@@ -111,6 +152,11 @@
       <p class="theme-text-secondary text-sm mt-2">
         Work orders will appear here when they reach {stageCode} stage
       </p>
+    </div>
+  {:else if filteredWorkOrdersData.length === 0}
+    <div class="px-6 py-12 text-center">
+      <p class="theme-text-secondary text-lg">No work orders match your search</p>
+      <p class="theme-text-secondary mt-2 text-sm">Try a different term or clear the search box.</p>
     </div>
   {:else}
     <div class="overflow-x-auto">
@@ -393,7 +439,13 @@
     <div class="px-6 py-4 theme-bg-secondary border-t theme-border">
       <div class="flex flex-wrap gap-4 text-sm">
         <div class="theme-text-secondary">
-          <span class="font-medium">Total Work Orders:</span> {sortedWorkOrdersData.length}
+          {#if searchTerm.trim()}
+            <span class="font-medium">Matching work orders:</span>
+            {sortedWorkOrdersData.length} of {workOrdersData.length}
+          {:else}
+            <span class="font-medium">Total work orders:</span>
+            {sortedWorkOrdersData.length}
+          {/if}
         </div>
       </div>
     </div>

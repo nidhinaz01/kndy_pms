@@ -36,7 +36,8 @@ export async function loadWorkers(
         )
       `)
       .eq('stage_code', stageCode)
-      .eq('reporting_date', dateStr)
+      .lte('reporting_from_date', dateStr)
+      .gte('reporting_to_date', dateStr)
       .eq('attendance_status', 'present')
       .eq('is_deleted', false);
     if (shiftCode) {

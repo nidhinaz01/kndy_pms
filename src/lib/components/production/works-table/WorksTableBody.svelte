@@ -42,7 +42,6 @@
         }}
       />
     </th>
-    <SortableHeader column="wo_details_id" {sortConfig} {onSort} label="WO Details ID" />
     <SortableHeader column="wo_no" {sortConfig} {onSort} label="Work Order Number" />
     <SortableHeader column="pwo_no" {sortConfig} {onSort} label="Pre-Work Order Number" />
     <SortableHeader column="wo_model" {sortConfig} {onSort} label="Vehicle Model" />
@@ -65,7 +64,7 @@
 <tbody class="theme-bg-primary divide-y divide-gray-200 dark:divide-gray-700">
   {#if isLoading}
     <tr>
-      <td colspan="13" class="px-6 py-4 text-center">
+      <td colspan="12" class="px-6 py-4 text-center">
         <div class="flex items-center justify-center">
           <div class="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-500 mr-2"></div>
           <span class="theme-text-secondary">Loading works...</span>
@@ -74,7 +73,7 @@
     </tr>
   {:else if filteredData.length === 0}
     <tr>
-      <td colspan="13" class="px-6 py-4 text-center">
+      <td colspan="12" class="px-6 py-4 text-center">
         <div class="text-center py-8">
           <div class="text-4xl mb-2">🔧</div>
           <p class="theme-text-secondary text-lg">No works found</p>

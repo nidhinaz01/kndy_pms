@@ -54,15 +54,16 @@
   let previousIsOpen: boolean = false;
   $: if (work && isOpen) {
     const currentWorkId = `${work?.sw_id || work?.id || 'new'}-${work?.wo_details_id || 'unknown'}`;
-    
+    /** True only on the transition into an open modal (previousIsOpen reset when modal closes). */
+    const opening = !previousIsOpen && isOpen;
+
     // CRITICAL: Clear selectedWorkers when modal first opens (even if same work)
     // This prevents stale data from previous modal sessions
-    if (!previousIsOpen && isOpen) {
+    if (opening) {
       formData = { ...formData, selectedWorkers: {}, selectedTrainees: [], traineeDeviationReason: '' };
       console.log('🧹 Cleared selected workers and trainees on modal open');
     }
-    previousIsOpen = isOpen;
-    
+
     // Only reset if this is actually a different work
     if (currentWorkId !== previousWorkId) {
       console.log('PlanWorkModal: Work changed:', work, 'from', previousWorkId, 'to', currentWorkId);
@@ -167,9 +168,15 @@
           previousSelectedSkillMappingIndex = 0;
         }
       }
+    } else if (opening) {
+      // Same work re-opened: still reload workers / continuation / plans / shift so dropdowns stay correct
+      console.log('PlanWorkModal: Same work re-opened — reloading data');
+      loadAllData();
     }
+
+    previousIsOpen = true;
   }
-  
+
   // Pre-fill workers after they are loaded (for edit mode)
   let hasPrefilledWorkers = false;
   $: if (work?.existingDraftPlans && Array.isArray(work.existingDraftPlans) && work.existingDraftPlans.length > 0 
@@ -181,6 +188,7 @@
   
   // Reset flag when modal closes or work changes
   $: if (!isOpen || !work) {
+    previousIsOpen = false;
     hasPrefilledWorkers = false;
     savedSelectedWorkers = {}; // Fix 4: Clear saved workers when modal closes or work changes
   }

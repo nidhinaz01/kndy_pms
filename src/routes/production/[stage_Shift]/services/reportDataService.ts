@@ -1,4 +1,5 @@
 import { supabase } from '$lib/supabaseClient';
+import { attachReportingWorkersToRows } from '$lib/api/production/planningReportingService';
 
 /**
  * Load report data
@@ -33,6 +34,7 @@ export async function loadReportData(stageCode: string, shiftCode: string, selec
       .eq('is_deleted', false);
     
     if (error) throw error;
+    await attachReportingWorkersToRows(data || []);
     // Enrich report rows with vehicleWorkFlow and skillTimeStandard same as planned data
     try {
       const { batchEnrichItems } = await import('$lib/utils/workEnrichmentService');

@@ -1,5 +1,14 @@
 // Production API Types and Interfaces
 
+/** C-Off fields saved with planned/reported manpower attendance (same row). */
+export interface ManpowerCOffSave {
+  cOffValue: number;
+  cOffFromDate?: string | null;
+  cOffFromTime?: string | null;
+  cOffToDate?: string | null;
+  cOffToTime?: string | null;
+}
+
 export interface ProductionEmployee {
   id: number;
   emp_id: string;
@@ -13,9 +22,17 @@ export interface ProductionEmployee {
   // Attendance details (from prdn_planning_manpower or prdn_reporting_manpower)
   planned_hours?: number | null; // For planning mode
   actual_hours?: number | null; // For reporting mode
+  /** Same as planning_from_date / planning_to_date or reporting_from_date / reporting_to_date on the row. */
+  attendance_from_date?: string | null;
+  attendance_to_date?: string | null;
   attendance_from_time?: string | null;
   attendance_to_time?: string | null;
   attendance_notes?: string | null;
+  c_off_value?: number | null;
+  c_off_from_date?: string | null;
+  c_off_from_time?: string | null;
+  c_off_to_date?: string | null;
+  c_off_to_time?: string | null;
   hours_planned?: number;
   hours_reported?: number;
   ot_hours?: number;

@@ -52,9 +52,6 @@
     />
   </td>
   <td class="px-6 py-4 whitespace-nowrap text-sm font-medium {isSelected ? 'text-gray-900 dark:text-gray-100' : 'theme-text-primary'}">
-    {work.wo_details_id || 'N/A'}
-  </td>
-  <td class="px-6 py-4 whitespace-nowrap text-sm font-medium {isSelected ? 'text-gray-900 dark:text-gray-100' : 'theme-text-primary'}">
     {work.wo_no || 'N/A'}
   </td>
   <td class="px-6 py-4 whitespace-nowrap text-sm font-medium {isSelected ? 'text-gray-900 dark:text-gray-100' : 'theme-text-primary'}">

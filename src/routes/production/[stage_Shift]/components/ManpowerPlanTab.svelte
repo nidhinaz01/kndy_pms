@@ -1,6 +1,7 @@
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
   import ManpowerTable from '$lib/components/production/ManpowerTable.svelte';
+  import ManpowerRowActionsLegend from '$lib/components/production/manpower-table/ManpowerRowActionsLegend.svelte';
   import type { ProductionEmployee } from '$lib/api/production';
 
   import { getManpowerLoadMetadata } from '../../services/stageProductionService';
@@ -230,8 +231,8 @@
       <span class="theme-text-secondary">Loading manpower data...</span>
     </div>
   {:else}
-    <div class="mb-3 flex items-center justify-between gap-4">
-      <div class="flex items-center gap-3">
+    <div class="mb-3 flex flex-wrap items-center justify-between gap-3 gap-y-2">
+      <div class="flex min-w-0 flex-1 flex-wrap items-center gap-3">
         <label for="manpower-search" class="text-sm theme-text-secondary">Search:</label>
         <input id="manpower-search" type="text" bind:value={searchTerm} placeholder="Search by name or emp id" class="theme-bg-primary theme-border px-3 py-1 rounded outline-2 outline-offset-1 w-[200px]" disabled={isPlanLocked} />
         <Button variant="secondary" size="sm" on:click={() => { toggleFiltersSignal++; filtersVisible = !filtersVisible; }}>
@@ -249,6 +250,9 @@
         <Button variant="secondary" size="sm" on:click={handleRefresh}>
           Refresh
         </Button>
+      </div>
+      <div class="ml-auto flex shrink-0 items-center border-l theme-border pl-3">
+        <ManpowerRowActionsLegend />
       </div>
     </div>
 

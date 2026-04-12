@@ -4,6 +4,33 @@ import { calculateStageTransferHours } from './productionEmployeeUtils';
 import { calculateBreakTimeInMinutes } from '$lib/utils/breakTimeUtils';
 
 /**
+ * Net work hours from same-day (or overnight) wall from/to times, minus shift break overlap.
+ * Matches planning work aggregation in this service.
+ */
+function netWorkHoursFromWallTimes(
+  fromTime: string | null | undefined,
+  toTime: string | null | undefined,
+  breakTimes: Array<{ start_time: string; end_time: string }>
+): number | null {
+  if (!fromTime || !toTime) return null;
+  try {
+    const ws = String(fromTime).substring(0, 5);
+    const we = String(toTime).substring(0, 5);
+    const from = new Date(`2000-01-01T${ws}`);
+    let to = new Date(`2000-01-01T${we}`);
+    if (to < from) {
+      to = new Date(`2000-01-02T${we}`);
+    }
+    const diffMs = to.getTime() - from.getTime();
+    const totalHours = diffMs / (1000 * 60 * 60);
+    const breakMinutes = calculateBreakTimeInMinutes(ws, we, breakTimes || []);
+    return Math.max(0, totalHours - breakMinutes / 60);
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Fetch production employees with all related data using JOINs
  * Optimized to eliminate N+1 query problem
  * Uses JOINs for attendance and stage reassignments (both have foreign keys to hr_emp)
@@ -270,6 +297,8 @@ export async function fetchProductionEmployees(
       .select(`
         worker_id,
         hours_worked_today,
+        from_time,
+        to_time,
         overtime_minutes,
         prdn_work_planning!inner(
           stage_code,
@@ -278,6 +307,7 @@ export async function fetchProductionEmployees(
       `)
       .eq('prdn_work_planning.stage_code', stage)
       .eq('from_date', date)
+      .in('status', ['draft', 'pending_approval', 'approved'])
       .eq('is_deleted', false);
     if (shiftCode) {
       workReportingQuery = workReportingQuery.eq('prdn_work_planning.shift_code', shiftCode);
@@ -292,6 +322,8 @@ export async function fetchProductionEmployees(
     const employeeIds = (employees || []).map(emp => emp.emp_id);
     let attendanceData: any[] = [];
     let reassignmentData: any[] = [];
+    /** Reporting mode only: planning reassignments for To/From hours (same basis as Manpower Plan tab). */
+    let planningReassignmentRowsForTransfer: any[] = [];
     let ltpMap = new Map<string, number>();
     let ltnpMap = new Map<string, number>();
     let ltMap = new Map<string, number>();
@@ -308,15 +340,16 @@ export async function fetchProductionEmployees(
       let attendanceQuery;
       
       if (mode === 'planning') {
-        // For planning mode, query prdn_planning_manpower with planning_date
+        // For planning mode, query prdn_planning_manpower (planning_from_date / planning_to_date range)
         // Include draft, pending_approval, and approved statuses (all should show attendance)
         // Include created_dt so we keep the most recent record when deduping (latest has planned_hours)
         attendanceQuery = supabase
           .from('prdn_planning_manpower')
-          .select('emp_id, attendance_status, planned_hours, from_time, to_time, notes, created_dt')
+          .select('emp_id, attendance_status, planned_hours, planning_from_date, planning_to_date, from_time, to_time, notes, created_dt, c_off_value, c_off_from_date, c_off_from_time, c_off_to_date, c_off_to_time')
           .in('emp_id', employeeIds)
           .eq('stage_code', stage)
-          .eq('planning_date', date)
+          .lte('planning_from_date', date)
+          .gte('planning_to_date', date)
           .in('status', ['draft', 'pending_approval', 'approved'])
           .eq('is_deleted', false)
           .order('created_dt', { ascending: false });
@@ -324,14 +357,15 @@ export async function fetchProductionEmployees(
           attendanceQuery = attendanceQuery.eq('shift_code', shiftCode);
         }
       } else if (mode === 'reporting') {
-        // For reporting mode, query prdn_reporting_manpower with reporting_date
+        // For reporting mode, query prdn_reporting_manpower (reporting_from_date / reporting_to_date range)
         // Include draft, pending_approval, and approved statuses (all should show attendance)
         attendanceQuery = supabase
           .from('prdn_reporting_manpower')
-          .select('emp_id, attendance_status, actual_hours, from_time, to_time, notes')
+          .select('emp_id, attendance_status, actual_hours, reporting_from_date, reporting_to_date, from_time, to_time, notes, c_off_value, c_off_from_date, c_off_from_time, c_off_to_date, c_off_to_time')
           .in('emp_id', employeeIds)
           .eq('stage_code', stage)
-          .eq('reporting_date', date)
+          .lte('reporting_from_date', date)
+          .gte('reporting_to_date', date)
           .in('status', ['draft', 'pending_approval', 'approved'])
           .eq('is_deleted', false);
         if (shiftCode) {
@@ -378,10 +412,11 @@ export async function fetchProductionEmployees(
       if (mode === 'reporting' && employeeIds.length > 0) {
         let plannedQ = supabase
           .from('prdn_planning_manpower')
-          .select('emp_id, planned_hours')
+          .select('emp_id, planned_hours, from_time, to_time')
           .in('emp_id', employeeIds)
           .eq('stage_code', stage)
-          .eq('planning_date', date)
+          .lte('planning_from_date', date)
+          .gte('planning_to_date', date)
           .in('status', ['draft', 'pending_approval', 'approved'])
           .eq('is_deleted', false);
         if (shiftCode) {
@@ -480,6 +515,47 @@ export async function fetchProductionEmployees(
         reassignmentData = fetched || [];
       }
 
+      // Manpower Report: To/From other stage hours use the same planning reassignments + break logic as Manpower Plan
+      if (mode === 'reporting' && employeeIds.length > 0) {
+        const PLAN_CHUNK = 80;
+        const planSel =
+          'id, emp_id, from_stage_code, to_stage_code, planning_date, from_time, to_time, reason, created_by, created_dt, reporting_reassignment_id, status';
+        const planRows: any[] = [];
+        for (let i = 0; i < employeeIds.length; i += PLAN_CHUNK) {
+          const chunk = employeeIds.slice(i, i + PLAN_CHUNK);
+          let pq = supabase
+            .from('prdn_planning_stage_reassignment')
+            .select(planSel)
+            .in('emp_id', chunk)
+            .eq('planning_date', date)
+            .in('status', ['draft', 'pending_approval', 'approved'])
+            .eq('is_deleted', false)
+            .order('created_dt', { ascending: true });
+          const firstRes = await pq;
+          let planChunk: any[] | null = firstRes.data;
+          let planErr = firstRes.error;
+          if (planErr && String(planErr.message || planErr).includes('status')) {
+            const planSelNoStatus =
+              'id, emp_id, from_stage_code, to_stage_code, planning_date, from_time, to_time, reason, created_by, created_dt, reporting_reassignment_id';
+            const retry = await supabase
+              .from('prdn_planning_stage_reassignment')
+              .select(planSelNoStatus)
+              .in('emp_id', chunk)
+              .eq('planning_date', date)
+              .eq('is_deleted', false)
+              .order('created_dt', { ascending: true });
+            planChunk = retry.data;
+            planErr = retry.error;
+          }
+          if (planErr) {
+            console.error('Error fetching planning reassignments for transfer hours (reporting mode):', planErr);
+          } else {
+            planRows.push(...(planChunk || []));
+          }
+        }
+        planningReassignmentRowsForTransfer = planRows;
+      }
+
       // Query 7: Reporting manpower data (for LTP/LTNP hours) - only for reporting mode
       if (mode === 'reporting') {
         let ltpQ = supabase
@@ -487,7 +563,8 @@ export async function fetchProductionEmployees(
           .select('emp_id, ltp_hours, ltnp_hours')
           .in('emp_id', employeeIds)
           .eq('stage_code', stage)
-          .eq('reporting_date', date)
+          .lte('reporting_from_date', date)
+          .gte('reporting_to_date', date)
           .eq('is_deleted', false);
         if (shiftCode) {
           ltpQ = ltpQ.eq('shift_code', shiftCode);
@@ -590,36 +667,19 @@ export async function fetchProductionEmployees(
     (workPlanningData || []).forEach(plan => {
       if (plan.worker_id) {
         let hours = 0;
-        
-        // Always calculate from time range to ensure break time is subtracted
-        if (plan.from_time && plan.to_time) {
-          try {
-            const from = new Date(`2000-01-01T${plan.from_time}`);
-            const to = new Date(`2000-01-01T${plan.to_time}`);
-            if (to < from) to.setDate(to.getDate() + 1);
-            const diffMs = to.getTime() - from.getTime();
-            const totalHours = diffMs / (1000 * 60 * 60);
-            
-            // Get break times for this worker's shift
-            const workerShiftCode = workerShiftMap.get(plan.worker_id);
-            const breakTimes = workerShiftCode ? (shiftBreakTimesMap.get(workerShiftCode) || []) : [];
-            
-            // Subtract break time using the worker's shift break times
-            const breakMinutes = calculateBreakTimeInMinutes(plan.from_time, plan.to_time, breakTimes);
-            const breakHours = breakMinutes / 60;
-            hours = Math.max(0, totalHours - breakHours);
-            
-            console.log(`  Worker ${plan.worker_id}: ${plan.from_time}-${plan.to_time} = ${totalHours.toFixed(2)}h - ${breakHours.toFixed(2)}h break = ${hours.toFixed(2)}h`);
-          } catch (error) {
-            console.error('Error calculating planned hours from time range:', error);
-            // Fallback to stored planned_hours if calculation fails
-            hours = plan.planned_hours || 0;
-          }
+        const workerShiftCode = workerShiftMap.get(plan.worker_id);
+        const breakTimes = workerShiftCode ? (shiftBreakTimesMap.get(workerShiftCode) || []) : [];
+
+        const netFromTimes = netWorkHoursFromWallTimes(plan.from_time, plan.to_time, breakTimes);
+        if (netFromTimes !== null) {
+          hours = netFromTimes;
+          console.log(
+            `  Worker ${plan.worker_id}: ${plan.from_time}-${plan.to_time} (net ${hours.toFixed(2)}h incl. breaks)`
+          );
         } else {
-          // Fallback to stored planned_hours if time range is not available
           hours = plan.planned_hours || 0;
         }
-        
+
         if (hours > 0) {
           const currentHours = plannedHoursMap.get(plan.worker_id) || 0;
           plannedHoursMap.set(plan.worker_id, currentHours + hours);
@@ -633,12 +693,23 @@ export async function fetchProductionEmployees(
     const reportedHoursMap = new Map<string, number>();
     const otHoursMap = new Map<string, number>();
     (workReportingData || []).forEach(report => {
-      if (report.worker_id && report.hours_worked_today) {
-        const currentHours = reportedHoursMap.get(report.worker_id) || 0;
-        reportedHoursMap.set(report.worker_id, currentHours + (report.hours_worked_today || 0));
+      if (!report.worker_id) return;
+
+      const workerShiftCode = workerShiftMap.get(report.worker_id);
+      const breakTimes = workerShiftCode ? (shiftBreakTimesMap.get(workerShiftCode) || []) : [];
+      const netFromTimes = netWorkHoursFromWallTimes(report.from_time, report.to_time, breakTimes);
+      let hours = 0;
+      if (netFromTimes !== null) {
+        hours = netFromTimes;
+      } else if (report.hours_worked_today) {
+        hours = report.hours_worked_today;
       }
-      // Aggregate overtime minutes and convert to hours
-      if (report.worker_id && report.overtime_minutes) {
+      if (hours > 0) {
+        const currentHours = reportedHoursMap.get(report.worker_id) || 0;
+        reportedHoursMap.set(report.worker_id, currentHours + hours);
+      }
+
+      if (report.overtime_minutes) {
         const currentOTMinutes = otHoursMap.get(report.worker_id) || 0;
         otHoursMap.set(report.worker_id, currentOTMinutes + (report.overtime_minutes || 0));
       }
@@ -710,9 +781,64 @@ export async function fetchProductionEmployees(
         reassigned_by: reassign.created_by || reassign.reassigned_by || 'N/A'
       }));
 
-      // Calculate transfer hours (deducting shift breaks)
+      // Transfer hours (deducting shift breaks). Reporting tab uses planning reassignments like Manpower Plan.
       const breakTimesForShift = emp.shift_code ? (shiftBreakTimesMap.get(emp.shift_code) || []) : [];
-      const { toOtherStageHours, fromOtherStageHours } = calculateStageTransferHours(stageJourney, stage, breakTimesForShift);
+      let toOtherStageHours: number;
+      let fromOtherStageHours: number;
+      if (mode === 'reporting' && planningReassignmentRowsForTransfer.length > 0) {
+        const planRows = planningReassignmentRowsForTransfer
+          .filter((r: any) => r.emp_id === emp.emp_id)
+          .sort(
+            (a: any, b: any) =>
+              new Date(a.created_dt).getTime() - new Date(b.created_dt).getTime()
+          );
+        const planJourney = planRows.map((reassign: any) => ({
+          id: reassign.id,
+          source: 'planning' as const,
+          from_stage: reassign.from_stage_code,
+          to_stage: reassign.to_stage_code,
+          reassigned_at: reassign.created_dt,
+          from_time: reassign.from_time ? String(reassign.from_time).substring(0, 5) : '',
+          to_time: reassign.to_time ? String(reassign.to_time).substring(0, 5) : '',
+          reason: reassign.reason,
+          reassigned_by: reassign.created_by || reassign.reassigned_by || 'N/A'
+        }));
+        const t = calculateStageTransferHours(planJourney as any, stage, breakTimesForShift);
+        toOtherStageHours = t.toOtherStageHours;
+        fromOtherStageHours = t.fromOtherStageHours;
+      } else {
+        const t = calculateStageTransferHours(stageJourney, stage, breakTimesForShift);
+        toOtherStageHours = t.toOtherStageHours;
+        fromOtherStageHours = t.fromOtherStageHours;
+      }
+
+      const plannedHoursReporting =
+        mode === 'reporting' && plannedAttendance
+          ? (() => {
+              const net = netWorkHoursFromWallTimes(
+                plannedAttendance.from_time,
+                plannedAttendance.to_time,
+                breakTimesForShift
+              );
+              if (net !== null) return net;
+              return plannedAttendance.planned_hours != null
+                ? Number(plannedAttendance.planned_hours)
+                : null;
+            })()
+          : undefined;
+
+      const actualHoursReporting =
+        mode === 'reporting' && attendance
+          ? (() => {
+              const net = netWorkHoursFromWallTimes(
+                attendance.from_time,
+                attendance.to_time,
+                breakTimesForShift
+              );
+              if (net !== null) return net;
+              return attendance.actual_hours ?? null;
+            })()
+          : undefined;
 
       // Get LTP/LTNP hours if in reporting mode
       const ltpHours = mode === 'reporting' ? (ltpMap.get(emp.emp_id) || 0) : 0;
@@ -728,16 +854,45 @@ export async function fetchProductionEmployees(
         current_stage: currentStage,
         original_stage: emp.stage, // Original assigned stage from hr_emp table
         attendance_status: attendance ? (attendance.attendance_status || null) : null,
+        attendance_from_date:
+          mode === 'planning' && attendance?.planning_from_date
+            ? String(attendance.planning_from_date).split('T')[0]
+            : mode === 'reporting' && attendance?.reporting_from_date
+              ? String(attendance.reporting_from_date).split('T')[0]
+              : null,
+        attendance_to_date:
+          mode === 'planning' && attendance?.planning_to_date
+            ? String(attendance.planning_to_date).split('T')[0]
+            : mode === 'reporting' && attendance?.reporting_to_date
+              ? String(attendance.reporting_to_date).split('T')[0]
+              : null,
         // Attendance details from prdn_planning_manpower or prdn_reporting_manpower (coerce to number for display)
-        planned_hours: mode === 'planning' && attendance
-          ? (attendance.planned_hours != null ? Number(attendance.planned_hours) : null)
-          : mode === 'reporting' && plannedAttendance
-          ? (plannedAttendance.planned_hours != null ? Number(plannedAttendance.planned_hours) : null)
-          : undefined,
-        actual_hours: mode === 'reporting' && attendance ? (attendance.actual_hours ?? null) : undefined,
+        planned_hours:
+          mode === 'planning' && attendance
+            ? attendance.planned_hours != null
+              ? Number(attendance.planned_hours)
+              : null
+            : plannedHoursReporting,
+        actual_hours: actualHoursReporting,
         attendance_from_time: attendance ? (attendance.from_time ? attendance.from_time.substring(0,5) : null) : null,
         attendance_to_time: attendance ? (attendance.to_time ? attendance.to_time.substring(0,5) : null) : null,
         attendance_notes: attendance ? (attendance.notes || null) : null,
+        c_off_value:
+          attendance && attendance.c_off_value != null && attendance.c_off_value !== ''
+            ? Number(attendance.c_off_value)
+            : undefined,
+        c_off_from_date: attendance?.c_off_from_date
+          ? String(attendance.c_off_from_date).split('T')[0]
+          : null,
+        c_off_from_time: attendance?.c_off_from_time
+          ? String(attendance.c_off_from_time).substring(0, 5)
+          : null,
+        c_off_to_date: attendance?.c_off_to_date
+          ? String(attendance.c_off_to_date).split('T')[0]
+          : null,
+        c_off_to_time: attendance?.c_off_to_time
+          ? String(attendance.c_off_to_time).substring(0, 5)
+          : null,
         hours_planned: plannedHoursMap.get(emp.emp_id) || 0,
         hours_reported: reportedHoursMap.get(emp.emp_id) || 0,
         ot_hours: mode === 'reporting' ? (otHoursMapConverted.get(emp.emp_id) || 0) : 0,

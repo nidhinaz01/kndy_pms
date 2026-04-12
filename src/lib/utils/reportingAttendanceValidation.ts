@@ -65,7 +65,8 @@ export async function validateReportingAttendance(
         .from('prdn_reporting_manpower')
         .select('emp_id')
         .eq('stage_code', stageCode)
-        .eq('reporting_date', dateStr)
+        .lte('reporting_from_date', dateStr)
+        .gte('reporting_to_date', dateStr)
         .eq('is_deleted', false)
         .order('emp_id')
         .range(offset, offset + PAGE_SIZE - 1);

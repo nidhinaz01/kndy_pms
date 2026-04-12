@@ -1,8 +1,8 @@
 <script lang="ts">
-  import Button from '$lib/components/common/Button.svelte';
-  import { CheckCircle, XCircle, UserCheck, ArrowRight, Map } from 'lucide-svelte';
+  import ManpowerIconHintButton from '../manpower-table/ManpowerIconHintButton.svelte';
+  import { CheckCircle, XCircle, UserCheck, ArrowRight, Map, ClipboardList, Lock } from 'lucide-svelte';
   import type { ProductionEmployee } from '$lib/api/production';
-  import { isReportingAttendanceLocked } from '$lib/utils/manpowerTableUtils';
+  import { formatManpowerCOffValueDisplay, isReportingAttendanceLocked } from '$lib/utils/manpowerTableUtils';
 
   export let employee: ProductionEmployee;
   export let isSelected: boolean = false;
@@ -13,8 +13,17 @@
   export let onAttendanceToggle: () => void = () => {};
   export let onStageReassignment: () => void = () => {};
   export let onViewJourney: () => void = () => {};
+  export let onViewWorks: () => void = () => {};
 
   $: canReassignFromThisStage = !parentStageCode || employee.original_stage === parentStageCode;
+
+  $: attendanceLabel = isReportingAttendanceLocked(employee, reportingSubmissionStatus)
+    ? 'Attendance Locked'
+    : 'Mark Attendance';
+
+  $: reassignHint = !canReassignFromThisStage
+    ? `Reassign — from home stage (${employee.original_stage || '—'}) only`
+    : 'Reassign';
 
   // Get shift hours from attendance
   $: shiftHoursPlanned = employee.planned_hours ?? null; // From planning attendance
@@ -86,6 +95,9 @@
       </span>
     {/if}
   </td>
+  <td class="px-6 py-4 whitespace-nowrap text-sm tabular-nums {hasMismatchedHours ? '!text-gray-900 dark:!text-yellow-100' : 'theme-text-primary'}">
+    {formatManpowerCOffValueDisplay(employee.c_off_value)}
+  </td>
   <td class="px-6 py-4 whitespace-nowrap">
     <div class="flex items-center space-x-2">
       <div class="flex flex-col">
@@ -94,17 +106,13 @@
           <span class="text-xs theme-text-secondary">(Original: {employee.original_stage})</span>
         {/if}
       </div>
-      <span title={!canReassignFromThisStage ? `Reassign from home stage (${employee.original_stage || '—'}) only` : ''}>
-        <Button
-          variant="secondary"
-          size="sm"
-          on:click={onStageReassignment}
-          disabled={!canReassignFromThisStage || employee.attendance_status !== 'present'}
-        >
-          <ArrowRight class="w-3 h-3 mr-1" />
-          Reassign
-        </Button>
-      </span>
+      <ManpowerIconHintButton
+        label={reassignHint}
+        disabled={!canReassignFromThisStage || employee.attendance_status !== 'present'}
+        on:click={onStageReassignment}
+      >
+        <ArrowRight class="w-4 h-4" />
+      </ManpowerIconHintButton>
     </div>
   </td>
   <td class="px-6 py-4 whitespace-nowrap">
@@ -146,23 +154,24 @@
     {employee.from_other_stage_hours || 0}h
   </td>
   <td class="px-6 py-4 whitespace-nowrap text-sm theme-text-primary">
-    <div class="flex space-x-2">
-      <Button
-        variant="secondary"
-        size="sm"
-        on:click={onAttendanceToggle}
+    <div class="flex flex-row flex-nowrap items-center gap-1.5 overflow-x-auto sm:gap-2">
+      <ManpowerIconHintButton
+        label={attendanceLabel}
         disabled={isReportingAttendanceLocked(employee, reportingSubmissionStatus)}
+        on:click={onAttendanceToggle}
       >
-        {isReportingAttendanceLocked(employee, reportingSubmissionStatus) ? 'Attendance Locked' : 'Mark Attendance'}
-      </Button>
-      <Button
-        variant="secondary"
-        size="sm"
-        on:click={onViewJourney}
-      >
-        <Map class="w-3 h-3 mr-1" />
-        View Journey
-      </Button>
+        {#if isReportingAttendanceLocked(employee, reportingSubmissionStatus)}
+          <Lock class="w-4 h-4" />
+        {:else}
+          <UserCheck class="w-4 h-4" />
+        {/if}
+      </ManpowerIconHintButton>
+      <ManpowerIconHintButton label="View Journey" on:click={onViewJourney}>
+        <Map class="w-4 h-4" />
+      </ManpowerIconHintButton>
+      <ManpowerIconHintButton label="View Works" on:click={onViewWorks}>
+        <ClipboardList class="w-4 h-4" />
+      </ManpowerIconHintButton>
     </div>
   </td>
 </tr>

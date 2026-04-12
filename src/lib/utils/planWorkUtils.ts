@@ -155,6 +155,9 @@ export function autoCalculateEndTime(
 /** Minutes between each "From time" option in Plan Work (shift-boundary dropdown). */
 const TIME_SLOT_STEP_MINUTES = 5;
 
+/** Extend slot options this many hours past shift end (e.g. overtime / late starts). */
+const TIME_SLOTS_EXTEND_AFTER_SHIFT_END_HOURS = 4;
+
 /** Normalize DB time (HH:MM:SS or HH:MM) to HH:MM for pickers and calculations. */
 export function normalizeTimeToHHMM(timeStr: string): string {
   if (!timeStr) return '';
@@ -217,6 +220,10 @@ export function generateTimeSlots(shiftStartTime: string, shiftEndTime: string):
     if (shiftEndDate < shiftStartDate) {
       shiftEndDate = new Date(shiftEndDate.getTime() + 24 * 60 * 60 * 1000);
     }
+
+    shiftEndDate = new Date(
+      shiftEndDate.getTime() + TIME_SLOTS_EXTEND_AFTER_SHIFT_END_HOURS * 60 * 60 * 1000
+    );
     
     let currentTime = new Date(slotStartDate);
     while (currentTime <= shiftEndDate) {

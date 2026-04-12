@@ -213,12 +213,12 @@
                         <div class="mt-0.5 text-xs text-orange-600 dark:text-orange-400 truncate" title={deviation.reason}>
                           {deviation.reason}
                         </div>
-                      {:else if report.worker_id && report.prdn_work_planning?.hr_emp}
+                      {:else if report.worker_id}
                         <div class="font-medium">
-                          {report.prdn_work_planning.hr_emp.emp_name || 'N/A'}
+                          {report.reporting_hr_emp?.emp_name || report.worker_id || 'N/A'}
                         </div>
                         <div class="text-xs theme-text-secondary">
-                          ({report.prdn_work_planning.hr_emp.skill_short || 'N/A'})
+                          ({report.reporting_hr_emp?.skill_short || 'N/A'})
                         </div>
                       {:else}
                         <span class="theme-text-secondary">N/A</span>

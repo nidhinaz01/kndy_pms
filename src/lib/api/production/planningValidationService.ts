@@ -195,7 +195,8 @@ export async function validateEmployeeShiftPlanning(
       .select('emp_id, attendance_status, planned_hours')
       .eq('stage_code', stageCode)
       .eq('shift_code', shiftCode)
-      .eq('planning_date', planningDate)
+      .lte('planning_from_date', planningDate)
+      .gte('planning_to_date', planningDate)
       .eq('status', 'draft')
       .eq('is_deleted', false);
 
@@ -234,7 +235,6 @@ export async function validateEmployeeShiftPlanning(
       .select('emp_id, hr_emp!inner(emp_id, emp_name, skill_short, shift_code)')
       .eq('to_stage_code', stageCode)
       .eq('planning_date', planningDate)
-      .eq('status', 'draft')
       .eq('is_deleted', false)
       .eq('hr_emp.shift_code', shiftCode)
       .eq('hr_emp.is_active', true)
@@ -322,7 +322,6 @@ export async function validateEmployeeShiftPlanning(
       .select('emp_id, from_time, to_time')
       .eq('from_stage_code', stageCode)
       .eq('planning_date', planningDate)
-      .eq('status', 'draft')
       .eq('is_deleted', false);
 
     if (reassignFromError) {
@@ -339,7 +338,6 @@ export async function validateEmployeeShiftPlanning(
       .select('emp_id, from_time, to_time')
       .eq('to_stage_code', stageCode)
       .eq('planning_date', planningDate)
-      .eq('status', 'draft')
       .eq('is_deleted', false);
 
     if (reassignToSlotsError) {

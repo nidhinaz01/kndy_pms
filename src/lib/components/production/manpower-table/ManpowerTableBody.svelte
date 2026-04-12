@@ -13,6 +13,7 @@
   export let onAttendanceToggle: (employee: ProductionEmployee) => void = () => {};
   export let onStageReassignment: (employee: ProductionEmployee) => void = () => {};
   export let onViewJourney: (employee: ProductionEmployee) => void = () => {};
+  export let onViewWorks: (employee: ProductionEmployee) => void = () => {};
   export let onSelectAll: () => void = () => {};
   export let onClearAll: () => void = () => {};
   export let allSelected: boolean = false;
@@ -38,6 +39,7 @@
     <SortableHeader column="emp_name" {sortConfig} {onSort} label="Employee" />
     <SortableHeader column="skill_short" {sortConfig} {onSort} label="Skill" />
     <SortableHeader column="attendance_status" {sortConfig} {onSort} label="Status" />
+    <SortableHeader column="c_off_value" {sortConfig} {onSort} label="C-Off value" />
     <SortableHeader column="stage" {sortConfig} {onSort} label="Current Stage" />
     <SortableHeader column="shift_code" {sortConfig} {onSort} label="Shift" />
     <SortableHeader column="planned_hours" {sortConfig} {onSort} label="Hours Planned / Shift Hours" />
@@ -49,7 +51,7 @@
 <tbody class="theme-bg-primary divide-y theme-border">
   {#if filteredData.length === 0}
     <tr>
-      <td colspan="10" class="px-6 py-4 text-center text-sm theme-text-secondary">
+      <td colspan="11" class="px-6 py-4 text-center text-sm theme-text-secondary">
         {data.length === 0 ? 'No employees found for this stage and date' : 'No employees match the current filters'}
       </td>
     </tr>
@@ -65,6 +67,7 @@
         onAttendanceToggle={() => onAttendanceToggle(employee)}
         onStageReassignment={() => onStageReassignment(employee)}
         onViewJourney={() => onViewJourney(employee)}
+        onViewWorks={() => onViewWorks(employee)}
       />
     {/each}
   {/if}

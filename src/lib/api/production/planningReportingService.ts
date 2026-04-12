@@ -189,7 +189,8 @@ export async function getDraftManpowerPlans(
         `)
         .eq('stage_code', stageCode)
         .eq('shift_code', shiftCode)
-        .eq('planning_date', planningDate)
+        .lte('planning_from_date', planningDate)
+        .gte('planning_to_date', planningDate)
         .eq('status', 'draft')
         .eq('is_active', true)
         .eq('is_deleted', false)
@@ -296,7 +297,8 @@ export async function submitPlanning(
       })
       .eq('stage_code', stageCode)
       .eq('shift_code', shiftCode)
-      .eq('planning_date', planningDate)
+      .lte('planning_from_date', planningDate)
+      .gte('planning_to_date', planningDate)
       .eq('status', 'draft')
       .eq('is_deleted', false);
 
@@ -416,6 +418,53 @@ export async function createReportingSubmission(
 }
 
 /**
+ * Populates each `prdn_work_reporting` row with `reporting_hr_emp` from `worker_id`
+ * (the reported worker), not the nested planning assignee.
+ */
+export async function attachReportingWorkersToRows(rows: any[] | null | undefined): Promise<void> {
+  if (!rows?.length) return;
+
+  const idSet = new Set<string>();
+  for (const r of rows) {
+    if (r?.worker_id != null && String(r.worker_id).trim() !== '') {
+      idSet.add(String(r.worker_id));
+    }
+  }
+  if (idSet.size === 0) {
+    for (const r of rows) {
+      r.reporting_hr_emp = null;
+    }
+    return;
+  }
+
+  const empIds = Array.from(idSet);
+  const empMap = new Map<string, { emp_id: string; emp_name: string; skill_short: string | null }>();
+  const chunkSize = 200;
+  for (let i = 0; i < empIds.length; i += chunkSize) {
+    const slice = empIds.slice(i, i + chunkSize);
+    const { data, error } = await supabase
+      .from('hr_emp')
+      .select('emp_id, emp_name, skill_short')
+      .in('emp_id', slice);
+    if (error) {
+      console.error('attachReportingWorkersToRows:', error);
+      continue;
+    }
+    for (const e of data || []) {
+      empMap.set(String(e.emp_id), e as { emp_id: string; emp_name: string; skill_short: string | null });
+    }
+  }
+
+  for (const r of rows) {
+    if (r?.worker_id != null && String(r.worker_id).trim() !== '') {
+      r.reporting_hr_emp = empMap.get(String(r.worker_id)) ?? null;
+    } else {
+      r.reporting_hr_emp = null;
+    }
+  }
+}
+
+/**
  * Get draft work reports for a stage and date (paginated to avoid 1000-row limit)
  */
 export async function getDraftWorkReports(
@@ -454,6 +503,7 @@ export async function getDraftWorkReports(
       hasMore = page.length === PAGE_SIZE;
       offset += PAGE_SIZE;
     }
+    await attachReportingWorkersToRows(allRows);
     return allRows;
   } catch (error) {
     console.error('Error fetching draft work reports:', error);
@@ -476,12 +526,13 @@ export async function getDraftManpowerReports(
         *,
         hr_emp!inner(emp_id, emp_name, skill_short)
       `)
-      .eq('stage_code', stageCode)
-      .eq('shift_code', shiftCode)
-      .eq('reporting_date', reportingDate)
-      .in('status', ['draft', 'pending_approval', 'approved'])
-      .eq('is_active', true)
-      .eq('is_deleted', false);
+        .eq('stage_code', stageCode)
+        .eq('shift_code', shiftCode)
+        .lte('reporting_from_date', reportingDate)
+        .gte('reporting_to_date', reportingDate)
+        .in('status', ['draft', 'pending_approval', 'approved'])
+        .eq('is_active', true)
+        .eq('is_deleted', false);
 
     if (error) throw error;
     return data || [];
@@ -613,7 +664,8 @@ export async function submitReporting(
       })
       .eq('stage_code', stageCode)
       .eq('shift_code', shiftCode)
-      .eq('reporting_date', dateStr)
+      .lte('reporting_from_date', dateStr)
+      .gte('reporting_to_date', dateStr)
       .eq('status', 'draft')
       .eq('is_deleted', false)
       .select();
