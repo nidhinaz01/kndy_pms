@@ -2,7 +2,7 @@
   import ManpowerIconHintButton from '../manpower-table/ManpowerIconHintButton.svelte';
   import { CheckCircle, XCircle, UserCheck, ArrowRight, Map, ClipboardList, Lock } from 'lucide-svelte';
   import type { ProductionEmployee } from '$lib/api/production';
-  import { formatManpowerCOffValueDisplay, isReportingAttendanceLocked } from '$lib/utils/manpowerTableUtils';
+  import { formatManpowerCOffHoursDisplay, isReportingAttendanceLocked } from '$lib/utils/manpowerTableUtils';
 
   export let employee: ProductionEmployee;
   export let isSelected: boolean = false;
@@ -96,7 +96,7 @@
     {/if}
   </td>
   <td class="px-6 py-4 whitespace-nowrap text-sm tabular-nums {hasMismatchedHours ? '!text-gray-900 dark:!text-yellow-100' : 'theme-text-primary'}">
-    {formatManpowerCOffValueDisplay(employee.c_off_value)}
+    {formatManpowerCOffHoursDisplay(employee.c_off_value)}
   </td>
   <td class="px-6 py-4 whitespace-nowrap">
     <div class="flex items-center space-x-2">

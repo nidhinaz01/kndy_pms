@@ -5,7 +5,11 @@ import { savePlannedAttendance, savePlannedStageReassignment, saveReportedManpow
 import type { ManpowerCOffSave } from '$lib/api/production/productionTypes';
 import { convertPlanToDraftReport } from '$lib/services/convertPlanToDraftReportService';
 import { validateReportingAttendance } from '$lib/utils/reportingAttendanceValidation';
-import { validateCOffWithinAttendanceWindow, validateNetHoursForCoffAllow } from '$lib/utils/attendanceCOffSpanUtils';
+import {
+  getAttendanceWallWindowMs,
+  validateCOffWithinAttendanceWindow,
+  validateNetHoursForCoffAllow
+} from '$lib/utils/attendanceCOffSpanUtils';
 
 /**
  * Update work status when skill competencies are deleted
@@ -2104,6 +2108,34 @@ export async function handleSubmitReporting(context: EventHandlerContext) {
             });
           }
         }
+
+        /** Same idea as overtimeCalculationService: legacy shift-net vs sum(hours_worked_today) does not apply. */
+        const manpowerByEmp = new Map<
+          string,
+          {
+            attendance_status?: string | null;
+            reporting_from_date?: string | null;
+            reporting_to_date?: string | null;
+            from_time?: string | null;
+            to_time?: string | null;
+          }
+        >();
+        if (workerIds.length > 0) {
+          const { data: mpRows } = await supabase
+            .from('prdn_reporting_manpower')
+            .select(
+              'emp_id, attendance_status, reporting_from_date, reporting_to_date, from_time, to_time'
+            )
+            .eq('stage_code', context.stageCode)
+            .eq('shift_code', context.shiftCode)
+            .lte('reporting_from_date', dateStr)
+            .gte('reporting_to_date', dateStr)
+            .in('status', ['draft', 'pending_approval'])
+            .eq('is_deleted', false)
+            .in('emp_id', workerIds);
+
+          (mpRows || []).forEach((r: any) => manpowerByEmp.set(r.emp_id, r));
+        }
         
         // Helper function to convert time to minutes
         const timeToMinutes = (timeStr: string): number => {
@@ -2140,6 +2172,20 @@ export async function handleSubmitReporting(context: EventHandlerContext) {
         for (const [workerId, workerReports] of reportsByWorker.entries()) {
           const workerInfo = workerShiftMap.get(workerId);
           if (!workerInfo) continue;
+
+          const mp = manpowerByEmp.get(workerId);
+          if (mp?.attendance_status === 'present' && mp.from_time && mp.to_time) {
+            const norm = (d: string | null | undefined) => (d ? String(d).split('T')[0].trim() : '');
+            const hm = (t: string | null | undefined) =>
+              t != null && String(t).trim() ? String(t).trim().substring(0, 5) : '';
+            const att = getAttendanceWallWindowMs({
+              attendanceFromDate: norm(mp.reporting_from_date),
+              attendanceToDate: norm(mp.reporting_to_date || mp.reporting_from_date),
+              attendanceFromTime: hm(mp.from_time),
+              attendanceToTime: hm(mp.to_time)
+            });
+            if (att) continue;
+          }
           
           // Calculate total worked time for this worker
           let totalWorkedMinutes = 0;

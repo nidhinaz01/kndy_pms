@@ -1,5 +1,6 @@
 import type { ProductionEmployee } from '$lib/api/production';
 import type { ManpowerTableFilters } from '$lib/types/manpowerTable';
+import { cOffNetWorkHours } from '$lib/utils/cOffWindowUtils';
 
 export function filterEmployees(
   data: ProductionEmployee[],
@@ -35,6 +36,14 @@ export function formatManpowerCOffValueDisplay(value: number | string | null | u
   const n = typeof value === 'number' ? value : parseFloat(String(value));
   if (!Number.isFinite(n)) return '0.0';
   return n.toFixed(1);
+}
+
+/** Manpower Report tab: show C-Off as net work hours (0, 4, 8, 12) matching stored day units. */
+export function formatManpowerCOffHoursDisplay(value: number | string | null | undefined): string {
+  if (value == null || value === '') return '0';
+  const n = typeof value === 'number' ? value : parseFloat(String(value));
+  if (!Number.isFinite(n)) return '0';
+  return String(cOffNetWorkHours(n));
 }
 
 export function calculateTotals(employees: ProductionEmployee[]) {

@@ -37,7 +37,7 @@
     <SortableHeader column="emp_name" {sortConfig} {onSort} label="Employee" />
     <SortableHeader column="skill_short" {sortConfig} {onSort} label="Skill" />
     <SortableHeader column="attendance_status" {sortConfig} {onSort} label="Status" />
-    <SortableHeader column="c_off_value" {sortConfig} {onSort} label="C-Off value" />
+    <SortableHeader column="c_off_value" {sortConfig} {onSort} label="C-Off Hours" />
     <SortableHeader column="stage" {sortConfig} {onSort} label="Current Stage" />
     <SortableHeader column="shift_code" {sortConfig} {onSort} label="Shift" />
     <SortableHeader column="planned_hours" {sortConfig} {onSort} label="Hours Planned / Shift Hours Planned" />
