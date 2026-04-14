@@ -167,6 +167,11 @@
     state.bulkCOffFromTime = '';
     state.bulkCOffToDate = '';
     state.bulkCOffToTime = '';
+    state.bulkOtHours = 0;
+    state.bulkOtFromDate = '';
+    state.bulkOtFromTime = '';
+    state.bulkOtToDate = '';
+    state.bulkOtToTime = '';
   }
 
   async function handleBulkAttendanceSubmit() {
@@ -263,6 +268,14 @@
       eventData.cOffFromTime = state.bulkCOffFromTime?.trim() || undefined;
       eventData.cOffToDate = state.bulkCOffToDate?.trim() || undefined;
       eventData.cOffToTime = state.bulkCOffToTime?.trim() || undefined;
+      const otNum = Number.isFinite(Number(state.bulkOtHours)) ? Math.max(0, Number(state.bulkOtHours)) : 0;
+      eventData.otHours = otNum;
+      if (otNum > 0) {
+        eventData.otFromDate = state.bulkOtFromDate?.trim() || undefined;
+        eventData.otFromTime = state.bulkOtFromTime?.trim() || undefined;
+        eventData.otToDate = state.bulkOtToDate?.trim() || undefined;
+        eventData.otToTime = state.bulkOtToTime?.trim() || undefined;
+      }
     }
     
     dispatch('bulkAttendanceMarked', eventData);
@@ -283,6 +296,11 @@
     state.bulkCOffFromTime = '';
     state.bulkCOffToDate = '';
     state.bulkCOffToTime = '';
+    state.bulkOtHours = 0;
+    state.bulkOtFromDate = '';
+    state.bulkOtFromTime = '';
+    state.bulkOtToDate = '';
+    state.bulkOtToTime = '';
     state.showBulkAttendanceModal = false;
     state.isBulkSubmitting = false;
   }
@@ -299,6 +317,11 @@
     state.bulkCOffFromTime = '';
     state.bulkCOffToDate = '';
     state.bulkCOffToTime = '';
+    state.bulkOtHours = 0;
+    state.bulkOtFromDate = '';
+    state.bulkOtFromTime = '';
+    state.bulkOtToDate = '';
+    state.bulkOtToTime = '';
   }
 
   function handleAttendanceToggle(employee: ProductionEmployee) {
@@ -516,6 +539,11 @@
     bind:bulkCOffFromTime={state.bulkCOffFromTime}
     bind:bulkCOffToDate={state.bulkCOffToDate}
     bind:bulkCOffToTime={state.bulkCOffToTime}
+    bind:bulkOtHours={state.bulkOtHours}
+    bind:bulkOtFromDate={state.bulkOtFromDate}
+    bind:bulkOtFromTime={state.bulkOtFromTime}
+    bind:bulkOtToDate={state.bulkOtToDate}
+    bind:bulkOtToTime={state.bulkOtToTime}
     isSubmitting={state.isBulkSubmitting}
     onStatusChange={(status) => state.bulkAttendanceStatus = status}
     onNotesChange={(notes) => state.bulkNotes = notes}

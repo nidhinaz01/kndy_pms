@@ -128,6 +128,7 @@ export async function getDraftWorkPlans(
         .eq('is_active', true)
         .eq('is_deleted', false)
         .order('from_time', { ascending: true })
+        .order('id', { ascending: true })
         .range(offset, offset + PAGE_SIZE - 1);
 
       if (error) {
@@ -494,7 +495,9 @@ export async function getDraftWorkReports(
         .eq('from_date', reportingDate)
         .in('status', ['draft', 'pending_approval', 'approved'])
         .eq('is_deleted', false)
+        // Tie-break on id: many workers share the same from_time; without this, keyset/range pagination can repeat rows.
         .order('from_time', { ascending: true })
+        .order('id', { ascending: true })
         .range(offset, offset + PAGE_SIZE - 1);
 
       if (error) throw error;
@@ -503,8 +506,21 @@ export async function getDraftWorkReports(
       hasMore = page.length === PAGE_SIZE;
       offset += PAGE_SIZE;
     }
-    await attachReportingWorkersToRows(allRows);
-    return allRows;
+    const seenReportIds = new Set<string>();
+    const dedupedRows: any[] = [];
+    for (const r of allRows) {
+      const rid = r?.id;
+      if (rid == null || rid === '') {
+        dedupedRows.push(r);
+        continue;
+      }
+      const key = String(rid);
+      if (seenReportIds.has(key)) continue;
+      seenReportIds.add(key);
+      dedupedRows.push(r);
+    }
+    await attachReportingWorkersToRows(dedupedRows);
+    return dedupedRows;
   } catch (error) {
     console.error('Error fetching draft work reports:', error);
     return [];

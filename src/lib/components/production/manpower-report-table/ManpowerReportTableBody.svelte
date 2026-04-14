@@ -38,11 +38,12 @@
     <SortableHeader column="skill_short" {sortConfig} {onSort} label="Skill" />
     <SortableHeader column="attendance_status" {sortConfig} {onSort} label="Status" />
     <SortableHeader column="c_off_value" {sortConfig} {onSort} label="C-Off Hours" />
+    <SortableHeader column="manpower_ot_hours" {sortConfig} {onSort} label="OT Hours" />
     <SortableHeader column="stage" {sortConfig} {onSort} label="Current Stage" />
     <SortableHeader column="shift_code" {sortConfig} {onSort} label="Shift" />
     <SortableHeader column="planned_hours" {sortConfig} {onSort} label="Hours Planned / Shift Hours Planned" />
     <SortableHeader column="reported_hours" {sortConfig} {onSort} label="Hours Reported / Shift Hours Reported" />
-    <SortableHeader column="overtime_hours" {sortConfig} {onSort} label="OT Hours" />
+    <SortableHeader column="ot_hours" {sortConfig} {onSort} label="Work OT (h)" />
     <SortableHeader column="lt_hours" {sortConfig} {onSort} label="LT Hours" />
     <SortableHeader column="ltp_hours" {sortConfig} {onSort} label="LTP Hours" />
     <SortableHeader column="ltnp_hours" {sortConfig} {onSort} label="LTNP Hours" />
@@ -54,7 +55,7 @@
 <tbody class="theme-bg-primary divide-y theme-border">
   {#if filteredData.length === 0}
     <tr>
-      <td colspan="16" class="px-6 py-4 text-center text-sm theme-text-secondary">
+      <td colspan="17" class="px-6 py-4 text-center text-sm theme-text-secondary">
         {data.length === 0 ? 'No employees found for this stage and date' : 'No employees match the current filters'}
       </td>
     </tr>

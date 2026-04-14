@@ -9,6 +9,10 @@ function isTraineePlanningRow(work: any): boolean {
   return typeof n === 'string' && n.trim().startsWith('Trainee:');
 }
 
+function normalizeReportingDateStr(d: string | null | undefined): string {
+  return d ? String(d).split('T')[0].trim() : '';
+}
+
 export async function saveMultiSkillReports(
   selectedWorks: any[],
   formData: MultiSkillReportFormData,
@@ -121,15 +125,89 @@ export async function saveMultiSkillReports(
     // Check if any works have reporting_id (indicating they're existing reports to update)
     const worksToUpdate = skillWorks.filter(work => work.reporting_id);
     const worksToInsert = skillWorks.filter(work => !work.reporting_id);
-    
-    // Prepare update data for existing reports
-    const updatePromises = worksToUpdate.map(async (work) => {
+
+    /** One draft/pending row per planning line + reporting date: merge hidden DB rows into update instead of insert. */
+    let existingDraftsForInsertPlans: { id: number; planning_id: number; worker_id: string | null; from_date: string }[] =
+      [];
+    if (worksToInsert.length > 0) {
+      const insertPlanningIds = [...new Set(worksToInsert.map((w) => w.id))];
+      const { data: existingDraftRows, error: existingDraftErr } = await supabase
+        .from('prdn_work_reporting')
+        .select('id, planning_id, worker_id, from_date')
+        .in('planning_id', insertPlanningIds)
+        .in('status', ['draft', 'pending_approval'])
+        .eq('is_deleted', false);
+      if (existingDraftErr) {
+        return { success: false, error: existingDraftErr.message || 'Could not load existing draft reports' };
+      }
+      existingDraftsForInsertPlans = existingDraftRows || [];
+    }
+
+    const duplicateReportIdsToSoftDelete = new Set<number>();
+    const insertWorksResolvedToUpdate: { reportId: number; work: any }[] = [];
+    const reportDataOnlyNewPlans: any[] = [];
+
+    for (const work of worksToInsert) {
+      const eff = getEffectiveRowTimes(String(work.id), formData);
+      const fromNorm = normalizeReportingDateStr(eff.fromDate);
+      const matches = existingDraftsForInsertPlans
+        .filter(
+          (r) =>
+            r.planning_id === work.id && normalizeReportingDateStr(r.from_date) === fromNorm
+        )
+        .sort((a, b) => a.id - b.id);
+
+      if (matches.length === 0) {
+        const hasDeviation = formData.deviations[work.id]?.hasDeviation || false;
+        const workerId = hasDeviation ? null : (formData.skillEmployees[work.id] || null);
+        const workerLtDetails = calculateLtDetailsForWorker(workerId);
+        const rowHoursWorked = eff.plannedHours;
+        reportDataOnlyNewPlans.push({
+          planning_id: work.id,
+          worker_id: workerId,
+          from_date: eff.fromDate,
+          from_time: eff.fromTime,
+          to_date: eff.toDate,
+          to_time: eff.toTime,
+          hours_worked_till_date: work.hours_worked_till_date || work.time_worked_till_date || 0,
+          hours_worked_today: rowHoursWorked,
+          completion_status: formData.completionStatus,
+          lt_minutes_total: formData.ltMinutes,
+          lt_details: workerLtDetails,
+          lt_comments: formData.ltComments,
+          status: 'draft',
+          created_by: currentUser,
+          created_dt: now,
+          modified_by: currentUser,
+          modified_dt: now
+        });
+      } else {
+        const keep = matches[0];
+        for (const extra of matches.slice(1)) {
+          duplicateReportIdsToSoftDelete.add(extra.id);
+        }
+        insertWorksResolvedToUpdate.push({ reportId: keep.id, work });
+      }
+    }
+
+    if (duplicateReportIdsToSoftDelete.size > 0) {
+      const { error: softDelErr } = await supabase
+        .from('prdn_work_reporting')
+        .update({
+          is_deleted: true,
+          modified_by: currentUser,
+          modified_dt: now
+        })
+        .in('id', Array.from(duplicateReportIdsToSoftDelete));
+      if (softDelErr) {
+        return { success: false, error: softDelErr.message || 'Could not remove duplicate draft reports' };
+      }
+    }
+
+    const updateOneReport = async (reportId: number, work: any) => {
       const hasDeviation = formData.deviations[work.id]?.hasDeviation || false;
       const workerId = hasDeviation ? null : (formData.skillEmployees[work.id] || null);
-      
-      // Calculate lt_details specific to this worker
       const workerLtDetails = calculateLtDetailsForWorker(workerId);
-      
       const eff = getEffectiveRowTimes(String(work.id), formData);
       const rowHoursWorked = eff.plannedHours;
 
@@ -148,58 +226,28 @@ export async function saveMultiSkillReports(
         modified_by: currentUser,
         modified_dt: now
       };
-      
+
       const { data, error } = await supabase
         .from('prdn_work_reporting')
         .update(updateData)
-        .eq('id', work.reporting_id)
+        .eq('id', reportId)
         .select()
         .single();
-      
+
       if (error) throw error;
       return data;
-    });
-    
-    // Prepare insert data for new reports
-    const reportData = worksToInsert.map(work => {
-      const hasDeviation = formData.deviations[work.id]?.hasDeviation || false;
-      const workerId = hasDeviation ? null : (formData.skillEmployees[work.id] || null);
-      
-      // Calculate lt_details specific to this worker
-      const workerLtDetails = calculateLtDetailsForWorker(workerId);
-      
-      const eff = getEffectiveRowTimes(String(work.id), formData);
-      const rowHoursWorked = eff.plannedHours;
+    };
 
-      return {
-        planning_id: work.id,
-        worker_id: workerId, // null if deviation, otherwise the assigned worker
-        from_date: eff.fromDate,
-        from_time: eff.fromTime,
-        to_date: eff.toDate,
-        to_time: eff.toTime,
-        hours_worked_till_date: work.hours_worked_till_date || work.time_worked_till_date || 0,
-        hours_worked_today: rowHoursWorked,
-        completion_status: formData.completionStatus,
-        lt_minutes_total: formData.ltMinutes,
-        lt_details: workerLtDetails, // Per-worker lost time details
-        lt_comments: formData.ltComments,
-        status: 'draft', // Save as draft
-        created_by: currentUser,
-        created_dt: now,
-        modified_by: currentUser,
-        modified_dt: now
-      };
-    });
+    const updatePromises = [
+      ...worksToUpdate.map((work) => updateOneReport(work.reporting_id, work)),
+      ...insertWorksResolvedToUpdate.map(({ reportId, work }) => updateOneReport(reportId, work))
+    ];
 
     // Execute updates and inserts
     const [updatedReports, insertResult] = await Promise.all([
       Promise.all(updatePromises),
-      reportData.length > 0 
-        ? supabase
-            .from('prdn_work_reporting')
-            .insert(reportData)
-            .select()
+      reportDataOnlyNewPlans.length > 0
+        ? supabase.from('prdn_work_reporting').insert(reportDataOnlyNewPlans).select()
         : Promise.resolve({ data: [], error: null })
     ]);
 

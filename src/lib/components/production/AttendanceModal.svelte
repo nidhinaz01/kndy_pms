@@ -5,7 +5,8 @@
   import { supabase } from '$lib/supabaseClient';
   import { calculateBreakTimeInMinutes } from '$lib/utils/breakTimeUtils';
   import { computeCOffToEndWithBreaks } from '$lib/utils/cOffWindowUtils';
-  import { validateCOffWithinAttendanceWindow, validateNetHoursForCoffAllow } from '$lib/utils/attendanceCOffSpanUtils';
+  import { validateCOffWithinAttendanceWindow } from '$lib/utils/attendanceCOffSpanUtils';
+  import { getShiftHourLimitHours, validateManpowerOtCoffBalance } from '$lib/utils/shiftHourLimitUtils';
 
   export let showModal: boolean = false;
   export let employee: ProductionEmployee | null = null;
@@ -30,6 +31,14 @@
   let cOffFromTime: string = '';
   let cOffToDate: string = '';
   let cOffToTime: string = '';
+
+  let otHours: number = 0;
+  let otFromDate: string = '';
+  let otFromTime: string = '';
+  let otToDate: string = '';
+  let otToTime: string = '';
+  /** From sys_data_elements (Shift Hour Limit); used for C‑Off + OT balance. */
+  let shiftHourLimitHours: number = 8;
 
   /** Maps to planning_from_date / planning_to_date or reporting_from_date / reporting_to_date. */
   let attendanceFromDate = '';
@@ -69,6 +78,30 @@
     return typeof selectedDate === 'string' ? selectedDate.split('T')[0] : '';
   }
 
+  function otHoursNumeric(v: unknown): number {
+    const n = typeof v === 'string' ? parseFloat(v) : Number(v);
+    return Number.isFinite(n) ? n : 0;
+  }
+
+  $: otHoursNum = otHoursNumeric(otHours);
+  $: showOtDateTimeFields = attendanceStatus === 'present' && otHoursNum > 0;
+
+  /** When OT &gt; 0, default OT dates to the attendance day; clear when OT is 0. */
+  $: if (attendanceStatus === 'present') {
+    if (otHoursNum > 0) {
+      const d = dayFromSelected();
+      if (d) {
+        if (!otFromDate?.trim()) otFromDate = d;
+        if (!otToDate?.trim()) otToDate = d;
+      }
+    } else {
+      otFromDate = '';
+      otFromTime = '';
+      otToDate = '';
+      otToTime = '';
+    }
+  }
+
   /** C-Off end: net work hours (0.5/1/1.5 day) plus shift breaks in the wall-clock window. */
   function computeCOffToEnd(fromDate: string, fromTime: string, offValue: number): { toDate: string; toTime: string } {
     return computeCOffToEndWithBreaks(fromDate, fromTime, offValue, shiftBreaks);
@@ -88,6 +121,11 @@
     cOffFromTime = '';
     cOffToDate = '';
     cOffToTime = '';
+    otHours = 0;
+    otFromDate = '';
+    otFromTime = '';
+    otToDate = '';
+    otToTime = '';
     attendanceFromDate = '';
     attendanceToDate = '';
   }
@@ -158,6 +196,12 @@
       );
       
       fullShiftHours = (shiftDurationMinutes - totalBreakMinutes) / 60;
+
+      try {
+        shiftHourLimitHours = await getShiftHourLimitHours();
+      } catch {
+        shiftHourLimitHours = 8;
+      }
 
       // Set default times and hours only if not already set from employee data
       // Don't reset if user is actively editing
@@ -359,6 +403,11 @@
         cOffFromTime = '';
         cOffToDate = '';
         cOffToTime = '';
+        otHours = 0;
+        otFromDate = '';
+        otFromTime = '';
+        otToDate = '';
+        otToTime = '';
         attendanceFromDate = '';
         attendanceToDate = '';
       } else {
@@ -381,6 +430,19 @@
           if (!cOffToDate?.trim()) cOffToDate = cOffFromDate;
           if (!cOffToTime?.trim()) syncCOffToEndFromStart();
         }
+
+        const rawOt = employee.manpower_ot_hours != null ? Number(employee.manpower_ot_hours) : 0;
+        otHours = Number.isFinite(rawOt) ? Math.max(0, rawOt) : 0;
+        const otd = employee.manpower_ot_from_date;
+        otFromDate = otd ? String(otd).split('T')[0] : '';
+        otFromTime = employee.manpower_ot_from_time
+          ? String(employee.manpower_ot_from_time).substring(0, 5)
+          : '';
+        const otd2 = employee.manpower_ot_to_date;
+        otToDate = otd2 ? String(otd2).split('T')[0] : '';
+        otToTime = employee.manpower_ot_to_time
+          ? String(employee.manpower_ot_to_time).substring(0, 5)
+          : '';
       }
       
       console.log('🔍 [AttendanceModal] Loaded times:', { fromTime, toTime });
@@ -434,7 +496,7 @@
     isEditingTime = false;
   }
 
-  function handleSubmit() {
+  async function handleSubmit() {
     if (!employee) {
       console.error('No employee selected for attendance marking');
       return;
@@ -451,11 +513,6 @@
     }
 
     if (attendanceStatus === 'present' && cOffValue > 0) {
-      const netHoursCheck = validateNetHoursForCoffAllow(currentHours);
-      if (!netHoursCheck.ok) {
-        alert(netHoursCheck.message);
-        return;
-      }
       if (!cOffFromDate?.trim() || !cOffFromTime?.trim()) {
         alert('C-Off: please set From Date and From Time when C-Off value is greater than zero.');
         return;
@@ -475,6 +532,33 @@
       });
       if (!spanCheck.ok) {
         alert(spanCheck.message);
+        return;
+      }
+    }
+
+    if (attendanceStatus === 'present') {
+      const otH = Number(otHours);
+      const otNum = Number.isFinite(otH) ? Math.max(0, otH) : 0;
+      if (otNum > 0.001) {
+        if (!otFromDate?.trim() || !otFromTime?.trim()) {
+          alert('OT: please set From Date and From Time when OT hours are greater than zero.');
+          return;
+        }
+      }
+      let L = shiftHourLimitHours;
+      try {
+        L = await getShiftHourLimitHours();
+      } catch {
+        L = 8;
+      }
+      const bal = validateManpowerOtCoffBalance(
+        currentHours,
+        L,
+        cOffValue,
+        otNum
+      );
+      if (!bal.ok) {
+        alert(bal.message);
         return;
       }
     }
@@ -507,6 +591,14 @@
       eventData.cOffFromTime = cOffFromTime?.trim() || undefined;
       eventData.cOffToDate = cOffToDate?.trim() || undefined;
       eventData.cOffToTime = cOffToTime?.trim() || undefined;
+      const otNum = Number.isFinite(Number(otHours)) ? Math.max(0, Number(otHours)) : 0;
+      eventData.otHours = otNum;
+      if (otNum > 0) {
+        eventData.otFromDate = otFromDate?.trim() || undefined;
+        eventData.otFromTime = otFromTime?.trim() || undefined;
+        eventData.otToDate = otToDate?.trim() || undefined;
+        eventData.otToTime = otToTime?.trim() || undefined;
+      }
       console.log('🔍 [AttendanceModal] Added time/hours to eventData:', {
         fromTime: eventData.fromTime,
         toTime: eventData.toTime,
@@ -542,6 +634,11 @@
     cOffFromTime = '';
     cOffToDate = '';
     cOffToTime = '';
+    otHours = 0;
+    otFromDate = '';
+    otFromTime = '';
+    otToDate = '';
+    otToTime = '';
     attendanceFromDate = '';
     attendanceToDate = '';
     isSubmitting = false;
@@ -697,8 +794,14 @@
                   value={String(cOffValue)}
                   on:change={(e) => {
                     const v = parseFloat(e.currentTarget.value);
-                    cOffValue = [0, 0.5, 1, 1.5].includes(v) ? v : 0;
-                    if (cOffValue > 0) {
+                    const next = [0, 0.5, 1, 1.5].includes(v) ? v : 0;
+                    cOffValue = next;
+                    if (next <= 0) {
+                      cOffFromDate = '';
+                      cOffFromTime = '';
+                      cOffToDate = '';
+                      cOffToTime = '';
+                    } else {
                       if (!cOffFromDate?.trim()) cOffFromDate = dayFromSelected();
                       if (!cOffFromTime?.trim() && fromTime?.trim()) cOffFromTime = fromTime.trim().substring(0, 5);
                       syncCOffToEndFromStart();
@@ -753,13 +856,85 @@
                     </div>
                   </div>
                   <p class="m-0 mt-2 text-xs leading-snug text-slate-600">
-                    To end uses net hours (0.5 / 1 / 1.5 day) plus shift breaks in that window—editable. C-Off is
-                    only allowed when attendance (excluding breaks) is exactly 4, 8, or 12 hours. C-Off must fall
-                    entirely within attendance from/to date and time (extend attendance if needed).
+                    To end uses net hours (0.5 / 1 / 1.5 day) plus shift breaks in that window—editable. C-Off must
+                    fall entirely within attendance from/to date and time (extend attendance if needed). With OT,
+                    (net attendance − {shiftHourLimitHours}h limit) must equal C‑Off hours + OT hours.
+                  </p>
+                {:else}
+                  <p class="m-0 mt-2 text-xs leading-snug text-slate-600">
+                    Select a C‑Off value (days) above to enter from/to dates and times.
                   </p>
                 {/if}
               {:else}
                 <p class="text-sm text-slate-600">C-Off cleared when absent.</p>
+              {/if}
+            </section>
+
+            <section
+              class="min-w-[180px] max-w-full flex-1 basis-[200px] rounded-lg border border-sky-300/80 bg-sky-50 p-3 text-slate-900 dark:border-sky-400/50 dark:bg-sky-100 dark:text-slate-900"
+            >
+              {#if attendanceStatus === 'present'}
+                <p class="mb-2 text-sm font-semibold text-slate-900">Overtime (optional)</p>
+                <label class="mb-1 block text-xs font-medium text-slate-700" for="ot-hours">OT hours</label>
+                <input
+                  id="ot-hours"
+                  type="number"
+                  min="0"
+                  max="24"
+                  step="0.25"
+                  bind:value={otHours}
+                  class="mb-2 w-full rounded-md border px-2 py-1.5 text-sm theme-border theme-bg-primary theme-text-primary focus:border-transparent focus:ring-2 focus:ring-blue-500"
+                />
+                {#if showOtDateTimeFields}
+                  <div class="grid grid-cols-2 gap-2">
+                    <div>
+                      <label for="ot-from-date" class="mb-1 block text-xs font-medium text-slate-700">From date</label>
+                      <input
+                        id="ot-from-date"
+                        type="date"
+                        bind:value={otFromDate}
+                        class="w-full rounded-md border px-2 py-1.5 text-sm theme-border theme-bg-primary theme-text-primary focus:border-transparent focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+                    <div>
+                      <label for="ot-from-time" class="mb-1 block text-xs font-medium text-slate-700">From time</label>
+                      <input
+                        id="ot-from-time"
+                        type="time"
+                        bind:value={otFromTime}
+                        class="w-full rounded-md border px-2 py-1.5 text-sm theme-border theme-bg-primary theme-text-primary focus:border-transparent focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+                    <div>
+                      <label for="ot-to-date" class="mb-1 block text-xs font-medium text-slate-700">To date</label>
+                      <input
+                        id="ot-to-date"
+                        type="date"
+                        bind:value={otToDate}
+                        class="w-full rounded-md border px-2 py-1.5 text-sm theme-border theme-bg-primary theme-text-primary focus:border-transparent focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+                    <div>
+                      <label for="ot-to-time" class="mb-1 block text-xs font-medium text-slate-700">To time</label>
+                      <input
+                        id="ot-to-time"
+                        type="time"
+                        bind:value={otToTime}
+                        class="w-full rounded-md border px-2 py-1.5 text-sm theme-border theme-bg-primary theme-text-primary focus:border-transparent focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+                  </div>
+                  <p class="m-0 mt-2 text-xs leading-snug text-slate-600">
+                    From / to dates default to the attendance day. Required when OT &gt; 0: from date &amp; time.
+                    Balance: (net hours after breaks) − {shiftHourLimitHours}h = C‑Off hours + OT hours.
+                  </p>
+                {:else}
+                  <p class="m-0 mt-2 text-xs leading-snug text-slate-600">
+                    Enter OT hours above to set from/to dates and times (dates default to the attendance day).
+                  </p>
+                {/if}
+              {:else}
+                <p class="text-sm text-slate-600">OT cleared when absent.</p>
               {/if}
             </section>
 

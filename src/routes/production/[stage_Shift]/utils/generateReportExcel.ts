@@ -124,14 +124,15 @@ export function generateReportExcel(
     ];
 
     // Create Worker Summary sheet (from Manpower Report data)
-    // Columns: Employee, Skill, Attendance Status, Hours Planned, Hours Reported, OT Hours, LT Hours, LTP Hours, LTNP Hours, To Other Stage, From Other Stage
+    // Columns: Employee, Skill, Attendance Status, Hours Planned, Hours Reported, Manpower OT, Work OT, LT Hours, ...
     const workerSummaryData = (manpowerEmployees || []).map(emp => ({
       'Employee': emp.emp_name || '',
       'Skill': emp.skill_short || '',
       'Attendance Status': emp.attendance_status === 'present' ? 'Present' : emp.attendance_status === 'absent' ? 'Absent' : (emp.attendance_status ? String(emp.attendance_status) : ''),
       'Hours Planned': emp.hours_planned != null ? emp.hours_planned : '',
       'Hours Reported': emp.hours_reported != null ? emp.hours_reported : 0,
-      'OT Hours': emp.ot_hours != null ? emp.ot_hours : 0,
+      'Manpower OT (h)': emp.manpower_ot_hours != null ? emp.manpower_ot_hours : 0,
+      'Work OT (h)': emp.ot_hours != null ? emp.ot_hours : 0,
       'LT Hours': emp.lt_hours != null ? emp.lt_hours : 0,
       'LTP Hours': emp.ltp_hours != null ? emp.ltp_hours : 0,
       'LTNP Hours': emp.ltnp_hours != null ? emp.ltnp_hours : 0,
@@ -153,7 +154,8 @@ export function generateReportExcel(
       { wch: 18 }, // Attendance Status
       { wch: 15 }, // Hours Planned
       { wch: 15 }, // Hours Reported
-      { wch: 12 }, // OT Hours
+      { wch: 14 }, // Manpower OT
+      { wch: 12 }, // Work OT
       { wch: 12 }, // LT Hours
       { wch: 12 }, // LTP Hours
       { wch: 12 }, // LTNP Hours

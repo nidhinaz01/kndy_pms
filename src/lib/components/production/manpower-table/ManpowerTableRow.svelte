@@ -108,6 +108,9 @@
   <td class="px-6 py-4 whitespace-nowrap text-sm tabular-nums {hasMismatchedHours ? 'text-gray-900 dark:text-yellow-100' : 'theme-text-primary'}">
     {formatManpowerCOffHoursDisplay(employee.c_off_value)}
   </td>
+  <td class="px-6 py-4 whitespace-nowrap text-sm tabular-nums {hasMismatchedHours ? 'text-gray-900 dark:text-yellow-100' : 'theme-text-primary'}">
+    {formatHours(employee.manpower_ot_hours ?? 0)}h
+  </td>
   <td class="px-6 py-4 whitespace-nowrap">
     <div class="flex items-center space-x-2">
       <div class="flex flex-col">

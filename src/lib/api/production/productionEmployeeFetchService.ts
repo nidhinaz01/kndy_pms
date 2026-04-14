@@ -345,7 +345,7 @@ export async function fetchProductionEmployees(
         // Include created_dt so we keep the most recent record when deduping (latest has planned_hours)
         attendanceQuery = supabase
           .from('prdn_planning_manpower')
-          .select('emp_id, attendance_status, planned_hours, planning_from_date, planning_to_date, from_time, to_time, notes, created_dt, c_off_value, c_off_from_date, c_off_from_time, c_off_to_date, c_off_to_time')
+          .select('emp_id, attendance_status, planned_hours, planning_from_date, planning_to_date, from_time, to_time, notes, created_dt, c_off_value, c_off_from_date, c_off_from_time, c_off_to_date, c_off_to_time, ot_hours, ot_from_date, ot_from_time, ot_to_date, ot_to_time')
           .in('emp_id', employeeIds)
           .eq('stage_code', stage)
           .lte('planning_from_date', date)
@@ -361,7 +361,7 @@ export async function fetchProductionEmployees(
         // Include draft, pending_approval, and approved statuses (all should show attendance)
         attendanceQuery = supabase
           .from('prdn_reporting_manpower')
-          .select('emp_id, attendance_status, actual_hours, reporting_from_date, reporting_to_date, from_time, to_time, notes, c_off_value, c_off_from_date, c_off_from_time, c_off_to_date, c_off_to_time')
+          .select('emp_id, attendance_status, actual_hours, reporting_from_date, reporting_to_date, from_time, to_time, notes, c_off_value, c_off_from_date, c_off_from_time, c_off_to_date, c_off_to_time, ot_hours, ot_from_date, ot_from_time, ot_to_date, ot_to_time')
           .in('emp_id', employeeIds)
           .eq('stage_code', stage)
           .lte('reporting_from_date', date)
@@ -892,6 +892,24 @@ export async function fetchProductionEmployees(
           : null,
         c_off_to_time: attendance?.c_off_to_time
           ? String(attendance.c_off_to_time).substring(0, 5)
+          : null,
+        manpower_ot_hours:
+          !attendance
+            ? undefined
+            : attendance.ot_hours != null && attendance.ot_hours !== ''
+              ? Number(attendance.ot_hours)
+              : 0,
+        manpower_ot_from_date: attendance?.ot_from_date
+          ? String(attendance.ot_from_date).split('T')[0]
+          : null,
+        manpower_ot_from_time: attendance?.ot_from_time
+          ? String(attendance.ot_from_time).substring(0, 5)
+          : null,
+        manpower_ot_to_date: attendance?.ot_to_date
+          ? String(attendance.ot_to_date).split('T')[0]
+          : null,
+        manpower_ot_to_time: attendance?.ot_to_time
+          ? String(attendance.ot_to_time).substring(0, 5)
           : null,
         hours_planned: plannedHoursMap.get(emp.emp_id) || 0,
         hours_reported: reportedHoursMap.get(emp.emp_id) || 0,

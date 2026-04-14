@@ -5,7 +5,8 @@
 import { supabase } from '$lib/supabaseClient';
 import { getCurrentUsername, getCurrentTimestamp } from '$lib/utils/userUtils';
 import { calculateBreakTimeInMinutes } from '$lib/utils/breakTimeUtils';
-import type { ManpowerCOffSave } from './productionTypes';
+import type { ManpowerCOffSave, ManpowerOTSave } from './productionTypes';
+import { getShiftHourLimitHours, validateManpowerOtCoffBalance } from '$lib/utils/shiftHourLimitUtils';
 
 /**
  * Row date span for manpower attendance — same as planning_from/to / reporting_from/to.
@@ -59,6 +60,55 @@ function manpowerCOffColumns(
     c_off_to_date: cOff?.cOffToDate ?? null,
     c_off_to_time: cOff?.cOffToTime ?? null
   };
+}
+
+/** DB columns for ot_* on prdn_planning_manpower / prdn_reporting_manpower. */
+function manpowerOTColumns(
+  attendanceStatus: 'present' | 'absent',
+  ot?: ManpowerOTSave | null
+): Record<string, unknown> {
+  if (attendanceStatus === 'absent') {
+    return {
+      ot_hours: 0,
+      ot_from_date: null,
+      ot_from_time: null,
+      ot_to_date: null,
+      ot_to_time: null
+    };
+  }
+  const raw = ot?.otHours != null ? Number(ot.otHours) : 0;
+  const h = Number.isFinite(raw) ? Math.min(24, Math.max(0, raw)) : 0;
+  if (h <= 0) {
+    return {
+      ot_hours: 0,
+      ot_from_date: null,
+      ot_from_time: null,
+      ot_to_date: null,
+      ot_to_time: null
+    };
+  }
+  return {
+    ot_hours: h,
+    ot_from_date: ot?.otFromDate ?? null,
+    ot_from_time: ot?.otFromTime ?? null,
+    ot_to_date: ot?.otToDate ?? null,
+    ot_to_time: ot?.otToTime ?? null
+  };
+}
+
+async function validatePresentNetOtCoff(
+  attendanceStatus: 'present' | 'absent',
+  netHours: number | null | undefined,
+  cOff?: ManpowerCOffSave | null,
+  ot?: ManpowerOTSave | null
+): Promise<{ ok: true } | { ok: false; message: string }> {
+  if (attendanceStatus !== 'present' || netHours == null || !Number.isFinite(netHours)) {
+    return { ok: true };
+  }
+  const L = await getShiftHourLimitHours();
+  const cv = cOff?.cOffValue != null ? Number(cOff.cOffValue) : 0;
+  const oh = ot?.otHours != null ? Number(ot.otHours) : 0;
+  return validateManpowerOtCoffBalance(netHours, L, cv, oh);
 }
 
 /**
@@ -140,7 +190,8 @@ export async function savePlannedAttendance(
   toTime?: string,
   attendanceFromDate?: string | null,
   attendanceToDate?: string | null,
-  cOff?: ManpowerCOffSave | null
+  cOff?: ManpowerCOffSave | null,
+  ot?: ManpowerOTSave | null
 ): Promise<{ success: boolean; error?: string }> {
   console.log('🔍 [savePlannedAttendance] Called with:', {
     empId,
@@ -186,6 +237,11 @@ export async function savePlannedAttendance(
           };
         }
       }
+
+      const bal = await validatePresentNetOtCoff(attendanceStatus, plannedHours, cOff, ot);
+      if (!bal.ok) {
+        return { success: false, error: bal.message };
+      }
     }
 
     // Check if record already exists
@@ -209,7 +265,8 @@ export async function savePlannedAttendance(
       modified_dt: now,
       planning_from_date: planSpan.from,
       planning_to_date: planSpan.to,
-      ...manpowerCOffColumns(attendanceStatus, cOff)
+      ...manpowerCOffColumns(attendanceStatus, cOff),
+      ...manpowerOTColumns(attendanceStatus, ot)
     };
 
     // Add time/hours fields only for present employees
@@ -261,7 +318,8 @@ export async function savePlannedAttendance(
         created_dt: now,
         modified_by: currentUser,
         modified_dt: now,
-        ...manpowerCOffColumns(attendanceStatus, cOff)
+        ...manpowerCOffColumns(attendanceStatus, cOff),
+        ...manpowerOTColumns(attendanceStatus, ot)
       };
 
       // Add time/hours fields only for present employees
@@ -303,7 +361,8 @@ export async function savePlannedAttendance(
       modified_dt: now,
       reporting_from_date: reportSpan.from,
       reporting_to_date: reportSpan.to,
-      ...manpowerCOffColumns(attendanceStatus, cOff)
+      ...manpowerCOffColumns(attendanceStatus, cOff),
+      ...manpowerOTColumns(attendanceStatus, ot)
     };
     if (attendanceStatus === 'present') {
       reportingPayload.actual_hours = plannedHours;
@@ -341,7 +400,8 @@ export async function savePlannedAttendance(
         created_dt: now,
         modified_by: currentUser,
         modified_dt: now,
-        ...manpowerCOffColumns(attendanceStatus, cOff)
+        ...manpowerCOffColumns(attendanceStatus, cOff),
+        ...manpowerOTColumns(attendanceStatus, ot)
       };
       if (attendanceStatus === 'present') {
         insertReporting.actual_hours = plannedHours;
@@ -499,7 +559,8 @@ export async function saveReportedManpower(
   toTime?: string,
   attendanceFromDate?: string | null,
   attendanceToDate?: string | null,
-  cOff?: ManpowerCOffSave | null
+  cOff?: ManpowerCOffSave | null,
+  ot?: ManpowerOTSave | null
 ): Promise<{ success: boolean; error?: string }> {
   try {
     const currentUser = getCurrentUsername();
@@ -568,6 +629,11 @@ export async function saveReportedManpower(
           };
         }
       }
+
+      const bal = await validatePresentNetOtCoff(attendanceStatus, actualHours, cOff, ot);
+      if (!bal.ok) {
+        return { success: false, error: bal.message };
+      }
     }
 
     // Check if record already exists
@@ -593,7 +659,8 @@ export async function saveReportedManpower(
       modified_dt: now,
       reporting_from_date: reportingSpan.from,
       reporting_to_date: reportingSpan.to,
-      ...manpowerCOffColumns(attendanceStatus, cOff)
+      ...manpowerCOffColumns(attendanceStatus, cOff),
+      ...manpowerOTColumns(attendanceStatus, ot)
     };
 
     // Add time/hours fields only for present employees
@@ -633,7 +700,8 @@ export async function saveReportedManpower(
         created_dt: now,
         modified_by: currentUser,
         modified_dt: now,
-        ...manpowerCOffColumns(attendanceStatus, cOff)
+        ...manpowerCOffColumns(attendanceStatus, cOff),
+        ...manpowerOTColumns(attendanceStatus, ot)
       };
 
       // Add time/hours fields only for present employees

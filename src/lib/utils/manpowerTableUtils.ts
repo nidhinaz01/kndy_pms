@@ -38,12 +38,12 @@ export function formatManpowerCOffValueDisplay(value: number | string | null | u
   return n.toFixed(1);
 }
 
-/** Manpower Report tab: show C-Off as net work hours (0, 4, 8, 12) matching stored day units. */
+/** C-Off column: net work hours (0, 4, 8, 12) from stored day units, with `h` suffix (e.g. `0h`) to match OT column. */
 export function formatManpowerCOffHoursDisplay(value: number | string | null | undefined): string {
-  if (value == null || value === '') return '0';
+  if (value == null || value === '') return '0h';
   const n = typeof value === 'number' ? value : parseFloat(String(value));
-  if (!Number.isFinite(n)) return '0';
-  return String(cOffNetWorkHours(n));
+  if (!Number.isFinite(n)) return '0h';
+  return `${cOffNetWorkHours(n)}h`;
 }
 
 export function calculateTotals(employees: ProductionEmployee[]) {

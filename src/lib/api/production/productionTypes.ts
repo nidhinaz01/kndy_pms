@@ -9,6 +9,15 @@ export interface ManpowerCOffSave {
   cOffToTime?: string | null;
 }
 
+/** OT fields saved with planned/reported manpower attendance (prdn_*_manpower.ot_*). */
+export interface ManpowerOTSave {
+  otHours: number;
+  otFromDate?: string | null;
+  otFromTime?: string | null;
+  otToDate?: string | null;
+  otToTime?: string | null;
+}
+
 export interface ProductionEmployee {
   id: number;
   emp_id: string;
@@ -33,8 +42,15 @@ export interface ProductionEmployee {
   c_off_from_time?: string | null;
   c_off_to_date?: string | null;
   c_off_to_time?: string | null;
+  /** Manpower row OT (DB prdn_*_manpower.ot_*), not work-report OT aggregate. */
+  manpower_ot_hours?: number | null;
+  manpower_ot_from_date?: string | null;
+  manpower_ot_from_time?: string | null;
+  manpower_ot_to_date?: string | null;
+  manpower_ot_to_time?: string | null;
   hours_planned?: number;
   hours_reported?: number;
+  /** Aggregated OT from work reporting (prdn_work_reporting); Manpower Report tab “Work OT”. */
   ot_hours?: number;
   lt_hours?: number;
   ltp_hours?: number;

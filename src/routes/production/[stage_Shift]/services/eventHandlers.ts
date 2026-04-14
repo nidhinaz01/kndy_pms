@@ -2,14 +2,14 @@ import { supabase } from '$lib/supabaseClient';
 import { getWaitingWorkOrdersForEntry, getAvailableWorkOrdersForExit, recordWorkOrderEntry, recordWorkOrderExit } from '../../services/stageWorkOrderService';
 import { submitPlanning, submitReporting } from '$lib/api/production/planningReportingService';
 import { savePlannedAttendance, savePlannedStageReassignment, saveReportedManpower, saveReportedStageReassignment } from '$lib/api/production/manpowerPlanningReportingService';
-import type { ManpowerCOffSave } from '$lib/api/production/productionTypes';
+import type { ManpowerCOffSave, ManpowerOTSave } from '$lib/api/production/productionTypes';
 import { convertPlanToDraftReport } from '$lib/services/convertPlanToDraftReportService';
 import { validateReportingAttendance } from '$lib/utils/reportingAttendanceValidation';
 import {
   getAttendanceWallWindowMs,
-  validateCOffWithinAttendanceWindow,
-  validateNetHoursForCoffAllow
+  validateCOffWithinAttendanceWindow
 } from '$lib/utils/attendanceCOffSpanUtils';
+import { getShiftHourLimitHours, validateManpowerOtCoffBalance } from '$lib/utils/shiftHourLimitUtils';
 
 /**
  * Update work status when skill competencies are deleted
@@ -1104,6 +1104,22 @@ function cOffPayloadFromEventDetail(
   };
 }
 
+function otPayloadFromEventDetail(
+  status: 'present' | 'absent',
+  detail: Record<string, unknown>
+): ManpowerOTSave | null | undefined {
+  if (status === 'absent') return undefined;
+  const raw = detail.otHours ?? detail.ot_hours;
+  const otHours = raw != null && raw !== '' ? Number(raw) : 0;
+  return {
+    otHours: Number.isFinite(otHours) ? Math.max(0, otHours) : 0,
+    otFromDate: (detail.otFromDate as string) || (detail.ot_from_date as string) || null,
+    otFromTime: (detail.otFromTime as string) || (detail.ot_from_time as string) || null,
+    otToDate: (detail.otToDate as string) || (detail.ot_to_date as string) || null,
+    otToTime: (detail.otToTime as string) || (detail.ot_to_time as string) || null
+  };
+}
+
 /**
  * Handle attendance marked
  */
@@ -1126,8 +1142,9 @@ export async function handleAttendanceMarked(context: EventHandlerContext, event
       ? ((event.detail as Record<string, unknown>).attendanceToDate as string)?.trim() || attendanceFromDate
       : undefined;
   const cOff = cOffPayloadFromEventDetail(status, event.detail as Record<string, unknown>);
+  const ot = otPayloadFromEventDetail(status, event.detail as Record<string, unknown>);
 
-  if (status === 'present' && cOff && Number(cOff.cOffValue) > 0) {
+  if (status === 'present') {
     const netHours =
       context.activeTab === 'manpower-plan'
         ? plannedHours != null && plannedHours !== ''
@@ -1136,24 +1153,32 @@ export async function handleAttendanceMarked(context: EventHandlerContext, event
         : actualHours != null && actualHours !== ''
           ? Number(actualHours)
           : null;
-    const netCheck = validateNetHoursForCoffAllow(netHours);
-    if (!netCheck.ok) {
-      alert(netCheck.message);
+    const L = await getShiftHourLimitHours();
+    const bal = validateManpowerOtCoffBalance(
+      netHours,
+      L,
+      cOff?.cOffValue != null ? Number(cOff.cOffValue) : 0,
+      ot?.otHours != null ? Number(ot.otHours) : 0
+    );
+    if (!bal.ok) {
+      alert(bal.message);
       return;
     }
-    const spanCheck = validateCOffWithinAttendanceWindow(Number(cOff.cOffValue), {
-      attendanceFromDate: attendanceFromDate ?? '',
-      attendanceToDate: attendanceToDate ?? attendanceFromDate ?? '',
-      attendanceFromTime: String(fromTime ?? '').trim(),
-      attendanceToTime: String(toTime ?? '').trim(),
-      cOffFromDate: String(cOff.cOffFromDate ?? '').trim(),
-      cOffFromTime: String(cOff.cOffFromTime ?? '').trim(),
-      cOffToDate: String(cOff.cOffToDate ?? '').trim(),
-      cOffToTime: String(cOff.cOffToTime ?? '').trim()
-    });
-    if (!spanCheck.ok) {
-      alert(spanCheck.message);
-      return;
+    if (cOff && Number(cOff.cOffValue) > 0) {
+      const spanCheck = validateCOffWithinAttendanceWindow(Number(cOff.cOffValue), {
+        attendanceFromDate: attendanceFromDate ?? '',
+        attendanceToDate: attendanceToDate ?? attendanceFromDate ?? '',
+        attendanceFromTime: String(fromTime ?? '').trim(),
+        attendanceToTime: String(toTime ?? '').trim(),
+        cOffFromDate: String(cOff.cOffFromDate ?? '').trim(),
+        cOffFromTime: String(cOff.cOffFromTime ?? '').trim(),
+        cOffToDate: String(cOff.cOffToDate ?? '').trim(),
+        cOffToTime: String(cOff.cOffToTime ?? '').trim()
+      });
+      if (!spanCheck.ok) {
+        alert(spanCheck.message);
+        return;
+      }
     }
   }
 
@@ -1186,7 +1211,8 @@ export async function handleAttendanceMarked(context: EventHandlerContext, event
         toTime,
         attendanceFromDate ?? null,
         attendanceToDate ?? null,
-        cOff
+        cOff,
+        ot ?? null
       );
       if (!result.success) {
         alert('Error saving planned attendance: ' + (result.error || 'Unknown error'));
@@ -1211,7 +1237,8 @@ export async function handleAttendanceMarked(context: EventHandlerContext, event
         toTime,
         attendanceFromDate ?? null,
         attendanceToDate ?? null,
-        cOff
+        cOff,
+        ot ?? null
       );
       if (!result.success) {
         alert('Error saving reported attendance: ' + (result.error || 'Unknown error'));
@@ -1248,8 +1275,9 @@ export async function handleBulkAttendanceMarked(context: EventHandlerContext, e
       ? ((event.detail as Record<string, unknown>).attendanceToDate as string)?.trim() || attendanceFromDate
       : undefined;
   const cOff = cOffPayloadFromEventDetail(status, event.detail as Record<string, unknown>);
+  const ot = otPayloadFromEventDetail(status, event.detail as Record<string, unknown>);
 
-  if (status === 'present' && cOff && Number(cOff.cOffValue) > 0) {
+  if (status === 'present') {
     const netHours =
       context.activeTab === 'manpower-plan'
         ? plannedHours != null && plannedHours !== ''
@@ -1258,24 +1286,32 @@ export async function handleBulkAttendanceMarked(context: EventHandlerContext, e
         : actualHours != null && actualHours !== ''
           ? Number(actualHours)
           : null;
-    const netCheck = validateNetHoursForCoffAllow(netHours);
-    if (!netCheck.ok) {
-      alert(netCheck.message);
+    const L = await getShiftHourLimitHours();
+    const bal = validateManpowerOtCoffBalance(
+      netHours,
+      L,
+      cOff?.cOffValue != null ? Number(cOff.cOffValue) : 0,
+      ot?.otHours != null ? Number(ot.otHours) : 0
+    );
+    if (!bal.ok) {
+      alert(bal.message);
       return;
     }
-    const spanCheck = validateCOffWithinAttendanceWindow(Number(cOff.cOffValue), {
-      attendanceFromDate: attendanceFromDate ?? '',
-      attendanceToDate: attendanceToDate ?? attendanceFromDate ?? '',
-      attendanceFromTime: String(fromTime ?? '').trim(),
-      attendanceToTime: String(toTime ?? '').trim(),
-      cOffFromDate: String(cOff.cOffFromDate ?? '').trim(),
-      cOffFromTime: String(cOff.cOffFromTime ?? '').trim(),
-      cOffToDate: String(cOff.cOffToDate ?? '').trim(),
-      cOffToTime: String(cOff.cOffToTime ?? '').trim()
-    });
-    if (!spanCheck.ok) {
-      alert(spanCheck.message);
-      return;
+    if (cOff && Number(cOff.cOffValue) > 0) {
+      const spanCheck = validateCOffWithinAttendanceWindow(Number(cOff.cOffValue), {
+        attendanceFromDate: attendanceFromDate ?? '',
+        attendanceToDate: attendanceToDate ?? attendanceFromDate ?? '',
+        attendanceFromTime: String(fromTime ?? '').trim(),
+        attendanceToTime: String(toTime ?? '').trim(),
+        cOffFromDate: String(cOff.cOffFromDate ?? '').trim(),
+        cOffFromTime: String(cOff.cOffFromTime ?? '').trim(),
+        cOffToDate: String(cOff.cOffToDate ?? '').trim(),
+        cOffToTime: String(cOff.cOffToTime ?? '').trim()
+      });
+      if (!spanCheck.ok) {
+        alert(spanCheck.message);
+        return;
+      }
     }
   }
 
@@ -1304,7 +1340,8 @@ export async function handleBulkAttendanceMarked(context: EventHandlerContext, e
             toTime,
             attendanceFromDate ?? null,
             attendanceToDate ?? null,
-            cOff
+            cOff,
+            ot ?? null
           )
         )
       );
@@ -1328,7 +1365,8 @@ export async function handleBulkAttendanceMarked(context: EventHandlerContext, e
             toTime,
             attendanceFromDate ?? null,
             attendanceToDate ?? null,
-            cOff
+            cOff,
+            ot ?? null
           )
         )
       );
@@ -1927,28 +1965,36 @@ export async function handleSubmitReporting(context: EventHandlerContext) {
       }
     }
     
-    // Check for overtime before submitting
-    const { calculateOvertime } = await import('$lib/services/overtimeCalculationService');
-    let otResult;
-    try {
-      otResult = await calculateOvertime(context.stageCode, dateStr, context.shiftCode);
-      
-      // Log any errors from overtime calculation for debugging
-      if (otResult.errors && otResult.errors.length > 0) {
-        console.warn('Overtime calculation warnings:', otResult.errors);
+    // OT gates only for employees with declared OT hours on reporting manpower (faster; no crew-wide OT scan).
+    const { calculateOvertime, getReportingManpowerOtEmpIds } = await import(
+      '$lib/services/overtimeCalculationService'
+    );
+    const manpowerOtEmpIds = await getReportingManpowerOtEmpIds(
+      context.stageCode,
+      dateStr,
+      context.shiftCode
+    );
+
+    if (manpowerOtEmpIds.length > 0) {
+      let otResult;
+      try {
+        otResult = await calculateOvertime(context.stageCode, dateStr, context.shiftCode, {
+          workerIdsOnly: manpowerOtEmpIds
+        });
+
+        if (otResult.errors && otResult.errors.length > 0) {
+          console.warn('Overtime calculation warnings:', otResult.errors);
+        }
+      } catch (error) {
+        console.error('Error calculating overtime:', error);
+        alert('Error checking overtime: ' + ((error as Error).message || 'Unknown error'));
+        context.setDraftReportLoading(false);
+        return;
       }
-    } catch (error) {
-      console.error('Error calculating overtime:', error);
-      alert('Error checking overtime: ' + ((error as Error).message || 'Unknown error'));
-      context.setDraftReportLoading(false);
-      return;
-    }
-    
-    // Fetch all reports for this stage and date to check OT status (both draft and pending_approval)
-    // When submitting, we need to check OT for all reports regardless of status
-    const { data: draftReports, error: draftReportsError } = await supabase
-      .from('prdn_work_reporting')
-      .select(`
+
+      const { data: draftReports, error: draftReportsError } = await supabase
+        .from('prdn_work_reporting')
+        .select(`
         id,
         overtime_minutes,
         overtime_amount,
@@ -1958,20 +2004,21 @@ export async function handleSubmitReporting(context: EventHandlerContext) {
         hours_worked_today,
         prdn_work_planning!inner(stage_code, shift_code)
       `)
-      .eq('from_date', dateStr)
-      .in('status', ['draft', 'pending_approval'])
-      .eq('is_deleted', false)
-      .eq('prdn_work_planning.stage_code', context.stageCode)
-      .eq('prdn_work_planning.shift_code', context.shiftCode);
-    
-    if (draftReportsError) {
-      console.error('Error fetching draft reports for OT check:', draftReportsError);
-      alert('Error checking overtime status: ' + draftReportsError.message);
-      context.setDraftReportLoading(false);
-      return;
-    }
-    
-    if (otResult.hasOvertime) {
+        .eq('from_date', dateStr)
+        .in('status', ['draft', 'pending_approval'])
+        .eq('is_deleted', false)
+        .eq('prdn_work_planning.stage_code', context.stageCode)
+        .eq('prdn_work_planning.shift_code', context.shiftCode)
+        .in('worker_id', manpowerOtEmpIds);
+
+      if (draftReportsError) {
+        console.error('Error fetching draft reports for OT check:', draftReportsError);
+        alert('Error checking overtime status: ' + draftReportsError.message);
+        context.setDraftReportLoading(false);
+        return;
+      }
+
+      if (otResult.hasOvertime) {
       // Check if all workers with OT have reported OT
       const allWorkersWithOTReported = otResult.workers.every(worker => 
         worker.works.every(work => {
@@ -1995,7 +2042,9 @@ export async function handleSubmitReporting(context: EventHandlerContext) {
       // Recalculate OT to validate stored values
       let revalidationResult;
       try {
-        revalidationResult = await calculateOvertime(context.stageCode, dateStr, context.shiftCode);
+        revalidationResult = await calculateOvertime(context.stageCode, dateStr, context.shiftCode, {
+          workerIdsOnly: manpowerOtEmpIds
+        });
       } catch (error) {
         console.error('Error revalidating overtime:', error);
         alert('Error validating overtime values: ' + ((error as Error).message || 'Unknown error'));
@@ -2278,7 +2327,8 @@ export async function handleSubmitReporting(context: EventHandlerContext) {
         }
       }
     }
-    
+    }
+
     // Submit the reporting
     const result = await submitReporting(context.stageCode, dateStr, context.shiftCode);
     

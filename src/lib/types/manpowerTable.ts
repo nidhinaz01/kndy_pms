@@ -27,6 +27,11 @@ export interface ManpowerTableState {
   bulkCOffFromTime: string;
   bulkCOffToDate: string;
   bulkCOffToTime: string;
+  bulkOtHours: number;
+  bulkOtFromDate: string;
+  bulkOtFromTime: string;
+  bulkOtToDate: string;
+  bulkOtToTime: string;
   isBulkSubmitting: boolean;
 }
 
@@ -58,6 +63,11 @@ export const initialManpowerTableState: ManpowerTableState = {
   bulkCOffFromTime: '',
   bulkCOffToDate: '',
   bulkCOffToTime: '',
+  bulkOtHours: 0,
+  bulkOtFromDate: '',
+  bulkOtFromTime: '',
+  bulkOtToDate: '',
+  bulkOtToTime: '',
   isBulkSubmitting: false
 };
 

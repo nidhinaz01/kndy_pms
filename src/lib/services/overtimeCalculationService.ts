@@ -48,6 +48,46 @@ export interface OvertimeCalculationResult {
   errors: string[];
 }
 
+export type CalculateOvertimeOptions = {
+  /** When set and non-empty, only these workers' draft reports are loaded and OT is computed for them only. */
+  workerIdsOnly?: readonly string[] | null;
+};
+
+/**
+ * Employees with declared work-report OT on reporting manpower (draft / pending_approval, date in span).
+ * Submit-time OT gates use this list so OT is not calculated for the whole crew.
+ */
+export async function getReportingManpowerOtEmpIds(
+  stageCode: string,
+  reportingDate: string,
+  shiftCode: string
+): Promise<string[]> {
+  const dateStr = reportingDate.includes('T') ? reportingDate.split('T')[0] : reportingDate;
+  const { data, error } = await supabase
+    .from('prdn_reporting_manpower')
+    .select('emp_id, ot_hours')
+    .eq('stage_code', stageCode)
+    .eq('shift_code', shiftCode)
+    .lte('reporting_from_date', dateStr)
+    .gte('reporting_to_date', dateStr)
+    .in('status', ['draft', 'pending_approval'])
+    .eq('is_deleted', false)
+    .not('ot_hours', 'is', null)
+    .gt('ot_hours', 0);
+
+  if (error) {
+    console.warn('getReportingManpowerOtEmpIds:', error.message);
+    return [];
+  }
+  const ids = new Set<string>();
+  for (const row of data || []) {
+    const id = (row as { emp_id?: string }).emp_id;
+    const h = Number((row as { ot_hours?: unknown }).ot_hours);
+    if (id && Number.isFinite(h) && h > 0) ids.add(id);
+  }
+  return Array.from(ids);
+}
+
 /**
  * Convert time string (HH:MM or HH:MM:SS) to minutes since midnight
  */
@@ -99,12 +139,14 @@ type ReportingManpowerRow = {
 };
 
 /**
- * Calculate overtime for all workers in a stage on a given date
+ * Calculate overtime for workers in a stage on a given date.
+ * Pass `options.workerIdsOnly` to limit to employees with declared OT on reporting manpower (faster submit gates).
  */
 export async function calculateOvertime(
   stageCode: string,
   reportingDate: string,
-  shiftCode: string
+  shiftCode: string,
+  options?: CalculateOvertimeOptions
 ): Promise<OvertimeCalculationResult> {
   const errors: string[] = [];
   const workers: WorkerOvertime[] = [];
@@ -113,13 +155,18 @@ export async function calculateOvertime(
     // Ensure date is in YYYY-MM-DD format
     const dateStr = reportingDate.includes('T') ? reportingDate.split('T')[0] : reportingDate;
 
+    const onlyIds = options?.workerIdsOnly;
+    if (onlyIds != null && onlyIds.length === 0) {
+      return { hasOvertime: false, workers: [], errors: [] };
+    }
+
     // 1. Get all work reports for this stage and date (paginated to avoid 1000-row limit)
     const PAGE_SIZE = 1000;
     const draftReports: any[] = [];
     let offset = 0;
     let hasMore = true;
     while (hasMore) {
-      const { data: page, error: reportsError } = await supabase
+      let reportsQuery = supabase
         .from('prdn_work_reporting')
         .select(`
           id,
@@ -153,6 +200,12 @@ export async function calculateOvertime(
         .eq('prdn_work_planning.shift_code', shiftCode)
         .order('id')
         .range(offset, offset + PAGE_SIZE - 1);
+
+      if (onlyIds && onlyIds.length > 0) {
+        reportsQuery = reportsQuery.in('worker_id', [...onlyIds]);
+      }
+
+      const { data: page, error: reportsError } = await reportsQuery;
 
       if (reportsError) {
         errors.push(`Error fetching draft reports: ${reportsError.message}`);

@@ -7,7 +7,8 @@
   import { filterGroupedWorksBySearch } from '../utils/productionTabSearchUtils';
   import { formatDateTimeLocal } from '$lib/utils/formatDate';
   import OvertimeReportingModal from './OvertimeReportingModal.svelte';
-  import { calculateOvertime } from '$lib/services/overtimeCalculationService';
+  import { calculateOvertime, getReportingManpowerOtEmpIds } from '$lib/services/overtimeCalculationService';
+  import { validateEmployeeShiftReporting } from '$lib/api/production/reportingValidationService';
   import type { WorkerOvertime } from '$lib/services/overtimeCalculationService';
   import { sortTableData, handleSortClick, type SortConfig } from '$lib/utils/tableSorting';
 
@@ -27,6 +28,8 @@
   let isCalculatingOT = false;
   let hasOvertime = false;
   let otReported = false;
+  /** Same checks as submit: all present / reassigned-in employees have work hours aligned with manpower before Report OT. */
+  let allEmployeeReportingComplete = true;
   let searchTerm = '';
   let sortConfig: SortConfig = { column: null, direction: null };
 
@@ -99,12 +102,44 @@
     return tokens.join(' + ');
   }
 
+  function reportingDateStr(): string {
+    if (!selectedDate) return '';
+    return typeof selectedDate === 'string'
+      ? selectedDate.split('T')[0]
+      : new Date(selectedDate).toISOString().split('T')[0];
+  }
+
   async function handleReportOT() {
     isCalculatingOT = true;
     try {
-      // Always try calculateOvertime first
-      const result = await calculateOvertime(stageCode, selectedDate, shiftCode);
-      
+      const otEmpIds = await getReportingManpowerOtEmpIds(stageCode, selectedDate, shiftCode);
+      if (otEmpIds.length === 0) {
+        alert(
+          'No employees have OT hours on reporting manpower for this date.\n\n' +
+            'Set OT hours on attendance first, then use Report OT.'
+        );
+        return;
+      }
+
+      const dateStr = reportingDateStr();
+      const reportingValidation = await validateEmployeeShiftReporting(stageCode, shiftCode, dateStr);
+      if (!reportingValidation.isValid) {
+        const lines = reportingValidation.errors.slice(0, 8).join('\n');
+        alert(
+          'Report OT is available only after reporting is complete for every employee on this shift.\n\n' +
+            'Fix the following first, then try again:\n\n' +
+            lines +
+            (reportingValidation.errors.length > 8
+              ? `\n\n... and ${reportingValidation.errors.length - 8} more`
+              : '')
+        );
+        return;
+      }
+
+      const result = await calculateOvertime(stageCode, selectedDate, shiftCode, {
+        workerIdsOnly: otEmpIds
+      });
+
       if (result.hasOvertime && result.workers.length > 0) {
         overtimeData = result.workers;
         showOvertimeModal = true;
@@ -189,7 +224,21 @@
 
   async function checkOvertime() {
     try {
-      const result = await calculateOvertime(stageCode, selectedDate, shiftCode);
+      const dateStr = reportingDateStr();
+      const otEmpIds = await getReportingManpowerOtEmpIds(stageCode, selectedDate, shiftCode);
+      if (otEmpIds.length === 0) {
+        hasOvertime = false;
+        otReported = true;
+        allEmployeeReportingComplete = true;
+        return;
+      }
+
+      const reportingValidation = await validateEmployeeShiftReporting(stageCode, shiftCode, dateStr);
+      allEmployeeReportingComplete = reportingValidation.isValid;
+
+      const result = await calculateOvertime(stageCode, selectedDate, shiftCode, {
+        workerIdsOnly: otEmpIds
+      });
       const detectedOvertime = result.hasOvertime;
 
       hasOvertime = detectedOvertime;
@@ -224,11 +273,17 @@
       console.error('Error checking overtime:', error);
       hasOvertime = false;
       otReported = false;
+      allEmployeeReportingComplete = false;
     }
   }
 
-  // Check overtime when component loads or data changes
-  $: if (stageCode && selectedDate && draftReportData.length > 0) {
+  // Check overtime when component loads or data changes (manpower + drafts drive completeness)
+  $: if (
+    stageCode &&
+    shiftCode &&
+    selectedDate &&
+    (draftReportData.length > 0 || draftManpowerReportData.length > 0)
+  ) {
     checkOvertime();
   }
 
@@ -239,13 +294,30 @@
   $: isApproved = reportingSubmissionStatus?.status === 'approved';
   $: isRejected = reportingSubmissionStatus?.status === 'rejected';
   $: canEdit = !hasSubmission || isRejected; // Can edit if no submission or if rejected
-  $: shouldDisableSubmit = isLoading || totalReports === 0 || isPendingApproval || isApproved || (hasOvertime && !otReported);
+  $: shouldDisableSubmit =
+    isLoading ||
+    totalReports === 0 ||
+    isPendingApproval ||
+    isApproved ||
+    (hasOvertime && (!otReported || !allEmployeeReportingComplete));
   $: submitDisabledReason = (() => {
     if (isLoading) return 'Loading data...';
     if (totalReports === 0) return 'No reports to submit';
     if (isPendingApproval) return 'Report is pending approval';
     if (isApproved) return 'Report has been approved';
+    if (hasOvertime && !allEmployeeReportingComplete)
+      return 'Finish reporting for all employees (manpower + work hours), then use Report OT.';
     if (hasOvertime && !otReported) return 'Overtime detected but not reported. Please click "Report OT" first.';
+    return null;
+  })();
+
+  $: reportOtDisabledReason = (() => {
+    if (isLoading) return 'Loading...';
+    if (isPendingApproval || isApproved) return 'Not editable in this status.';
+    if (!hasOvertime) return 'No calculated overtime for employees with OT hours on manpower.';
+    if (!allEmployeeReportingComplete)
+      return 'Complete reporting for every employee on this shift (attendance and work hours) before Report OT.';
+    if (otReported) return 'Overtime already saved for this calculation.';
     return null;
   })();
 
@@ -284,6 +356,44 @@
         minute: '2-digit'
       })
     : null;
+
+  type DuplicateWorkerReportHint = {
+    planningId: number;
+    workerId: string;
+    workerName: string;
+    count: number;
+    reportIds: number[];
+  };
+
+  /** More than one draft row for the same planning line + worker (different report ids). */
+  $: duplicateWorkerReportHints = ((): DuplicateWorkerReportHint[] => {
+    const byKey = new Map<string, DuplicateWorkerReportHint>();
+    for (const r of allDraftReports) {
+      const pidRaw = r.planning_id ?? r.prdn_work_planning?.id;
+      const wid = r.worker_id;
+      if (pidRaw == null || wid == null || String(wid).trim() === '') continue;
+      const planningId = Number(pidRaw);
+      if (!Number.isFinite(planningId)) continue;
+      const workerId = String(wid).trim();
+      const key = `${planningId}_${workerId}`;
+      const name = r.reporting_hr_emp?.emp_name || workerId;
+      const rid = Number(r.id);
+      const prev = byKey.get(key);
+      if (prev) {
+        prev.count += 1;
+        if (Number.isFinite(rid)) prev.reportIds.push(rid);
+      } else {
+        byKey.set(key, {
+          planningId,
+          workerId,
+          workerName: name,
+          count: 1,
+          reportIds: Number.isFinite(rid) ? [rid] : []
+        });
+      }
+    }
+    return [...byKey.values()].filter((h) => h.count > 1);
+  })();
 </script>
 
 <div class="theme-bg-primary rounded-lg shadow border theme-border p-6">
@@ -333,7 +443,8 @@
         variant="warning" 
         size="sm" 
         on:click={handleReportOT}
-        disabled={isLoading || isCalculatingOT || !hasOvertime || otReported || isPendingApproval || isApproved}
+        disabled={isLoading || isCalculatingOT || !hasOvertime || !allEmployeeReportingComplete || otReported || isPendingApproval || isApproved}
+        title={reportOtDisabledReason || ''}
       >
         {isCalculatingOT ? 'Calculating...' : 'Report OT'}
       </Button>
@@ -357,6 +468,34 @@
       />
     </div>
   </div>
+
+  {#if duplicateWorkerReportHints.length > 0}
+    <div
+      class="mt-3 p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg"
+      role="status"
+    >
+      <p class="text-sm font-medium text-amber-900 dark:text-amber-200">
+        Possible duplicate draft reports
+      </p>
+      <p class="text-xs text-amber-800 dark:text-amber-300 mt-1">
+        There is more than one draft row for the same planned work line and the same worker. Totals and submit
+        checks can be wrong until extras are removed. Delete spare rows or merge in the database, then click
+        Refresh.
+      </p>
+      <ul class="mt-2 text-xs text-amber-900 dark:text-amber-200 list-disc pl-4 space-y-1">
+        {#each duplicateWorkerReportHints.slice(0, 8) as d}
+          <li>
+            {d.workerName} — planning #{d.planningId} — {d.count} rows (report ids: {d.reportIds.join(', ')})
+          </li>
+        {/each}
+      </ul>
+      {#if duplicateWorkerReportHints.length > 8}
+        <p class="text-xs mt-1 text-amber-800 dark:text-amber-300">
+          … and {duplicateWorkerReportHints.length - 8} more.
+        </p>
+      {/if}
+    </div>
+  {/if}
   
   <!-- Submit Disabled Message -->
   {#if shouldDisableSubmit && submitDisabledReason && !isPendingApproval && !isApproved}
@@ -742,9 +881,18 @@
             Overtime Detected
           </h3>
           <div class="mt-2 text-sm text-orange-700 dark:text-orange-400">
-            <p>
-              Some workers have worked beyond their shift time. Please click "Report OT" to calculate and record overtime hours and amounts before submitting the report.
-            </p>
+            {#if !allEmployeeReportingComplete}
+              <p>
+                Reporting is not complete for every employee on this shift (see Manpower Report and draft work
+                rows). Finish attendance and work hours for all employees first, then use Report OT so overtime can
+                be applied in one pass.
+              </p>
+            {:else}
+              <p>
+                Some workers have worked beyond their shift time. Please click "Report OT" to calculate and record
+                overtime hours and amounts before submitting the report.
+              </p>
+            {/if}
           </div>
         </div>
       </div>

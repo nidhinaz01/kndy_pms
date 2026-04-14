@@ -5,7 +5,8 @@
   import { supabase } from '$lib/supabaseClient';
   import { calculateBreakTimeInMinutes } from '$lib/utils/breakTimeUtils';
   import { computeCOffToEndWithBreaks } from '$lib/utils/cOffWindowUtils';
-  import { validateCOffWithinAttendanceWindow, validateNetHoursForCoffAllow } from '$lib/utils/attendanceCOffSpanUtils';
+  import { validateCOffWithinAttendanceWindow } from '$lib/utils/attendanceCOffSpanUtils';
+  import { getShiftHourLimitHours, validateManpowerOtCoffBalance } from '$lib/utils/shiftHourLimitUtils';
 
   export let showModal: boolean = false;
   export let selectedCount: number = 0;
@@ -31,12 +32,19 @@
   export let bulkCOffToDate: string = '';
   export let bulkCOffToTime: string = '';
 
+  export let bulkOtHours: number = 0;
+  export let bulkOtFromDate: string = '';
+  export let bulkOtFromTime: string = '';
+  export let bulkOtToDate: string = '';
+  export let bulkOtToTime: string = '';
+
   // Shift information
   let shiftStartTime: string = '08:00';
   let shiftEndTime: string = '17:00';
   let fullShiftHours: number = 8;
   let shiftBreaks: Array<{ start_time: string; end_time: string }> = [];
   let isLoadingShiftInfo = false;
+  let shiftHourLimitHours: number = 8;
 
   $: if (bulkAttendanceStatus === 'absent') {
     bulkCOffValue = 0;
@@ -44,10 +52,38 @@
     bulkCOffFromTime = '';
     bulkCOffToDate = '';
     bulkCOffToTime = '';
+    bulkOtHours = 0;
+    bulkOtFromDate = '';
+    bulkOtFromTime = '';
+    bulkOtToDate = '';
+    bulkOtToTime = '';
   }
 
   function bulkDayStr(): string {
     return typeof selectedDate === 'string' ? selectedDate.split('T')[0] : '';
+  }
+
+  function bulkOtNumeric(v: unknown): number {
+    const n = typeof v === 'string' ? parseFloat(v) : Number(v);
+    return Number.isFinite(n) ? n : 0;
+  }
+
+  $: bulkOtNum = bulkOtNumeric(bulkOtHours);
+  $: bulkShowOtDateTimeFields = bulkAttendanceStatus === 'present' && bulkOtNum > 0;
+
+  $: if (bulkAttendanceStatus === 'present') {
+    if (bulkOtNum > 0) {
+      const d = bulkDayStr();
+      if (d) {
+        if (!bulkOtFromDate?.trim()) bulkOtFromDate = d;
+        if (!bulkOtToDate?.trim()) bulkOtToDate = d;
+      }
+    } else {
+      bulkOtFromDate = '';
+      bulkOtFromTime = '';
+      bulkOtToDate = '';
+      bulkOtToTime = '';
+    }
   }
 
   function syncBulkCOffToEndFromStart() {
@@ -129,6 +165,12 @@
 
       fullShiftHours = (shiftDurationMinutes - totalBreakMinutes) / 60;
 
+      try {
+        shiftHourLimitHours = await getShiftHourLimitHours();
+      } catch {
+        shiftHourLimitHours = 8;
+      }
+
       // Set default times and hours (normalize to HH:MM)
       if (!fromTime) fromTime = shiftStartTime ? shiftStartTime.substring(0, 5) : '';
       if (!toTime) toTime = shiftEndTime ? shiftEndTime.substring(0, 5) : '';
@@ -181,17 +223,12 @@
     loadShiftInfo();
   }
 
-  function handleSaveClick() {
+  async function handleSaveClick() {
     if (bulkAttendanceStatus !== 'present') {
       onSubmit();
       return;
     }
     if (bulkCOffValue > 0) {
-      const netHoursCheck = validateNetHoursForCoffAllow(plannedHours);
-      if (!netHoursCheck.ok) {
-        alert(netHoursCheck.message);
-        return;
-      }
       if (!bulkCOffFromDate?.trim() || !bulkCOffFromTime?.trim()) {
         alert('C-Off: please set From Date and From Time when C-Off value is greater than zero.');
         return;
@@ -212,6 +249,24 @@
         alert(spanCheck.message);
         return;
       }
+    }
+    const otNum = Number.isFinite(Number(bulkOtHours)) ? Math.max(0, Number(bulkOtHours)) : 0;
+    if (otNum > 0.001) {
+      if (!bulkOtFromDate?.trim() || !bulkOtFromTime?.trim()) {
+        alert('OT: please set From Date and From Time when OT hours are greater than zero.');
+        return;
+      }
+    }
+    let L = shiftHourLimitHours;
+    try {
+      L = await getShiftHourLimitHours();
+    } catch {
+      L = 8;
+    }
+    const bal = validateManpowerOtCoffBalance(plannedHours, L, bulkCOffValue, otNum);
+    if (!bal.ok) {
+      alert(bal.message);
+      return;
     }
     onSubmit();
   }
@@ -348,8 +403,14 @@
                 value={String(bulkCOffValue)}
                 on:change={(e) => {
                   const v = parseFloat(e.currentTarget.value);
-                  bulkCOffValue = [0, 0.5, 1, 1.5].includes(v) ? v : 0;
-                  if (bulkCOffValue > 0) {
+                  const next = [0, 0.5, 1, 1.5].includes(v) ? v : 0;
+                  bulkCOffValue = next;
+                  if (next <= 0) {
+                    bulkCOffFromDate = '';
+                    bulkCOffFromTime = '';
+                    bulkCOffToDate = '';
+                    bulkCOffToTime = '';
+                  } else {
                     if (!bulkCOffFromDate?.trim()) bulkCOffFromDate = bulkDayStr();
                     if (!bulkCOffFromTime?.trim() && fromTime?.trim())
                       bulkCOffFromTime = fromTime.trim().substring(0, 5);
@@ -413,13 +474,84 @@
                   </div>
                 </div>
                 <p class="m-0 mt-2 text-xs leading-snug text-slate-600">
-                  To end uses net hours (0.5 / 1 / 1.5 day) plus shift breaks in that window—editable. C-Off is only
-                  allowed when planned attendance (excluding breaks) is exactly 4, 8, or 12 hours. C-Off must fall
-                  entirely within attendance from/to times (extend shift end time if needed).
+                  To end uses net hours (0.5 / 1 / 1.5 day) plus shift breaks in that window—editable. C-Off must
+                  fall entirely within attendance times. (Net hours − {shiftHourLimitHours}h) = C‑Off hours + OT
+                  hours.
+                </p>
+              {:else}
+                <p class="m-0 mt-2 text-xs leading-snug text-slate-600">
+                  Select a C‑Off value (days) above to enter from/to dates and times.
                 </p>
               {/if}
             {:else}
               <p class="text-sm text-slate-600">C-Off cleared when absent.</p>
+            {/if}
+          </section>
+
+          <section
+            class="min-w-[180px] max-w-full flex-1 basis-[200px] rounded-lg border border-sky-300/80 bg-sky-50 p-3 text-slate-900 dark:border-sky-400/50 dark:bg-sky-100 dark:text-slate-900"
+          >
+            {#if bulkAttendanceStatus === 'present'}
+              <p class="mb-2 text-sm font-semibold text-slate-900">Overtime (optional)</p>
+              <label class="mb-1 block text-xs font-medium text-slate-700" for="bulk-ot-hours">OT hours</label>
+              <input
+                id="bulk-ot-hours"
+                type="number"
+                min="0"
+                max="24"
+                step="0.25"
+                bind:value={bulkOtHours}
+                class="mb-2 w-full rounded-md border px-2 py-1.5 text-sm theme-border theme-bg-primary theme-text-primary focus:border-transparent focus:ring-2 focus:ring-blue-500"
+              />
+              {#if bulkShowOtDateTimeFields}
+                <div class="grid grid-cols-2 gap-2">
+                  <div>
+                    <label for="bulk-ot-from-date" class="mb-1 block text-xs font-medium text-slate-700">From date</label>
+                    <input
+                      id="bulk-ot-from-date"
+                      type="date"
+                      bind:value={bulkOtFromDate}
+                      class="w-full rounded-md border px-2 py-1.5 text-sm theme-border theme-bg-primary theme-text-primary focus:border-transparent focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label for="bulk-ot-from-time" class="mb-1 block text-xs font-medium text-slate-700">From time</label>
+                    <input
+                      id="bulk-ot-from-time"
+                      type="time"
+                      bind:value={bulkOtFromTime}
+                      class="w-full rounded-md border px-2 py-1.5 text-sm theme-border theme-bg-primary theme-text-primary focus:border-transparent focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label for="bulk-ot-to-date" class="mb-1 block text-xs font-medium text-slate-700">To date</label>
+                    <input
+                      id="bulk-ot-to-date"
+                      type="date"
+                      bind:value={bulkOtToDate}
+                      class="w-full rounded-md border px-2 py-1.5 text-sm theme-border theme-bg-primary theme-text-primary focus:border-transparent focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label for="bulk-ot-to-time" class="mb-1 block text-xs font-medium text-slate-700">To time</label>
+                    <input
+                      id="bulk-ot-to-time"
+                      type="time"
+                      bind:value={bulkOtToTime}
+                      class="w-full rounded-md border px-2 py-1.5 text-sm theme-border theme-bg-primary theme-text-primary focus:border-transparent focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                </div>
+                <p class="m-0 mt-2 text-xs leading-snug text-slate-600">
+                  From / to dates default to the attendance day. Required: from date &amp; time when OT &gt; 0.
+                </p>
+              {:else}
+                <p class="m-0 mt-2 text-xs leading-snug text-slate-600">
+                  Enter OT hours above to set from/to dates and times (dates default to the attendance day).
+                </p>
+              {/if}
+            {:else}
+              <p class="text-sm text-slate-600">OT cleared when absent.</p>
             {/if}
           </section>
 
