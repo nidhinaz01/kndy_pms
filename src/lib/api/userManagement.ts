@@ -6,12 +6,14 @@ export type {
   SupabaseAuthUser,
   AppUser,
   Menu,
+  MenuRedirect,
   UserMenuMapping,
   CreateUserData,
   UpdateUserData,
   CreateMenuData,
   UpdateMenuData,
-  CreateUserMenuMappingData
+  CreateUserMenuMappingData,
+  UpsertMenuRedirectData
 } from './user-management/userManagementTypes';
 
 // User Services
@@ -28,10 +30,14 @@ export {
 // Menu Services
 export {
   fetchMenus,
+  fetchMenusWithRedirectPath,
   fetchMenuById,
   createMenu,
   updateMenu,
-  deleteMenu
+  deleteMenu,
+  fetchMenuRedirects,
+  upsertMenuRedirect,
+  deleteMenuRedirect
 } from './user-management/userManagementMenuService';
 
 // User Menu Mapping Services

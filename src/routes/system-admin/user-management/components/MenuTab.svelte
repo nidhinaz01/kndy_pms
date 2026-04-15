@@ -1,8 +1,8 @@
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
-  import DataTable from '$lib/components/common/DataTable.svelte';
   import Button from '$lib/components/common/Button.svelte';
   import { Edit, Trash2 } from 'lucide-svelte';
+  import { buildMenuTree } from '../utils/menuTreeUtils';
   
   export let menuItems: any[] = [];
   export let isLoading: boolean = false;
@@ -11,6 +11,7 @@
   export let menuForm: {
     menu_name: string;
     menu_path: string;
+    redirect_path: string;
     parent_menu_id: string | null;
     menu_order: number;
     is_visible: boolean;
@@ -30,6 +31,41 @@
   function handleSave() {
     dispatch('save-menu');
   }
+
+  type FlatMenuRow = {
+    menu_id: string;
+    menu_name: string;
+    menu_path: string;
+    redirect_path?: string | null;
+    parent_menu_id?: string | null;
+    menu_order: number;
+    is_visible: boolean;
+    is_enabled: boolean;
+    depth: number;
+  };
+
+  function flattenMenuTree(nodes: any[], depth = 0): FlatMenuRow[] {
+    const rows: FlatMenuRow[] = [];
+    const sortedNodes = [...(nodes || [])].sort((a, b) => {
+      const orderDelta = (a.menu_order || 0) - (b.menu_order || 0);
+      if (orderDelta !== 0) return orderDelta;
+      return String(a.menu_name || '').localeCompare(String(b.menu_name || ''));
+    });
+
+    sortedNodes.forEach((node) => {
+      rows.push({
+        ...node,
+        depth
+      });
+      if (node.submenus?.length) {
+        rows.push(...flattenMenuTree(node.submenus, depth + 1));
+      }
+    });
+    return rows;
+  }
+
+  $: menuTree = buildMenuTree(menuItems || []);
+  $: flattenedMenuRows = flattenMenuTree(menuTree);
 </script>
 
 <div class="flex flex-1 gap-6">
@@ -69,6 +105,23 @@
             class="w-full px-3 py-2 border theme-border rounded-lg theme-bg-primary theme-text-primary focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             placeholder="Enter menu path"
           />
+        </div>
+
+        <!-- Redirect Path -->
+        <div>
+          <label for="redirect_path" class="block text-sm font-medium theme-text-primary mb-2">
+            Redirect Path
+          </label>
+          <input
+            id="redirect_path"
+            type="text"
+            bind:value={menuForm.redirect_path}
+            class="w-full px-3 py-2 border theme-border rounded-lg theme-bg-primary theme-text-primary focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            placeholder="Optional, e.g. /dashboard"
+          />
+          <p class="mt-1 text-xs theme-text-secondary">
+            If set, navigation for this menu uses redirect path.
+          </p>
         </div>
 
         <!-- Parent Menu -->
@@ -150,6 +203,10 @@
           </div>
           <div class="flex items-start space-x-2">
             <span class="text-blue-500 font-semibold">•</span>
+            <span>Redirect Path is optional and managed in menu_redirect.</span>
+          </div>
+          <div class="flex items-start space-x-2">
+            <span class="text-blue-500 font-semibold">•</span>
             <span>Select a parent menu if this is a submenu.</span>
           </div>
           <div class="flex items-start space-x-2">
@@ -167,30 +224,87 @@
 
   <!-- Right Side - Menu Table -->
   <div class="w-7/10">
-    <DataTable
-      data={menuItems}
-      columns={[
-        { key: 'menu_name', label: 'Menu Name', sortable: true, filterable: true, type: 'text' },
-        { key: 'menu_path', label: 'Menu Path', sortable: true, filterable: true, type: 'text' },
-        { key: 'menu_order', label: 'Order', sortable: true, filterable: true, type: 'number' },
-        { key: 'is_visible', label: 'Visible', sortable: true, filterable: true, type: 'status' },
-        { key: 'is_enabled', label: 'Enabled', sortable: true, filterable: true, type: 'status' }
-      ]}
-      actions={[
-        {
-          label: 'Edit',
-          icon: Edit,
-          onClick: handleEdit
-        },
-        {
-          label: 'Delete',
-          icon: Trash2,
-          onClick: handleDelete
-        }
-      ]}
-      title="Menu Items"
-      isLoading={isLoading}
-    />
+    <div class="theme-bg-primary rounded-lg shadow-lg border theme-border">
+      <div class="px-4 py-3 border-b theme-border">
+        <h3 class="text-base font-semibold theme-text-primary">Menu Items (Tree View)</h3>
+        <p class="text-xs theme-text-secondary mt-1">
+          Parent-child hierarchy helps identify submenu ownership clearly.
+        </p>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="min-w-full divide-y theme-border">
+          <thead class="theme-bg-secondary">
+            <tr>
+              <th class="px-4 py-2 text-left text-xs font-medium uppercase tracking-wider theme-text-secondary">Menu Name</th>
+              <th class="px-4 py-2 text-left text-xs font-medium uppercase tracking-wider theme-text-secondary">Menu Path</th>
+              <th class="px-4 py-2 text-left text-xs font-medium uppercase tracking-wider theme-text-secondary">Redirect Path</th>
+              <th class="px-4 py-2 text-left text-xs font-medium uppercase tracking-wider theme-text-secondary">Order</th>
+              <th class="px-4 py-2 text-left text-xs font-medium uppercase tracking-wider theme-text-secondary">Visible</th>
+              <th class="px-4 py-2 text-left text-xs font-medium uppercase tracking-wider theme-text-secondary">Enabled</th>
+              <th class="px-4 py-2 text-left text-xs font-medium uppercase tracking-wider theme-text-secondary">Actions</th>
+            </tr>
+          </thead>
+          <tbody class="theme-bg-primary divide-y theme-border">
+            {#if isLoading}
+              <tr>
+                <td colspan="7" class="px-4 py-6 text-center theme-text-secondary">Loading menus...</td>
+              </tr>
+            {:else if flattenedMenuRows.length === 0}
+              <tr>
+                <td colspan="7" class="px-4 py-6 text-center theme-text-secondary">No menu items found</td>
+              </tr>
+            {:else}
+              {#each flattenedMenuRows as menu}
+                <tr class="hover:theme-bg-secondary">
+                  <td class="px-4 py-2 text-sm theme-text-primary">
+                    <div class="flex items-center">
+                      <span style={`display:inline-block;width:${menu.depth * 18}px;`}></span>
+                      {#if menu.depth > 0}
+                        <span class="mr-2 theme-text-secondary">└</span>
+                      {/if}
+                      <span class={menu.depth === 0 ? 'font-semibold' : ''}>{menu.menu_name}</span>
+                    </div>
+                  </td>
+                  <td class="px-4 py-2 text-sm theme-text-primary">{menu.menu_path}</td>
+                  <td class="px-4 py-2 text-sm theme-text-primary">{menu.redirect_path || '—'}</td>
+                  <td class="px-4 py-2 text-sm theme-text-primary">{menu.menu_order ?? 0}</td>
+                  <td class="px-4 py-2 text-sm">
+                    <span class={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${menu.is_visible ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' : 'bg-gray-100 text-gray-700 dark:bg-gray-700/40 dark:text-gray-300'}`}>
+                      {menu.is_visible ? 'Yes' : 'No'}
+                    </span>
+                  </td>
+                  <td class="px-4 py-2 text-sm">
+                    <span class={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${menu.is_enabled ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' : 'bg-gray-100 text-gray-700 dark:bg-gray-700/40 dark:text-gray-300'}`}>
+                      {menu.is_enabled ? 'Yes' : 'No'}
+                    </span>
+                  </td>
+                  <td class="px-4 py-2 text-sm">
+                    <div class="flex items-center gap-2">
+                      <button
+                        class="inline-flex items-center gap-1 px-2 py-1 rounded border theme-border hover:theme-bg-secondary"
+                        on:click={() => handleEdit(menu)}
+                        aria-label="Edit menu"
+                      >
+                        <Edit class="w-3.5 h-3.5" />
+                        Edit
+                      </button>
+                      <button
+                        class="inline-flex items-center gap-1 px-2 py-1 rounded border border-red-300 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20"
+                        on:click={() => handleDelete(menu)}
+                        aria-label="Delete menu"
+                      >
+                        <Trash2 class="w-3.5 h-3.5" />
+                        Delete
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              {/each}
+            {/if}
+          </tbody>
+        </table>
+      </div>
+    </div>
   </div>
 </div>
 

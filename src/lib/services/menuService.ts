@@ -11,6 +11,37 @@ export interface MenuItem {
   submenus?: MenuItem[];
 }
 
+async function applyActiveMenuRedirects(menuItems: MenuItem[]): Promise<MenuItem[]> {
+  if (!menuItems || menuItems.length === 0) return menuItems;
+
+  const menuIds = menuItems.map((item) => item.menu_id).filter(Boolean);
+  if (menuIds.length === 0) return menuItems;
+
+  const { data: redirects, error } = await supabase
+    .from('menu_redirect')
+    .select('menu_id, redirect_path')
+    .in('menu_id', menuIds)
+    .eq('is_active', true);
+
+  if (error) {
+    console.error('Error fetching menu redirects:', error);
+    return menuItems;
+  }
+
+  const redirectMap = new Map<string, string>();
+  (redirects || []).forEach((row: any) => {
+    if (row?.menu_id && row?.redirect_path) {
+      redirectMap.set(String(row.menu_id), String(row.redirect_path));
+    }
+  });
+
+  return menuItems.map((item) => {
+    const redirectPath = redirectMap.get(String(item.menu_id));
+    if (!redirectPath) return item;
+    return { ...item, menu_path: redirectPath };
+  });
+}
+
 export async function fetchUserMenus(username: string): Promise<MenuItem[]> {
   try {
     // Get user info including role
@@ -40,7 +71,8 @@ export async function fetchUserMenus(username: string): Promise<MenuItem[]> {
         return [];
       }
 
-      return buildMenuTree(allMenus || []);
+      const menuItems = await applyActiveMenuRedirects((allMenus || []) as MenuItem[]);
+      return buildMenuTree(menuItems);
     }
 
     // For other users, get their specific menus
@@ -80,7 +112,8 @@ export async function fetchUserMenus(username: string): Promise<MenuItem[]> {
       return [];
     }
 
-    return buildMenuTree(menuItems || []);
+    const redirectedMenuItems = await applyActiveMenuRedirects((menuItems || []) as MenuItem[]);
+    return buildMenuTree(redirectedMenuItems);
   } catch (error) {
     console.error('Error in fetchUserMenus:', error);
     return [];

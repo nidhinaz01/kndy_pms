@@ -15,25 +15,27 @@
   let unplannedWorks: ProductionWork[] = [];
   let selectedWork: ProductionWork | null = null;
   let hasLoaded = false;
-  let searchTerm = '';
+  let workOrderSearchTerm = '';
+  let workSearchTerm = '';
 
-  // Filter unplanned works based on search term
+  // Filter unplanned works based on work-order and work search terms
   $: filteredUnplannedWorks = (() => {
-    if (!searchTerm.trim()) {
+    const woSearch = workOrderSearchTerm.toLowerCase().trim();
+    const workSearch = workSearchTerm.toLowerCase().trim();
+    if (!woSearch && !workSearch) {
       return unplannedWorks;
     }
-    
-    const searchLower = searchTerm.toLowerCase().trim();
+
     return unplannedWorks.filter((work: ProductionWork) => {
       const workCode = (work.std_work_type_details?.derived_sw_code || work.sw_code || '').toLowerCase();
       const workName = (work.sw_name || work.std_work_type_details?.std_work_details?.sw_name || '').toLowerCase();
       const woNo = (work.wo_no || work.prdn_wo_details?.wo_no || '').toLowerCase();
       const pwoNo = (work.pwo_no || work.prdn_wo_details?.pwo_no || '').toLowerCase();
-      
-      return workCode.includes(searchLower) || 
-             workName.includes(searchLower) || 
-             woNo.includes(searchLower) || 
-             pwoNo.includes(searchLower);
+
+      const woMatches = !woSearch || woNo.includes(woSearch) || pwoNo.includes(woSearch);
+      const workMatches = !workSearch || workCode.includes(workSearch) || workName.includes(workSearch);
+
+      return woMatches && workMatches;
     });
   })();
 
@@ -220,7 +222,8 @@
     selectedWork = null;
     unplannedWorks = [];
     hasLoaded = false;
-    searchTerm = '';
+    workOrderSearchTerm = '';
+    workSearchTerm = '';
   }
 </script>
 
@@ -266,24 +269,34 @@
             </p>
           </div>
         {:else}
-          <!-- Search Box -->
+          <!-- Search Boxes -->
           <div class="mb-4">
-            <input
-              type="text"
-              bind:value={searchTerm}
-              placeholder="Search by work order number, work code, or work description..."
-              class="w-full px-4 py-2 border theme-border rounded-lg theme-bg-primary theme-text-primary focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            />
-            {#if searchTerm.trim()}
+            <div class="grid grid-cols-4 gap-3">
+              <input
+                type="text"
+                bind:value={workOrderSearchTerm}
+                placeholder="Work Order No."
+                class="col-span-1 px-4 py-2 border theme-border rounded-lg theme-bg-primary theme-text-primary focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              />
+              <input
+                type="text"
+                bind:value={workSearchTerm}
+                placeholder="Work Code / Work Name (Description)"
+                class="col-span-3 px-4 py-2 border theme-border rounded-lg theme-bg-primary theme-text-primary focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              />
+            </div>
+            {#if workOrderSearchTerm.trim() || workSearchTerm.trim()}
               <p class="text-xs theme-text-secondary mt-1">
                 Showing {filteredUnplannedWorks.length} of {unplannedWorks.length} unplanned works
               </p>
             {/if}
           </div>
           
-          {#if filteredUnplannedWorks.length === 0 && searchTerm.trim()}
+          {#if filteredUnplannedWorks.length === 0 && (workOrderSearchTerm.trim() || workSearchTerm.trim())}
             <div class="text-center py-8">
-              <p class="theme-text-secondary text-lg">No works found matching "{searchTerm}"</p>
+              <p class="theme-text-secondary text-lg">
+                No works found matching current filters
+              </p>
               <p class="theme-text-secondary text-sm mt-2">
                 Try a different search term
               </p>

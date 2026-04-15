@@ -45,6 +45,16 @@ export interface Menu {
   menu_order: number;
   is_visible: boolean;
   is_enabled: boolean;
+  redirect_path?: string | null;
+}
+
+export interface MenuRedirect {
+  menu_id: string;
+  menu_path: string;
+  redirect_path: string;
+  is_active?: boolean;
+  created_by?: string | null;
+  modified_by?: string | null;
 }
 
 export interface UserMenuMapping {
@@ -99,6 +109,15 @@ export interface UpdateMenuData {
   menu_order?: number;
   is_visible?: boolean;
   is_enabled?: boolean;
+}
+
+export interface UpsertMenuRedirectData {
+  menu_id: string;
+  menu_path: string;
+  redirect_path: string;
+  is_active?: boolean;
+  created_by?: string | null;
+  modified_by?: string | null;
 }
 
 export interface CreateUserMenuMappingData {

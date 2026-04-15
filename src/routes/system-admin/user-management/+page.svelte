@@ -4,7 +4,21 @@
   import FloatingThemeToggle from '$lib/components/common/FloatingThemeToggle.svelte';
   import Sidebar from '$lib/components/navigation/Sidebar.svelte';
   import { fetchUserMenus } from '$lib/services/menuService';
-  import { fetchUsers, createUser, updateUser, deleteUser, fetchMenus, createMenu, updateMenu, deleteMenu, fetchUserMenuMappings, createUserMenuMapping, deleteUserMenuMapping } from '$lib/api/userManagement';
+  import {
+    fetchUsers,
+    createUser,
+    updateUser,
+    deleteUser,
+    fetchMenusWithRedirectPath,
+    createMenu,
+    updateMenu,
+    deleteMenu,
+    upsertMenuRedirect,
+    deleteMenuRedirect,
+    fetchUserMenuMappings,
+    createUserMenuMapping,
+    deleteUserMenuMapping
+  } from '$lib/api/userManagement';
   import UsersTab from './components/UsersTab.svelte';
   import MenuTab from './components/MenuTab.svelte';
   import UserMenuTab from './components/UserMenuTab.svelte';
@@ -49,6 +63,7 @@
   let menuForm = {
     menu_name: '',
     menu_path: '',
+    redirect_path: '',
     parent_menu_id: null,
     menu_order: 0,
     is_visible: true,
@@ -75,7 +90,7 @@
   async function loadMenus() {
     isMenuLoading = true;
     try {
-      menuItems = await fetchMenus();
+      menuItems = await fetchMenusWithRedirectPath();
     } catch (error) {
       console.error('Error loading menus:', error);
       showMessage('Error loading menus', 'error');
@@ -189,6 +204,7 @@
     menuForm = {
       menu_name: menu.menu_name,
       menu_path: menu.menu_path,
+      redirect_path: menu.redirect_path || '',
       parent_menu_id: menu.parent_menu_id,
       menu_order: menu.menu_order,
       is_visible: menu.is_visible,
@@ -216,17 +232,43 @@
 
   async function handleSaveMenu() {
     try {
+      const currentUser = localStorage.getItem('username');
+      if (!currentUser) {
+        showMessage('User session not found', 'error');
+        return;
+      }
+      const redirectPath = (menuForm.redirect_path || '').trim();
       const menuData = {
         ...menuForm,
+        redirect_path: undefined,
         parent_menu_id: menuForm.parent_menu_id || undefined
       };
 
+      let savedMenuId: string;
+      let savedMenuPath: string;
       if (isMenuEditMode) {
-        await updateMenu(selectedMenu.menu_id, menuData);
+        const updatedMenu = await updateMenu(selectedMenu.menu_id, menuData);
+        savedMenuId = updatedMenu.menu_id;
+        savedMenuPath = updatedMenu.menu_path;
         showMessage('Menu updated successfully!', 'success');
       } else {
-        await createMenu(menuData);
+        const createdMenu = await createMenu(menuData);
+        savedMenuId = createdMenu.menu_id;
+        savedMenuPath = createdMenu.menu_path;
         showMessage('Menu created successfully!', 'success');
+      }
+
+      if (redirectPath) {
+        await upsertMenuRedirect({
+          menu_id: savedMenuId,
+          menu_path: savedMenuPath,
+          redirect_path: redirectPath,
+          is_active: true,
+          created_by: currentUser,
+          modified_by: currentUser
+        });
+      } else if (isMenuEditMode && selectedMenu?.menu_id) {
+        await deleteMenuRedirect(selectedMenu.menu_id);
       }
 
       await loadMenus();
@@ -235,6 +277,7 @@
       menuForm = {
         menu_name: '',
         menu_path: '',
+        redirect_path: '',
         parent_menu_id: null,
         menu_order: 0,
         is_visible: true,
