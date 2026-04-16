@@ -17,7 +17,7 @@
   let menus: any[] = [];
   let selectedDate = new Date().toISOString().split('T')[0];
   let selectedStage: string = '';
-  let availableStages: string[] = ['P1S1', 'P1S2', 'P1S3', 'P2S1', 'P2S2', 'P2S3', 'P3S1'];
+  let availableStages: string[] = [];
   
   let activeTab = 'works-report';
   const tabs = [
@@ -39,8 +39,14 @@
   let showWorksReportFullscreen = false;
   let hasManuallyClosedFullscreen = false;
   
-  // Generate PDF when data changes (only after loading is complete)
-  $: if (worksReportData.length > 0 && selectedSubmission && !isLoading && activeTab === 'works-report') {
+  // Generate PDF when works data is ready (matches plan-review: wait until works load finishes)
+  $: if (
+    worksReportData.length > 0 &&
+    selectedSubmission &&
+    !isLoading &&
+    !isWorksReportLoading &&
+    activeTab === 'works-report'
+  ) {
     generateWorksReportPDF();
   }
   
@@ -65,12 +71,108 @@
   let manpowerReportData: any[] = [];
   let isManpowerReportLoading = false;
 
+  /** True for merged-in stage reassignment rows (not prdn_reporting_manpower attendance). */
+  function isManpowerReassignmentRow(report: any): boolean {
+    return !!(report?.from_stage_code && report?.to_stage_code);
+  }
+
+  function manpowerRowShiftCode(report: any): string {
+    return (report?.shift_code || selectedSubmission?.shift_code || '').trim();
+  }
+
+  /** e.g. P1S1-GEN; reassignment: P1S1-GEN → P2S1-GEN */
+  function stageShiftLabel(report: any): string {
+    const sh = manpowerRowShiftCode(report);
+    const seg = (stage: string) => (stage && sh ? `${stage}-${sh}` : stage || sh || '—');
+    if (isManpowerReassignmentRow(report)) {
+      return `${seg(report.from_stage_code)} → ${seg(report.to_stage_code)}`;
+    }
+    const st = report?.stage_code || '';
+    return st ? seg(st) : sh ? `—${sh}` : '—';
+  }
+
+  function formatManpowerHoursCell(value: unknown): string {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return '0.00';
+    return n.toFixed(2);
+  }
+
+  function attendanceIsAbsent(report: any): boolean {
+    if (isManpowerReassignmentRow(report)) return false;
+    const s = String(report?.attendance_status || '').toLowerCase();
+    return s === 'absent' || s === 'a';
+  }
+
+  function attendanceLetter(report: any): string {
+    if (isManpowerReassignmentRow(report)) return '';
+    const s = String(report?.attendance_status || '').toLowerCase();
+    if (s === 'present' || s === 'p') return 'P';
+    if (s === 'absent' || s === 'a') return 'A';
+    return '—';
+  }
+
+  function attendanceCellSecondary(report: any): string {
+    if (isManpowerReassignmentRow(report)) {
+      const ft = report.from_time || '';
+      const tt = report.to_time || '';
+      if (ft || tt) return `Reassigned · ${ft}–${tt}`;
+      return 'Reassigned';
+    }
+    return '';
+  }
+
+  $: manpowerReportRowsSorted = [...(manpowerReportData || [])].sort((a, b) => {
+    const na = (a?.hr_emp?.emp_name || a?.emp_id || '').toString().toLowerCase();
+    const nb = (b?.hr_emp?.emp_name || b?.emp_id || '').toString().toLowerCase();
+    const c = na.localeCompare(nb, undefined, { sensitivity: 'base' });
+    if (c !== 0) return c;
+    return String(a?.emp_id || '').localeCompare(String(b?.emp_id || ''));
+  });
+
+  function manpowerRowKey(report: any, index: number): string {
+    if (report?.id != null) return `m-${report.id}`;
+    if (report?.reassignment_id != null) return `r-${report.reassignment_id}`;
+    return `x-${report?.emp_id || index}-${report?.from_stage_code || ''}-${report?.to_stage_code || ''}-${index}`;
+  }
+
   // Approval state
   let showApprovalModal = false;
   let approvalAction: 'approve' | 'reject' = 'approve';
   let rejectionReason = '';
 
+  /** Pending/approved submission card title in sidebar, e.g. P1S1 - GEN */
+  function submissionStageShiftLabel(submission: { stage_code?: string; shift_code?: string } | null | undefined): string {
+    const stage = (submission?.stage_code || '').trim();
+    const shift = (submission?.shift_code || '').trim();
+    if (stage && shift) return `${stage} - ${shift}`;
+    return stage || shift || '—';
+  }
+
+  async function loadAvailableStages() {
+    try {
+      const { data, error } = await supabase
+        .from('sys_data_elements')
+        .select('de_value')
+        .eq('de_name', 'Plant-Stage')
+        .order('de_value', { ascending: true });
+
+      if (error) {
+        console.error('Error loading Plant-Stage values:', error);
+        return;
+      }
+
+      const values = (data || [])
+        .map((row: any) => (row?.de_value || '').toString().trim())
+        .filter((v: string) => v.length > 0);
+
+      availableStages = Array.from(new Set(values));
+    } catch (err) {
+      console.error('Unexpected error loading Plant-Stage values:', err);
+    }
+  }
+
   onMount(async () => {
+    await loadAvailableStages();
     const username = localStorage.getItem('username');
     if (username) {
       menus = await fetchUserMenus(username);
@@ -118,7 +220,6 @@
       }
       
       pendingSubmissions = data || [];
-      console.log('Loaded pending submissions:', pendingSubmissions.length, data);
     } catch (error) {
       console.error('Error loading pending submissions:', error);
       pendingSubmissions = [];
@@ -174,6 +275,8 @@
     if (!selectedSubmission) return;
 
     isLoading = true;
+    isWorksReportLoading = true;
+    isManpowerReportLoading = true;
     try {
       // Load works reports
       const { data: worksData, error: worksError } = await supabase
@@ -308,6 +411,8 @@
         })
       );
 
+      isWorksReportLoading = false;
+
       // Load manpower reports
       const { data: manpowerData, error: manpowerError } = await supabase
         .from('prdn_reporting_manpower')
@@ -321,80 +426,63 @@
       if (manpowerError) throw manpowerError;
       manpowerReportData = manpowerData || [];
 
-      // Load stage reassignments
-      // Try with reporting_submission_id first, fallback to date/stage if column doesn't exist
+      // Load stage reassignments: avoid hr_emp!inner (400 if embed/FK is wrong or emp row missing).
+      // Cascade queries when schema differs (missing reporting_submission_id / shift_code) or PostgREST returns 400.
       let reassignmentsData: any[] = [];
-      let reassignmentsError: any = null;
-      
-      try {
-        const { data, error } = await supabase
-          .from('prdn_reporting_stage_reassignment')
-          .select(`
-            *,
-            hr_emp!inner(emp_id, emp_name, skill_short)
-          `)
-          .eq('reporting_submission_id', selectedSubmission.id)
-          .eq('is_deleted', false);
-        
-        reassignmentsData = data || [];
-        reassignmentsError = error;
-        
-        // If error is about missing column, try fallback
-        if (reassignmentsError && (reassignmentsError.code === '42703' || 
-            reassignmentsError.code === 'PGRST204' ||
-            reassignmentsError.message?.includes('reporting_submission_id') ||
-            reassignmentsError.message?.includes('Could not find'))) {
-          console.warn('reporting_submission_id column not found, using fallback query');
-          const { data: fallbackData, error: fallbackError } = await supabase
+      const reassignmentSelect = `*, hr_emp(emp_id, emp_name, skill_short)`;
+      const sid = selectedSubmission.id;
+      const rDate = selectedSubmission.reporting_date;
+      const stg = selectedSubmission.stage_code;
+      const sh = selectedSubmission.shift_code;
+
+      const attempts = [
+        () =>
+          supabase
             .from('prdn_reporting_stage_reassignment')
-            .select(`
-              *,
-              hr_emp!inner(emp_id, emp_name, skill_short)
-            `)
-            .eq('reporting_date', selectedSubmission.reporting_date)
-            .eq('to_stage_code', selectedSubmission.stage_code)
+            .select(reassignmentSelect)
+            .eq('reporting_submission_id', sid)
+            .eq('is_deleted', false),
+        () =>
+          supabase
+            .from('prdn_reporting_stage_reassignment')
+            .select('*')
+            .eq('reporting_submission_id', sid)
+            .eq('is_deleted', false),
+        () => {
+          let q = supabase
+            .from('prdn_reporting_stage_reassignment')
+            .select(reassignmentSelect)
+            .eq('reassignment_date', rDate)
+            .eq('to_stage_code', stg)
             .eq('is_deleted', false);
-          
-          reassignmentsData = fallbackData || [];
-          reassignmentsError = fallbackError;
-        }
-      } catch (err: any) {
-        // If column doesn't exist, try querying by date and stage
-        if (err?.message?.includes('reporting_submission_id') || 
-            err?.code === '42703' || 
-            err?.code === 'PGRST204' ||
-            err?.message?.includes('Could not find')) {
-          console.warn('reporting_submission_id column not found, using fallback query');
-          try {
-            const { data: fallbackData, error: fallbackError } = await supabase
-              .from('prdn_reporting_stage_reassignment')
-              .select(`
-                *,
-                hr_emp!inner(emp_id, emp_name, skill_short)
-              `)
-              .eq('reporting_date', selectedSubmission.reporting_date)
-              .eq('to_stage_code', selectedSubmission.stage_code)
-              .eq('is_deleted', false);
-            
-            reassignmentsData = fallbackData || [];
-            reassignmentsError = fallbackError;
-          } catch (fallbackErr: any) {
-            reassignmentsError = fallbackErr;
-          }
-        } else {
-          reassignmentsError = err;
+          if (sh) q = q.eq('shift_code', sh);
+          return q;
+        },
+        () =>
+          supabase
+            .from('prdn_reporting_stage_reassignment')
+            .select(reassignmentSelect)
+            .eq('reassignment_date', rDate)
+            .eq('to_stage_code', stg)
+            .eq('is_deleted', false)
+      ];
+
+      let lastReassignmentErr: any = null;
+      for (const run of attempts) {
+        const { data, error } = await run();
+        lastReassignmentErr = error;
+        if (!error) {
+          reassignmentsData = data || [];
+          break;
         }
       }
-      
-      if (reassignmentsError && 
-          !reassignmentsError.message?.includes('reporting_submission_id') &&
-          reassignmentsError.code !== '42703' &&
-          reassignmentsError.code !== 'PGRST204') {
-        console.warn('Error loading stage reassignments:', reassignmentsError);
-        // Don't throw - continue without stage reassignments
+      if (lastReassignmentErr && reassignmentsData.length === 0) {
+        console.warn('Error loading stage reassignments:', lastReassignmentErr);
       }
       // Combine with manpower report data
       manpowerReportData = [...manpowerReportData, ...(reassignmentsData || [])];
+
+      isManpowerReportLoading = false;
       
       // Calculate LTNP hours from work reports for each employee
       // Group work reports by employee
@@ -432,12 +520,13 @@
           calculated_ltnp_hours: calculatedLTNPHours
         };
       });
-      
-      // Generate PDF for works report
-      await generateWorksReportPDF();
     } catch (error) {
       console.error('Error loading submission details:', error);
+      worksReportData = [];
+      manpowerReportData = [];
     } finally {
+      isWorksReportLoading = false;
+      isManpowerReportLoading = false;
       isLoading = false;
     }
   }
@@ -567,17 +656,20 @@
               err?.code === '42703' || 
               err?.code === 'PGRST204' ||
               err?.message?.includes('Could not find')) {
-            console.warn('reporting_submission_id column not found, using fallback update');
             try {
-              const { error: fallbackError } = await supabase
+              let u = supabase
                 .from('prdn_reporting_stage_reassignment')
                 .update({
                   status: newStatus,
                   modified_by: currentUser,
                   modified_dt: now
                 })
-                .eq('reporting_date', selectedSubmission.reporting_date)
+                .eq('reassignment_date', selectedSubmission.reporting_date)
                 .eq('to_stage_code', selectedSubmission.stage_code);
+              if (selectedSubmission.shift_code) {
+                u = u.eq('shift_code', selectedSubmission.shift_code);
+              }
+              const { error: fallbackError } = await u;
               
               reassignmentsError = fallbackError;
             } catch (fallbackErr: any) {
@@ -611,14 +703,18 @@
                     err?.code === 'PGRST204' ||
                     err?.message?.includes('Could not find')) {
                   try {
-                    const { error: fallbackError } = await supabase
+                    let u = supabase
                       .from('prdn_reporting_stage_reassignment')
                       .update({
                         modified_by: currentUser,
                         modified_dt: now
                       })
-                      .eq('reporting_date', selectedSubmission.reporting_date)
+                      .eq('reassignment_date', selectedSubmission.reporting_date)
                       .eq('to_stage_code', selectedSubmission.stage_code);
+                    if (selectedSubmission.shift_code) {
+                      u = u.eq('shift_code', selectedSubmission.shift_code);
+                    }
+                    const { error: fallbackError } = await u;
                     
                     updateError = fallbackError;
                   } catch (fallbackErr: any) {
@@ -685,17 +781,20 @@
                 err?.code === '42703' || 
                 err?.code === 'PGRST204' ||
                 err?.message?.includes('Could not find')) {
-              console.warn('reporting_submission_id column not found, using fallback update for reject');
               try {
-                const { error: fallbackError } = await supabase
+                let u = supabase
                   .from('prdn_reporting_stage_reassignment')
                   .update({
                     status: 'draft',
                     modified_by: currentUser,
                     modified_dt: now
                   })
-                  .eq('reporting_date', selectedSubmission.reporting_date)
+                  .eq('reassignment_date', selectedSubmission.reporting_date)
                   .eq('to_stage_code', selectedSubmission.stage_code);
+                if (selectedSubmission.shift_code) {
+                  u = u.eq('shift_code', selectedSubmission.shift_code);
+                }
+                const { error: fallbackError } = await u;
                 
                 reassignmentsRejectError = fallbackError;
               } catch (fallbackErr: any) {
@@ -719,14 +818,18 @@
               console.warn('prdn_reporting_stage_reassignment table may not have status column:', reassignmentsRejectError.message);
               // Try updating without status and without reporting_submission_id
               try {
-                const { error: fallbackError } = await supabase
+                let u = supabase
                   .from('prdn_reporting_stage_reassignment')
                   .update({
                     modified_by: currentUser,
                     modified_dt: now
                   })
-                  .eq('reporting_date', selectedSubmission.reporting_date)
+                  .eq('reassignment_date', selectedSubmission.reporting_date)
                   .eq('to_stage_code', selectedSubmission.stage_code);
+                if (selectedSubmission.shift_code) {
+                  u = u.eq('shift_code', selectedSubmission.shift_code);
+                }
+                const { error: fallbackError } = await u;
                 
                 if (fallbackError) {
                   console.error('Error updating stage reassignments on reject (fallback):', fallbackError);
@@ -872,7 +975,7 @@
                 class="w-full text-left p-3 rounded-lg border theme-border transition-colors {selectedSubmission?.id === submission.id && selectedSubmission?.status === 'pending_approval' ? 'bg-blue-50 dark:bg-blue-900/20 border-blue-300' : 'theme-bg-secondary hover:theme-bg-secondary'}"
               >
                 <div class="font-medium theme-text-primary">
-                  {submission.stage_code}
+                  {submissionStageShiftLabel(submission)}
                   {#if submission.version && submission.version > 1}
                     <span class="text-xs font-normal theme-text-secondary"> (v{submission.version})</span>
                   {/if}
@@ -909,7 +1012,7 @@
                 class="w-full text-left p-3 rounded-lg border theme-border transition-colors {selectedSubmission?.id === submission.id && selectedSubmission?.status === 'approved' ? 'bg-green-50 dark:bg-green-900/20 border-green-300' : 'theme-bg-secondary hover:theme-bg-secondary'}"
               >
                 <div class="font-medium theme-text-primary">
-                  {submission.stage_code}
+                  {submissionStageShiftLabel(submission)}
                   {#if submission.version && submission.version > 1}
                     <span class="text-xs font-normal theme-text-secondary"> (v{submission.version})</span>
                   {/if}
@@ -998,7 +1101,20 @@
               <p class="theme-text-secondary">No work reports in this submission</p>
             </div>
           {:else}
-            <div class="overflow-x-auto">
+            <div class="px-6 py-4 border-b theme-border">
+              <h2 class="text-xl font-semibold theme-text-primary">📊 Works Report</h2>
+              <p class="theme-text-secondary text-sm mt-1">
+                {selectedSubmission.stage_code}
+                {#if selectedSubmission.shift_code}
+                  <span class="theme-text-secondary"> · {selectedSubmission.shift_code}</span>
+                {/if}
+                · {new Date(selectedSubmission.reporting_date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' })}
+              </p>
+            </div>
+            <div class="w-full" style="padding: 0; min-height: 560px;">
+              <PDFViewer {pdfBlob} isLoading={isGeneratingPDF} />
+            </div>
+            <div class="overflow-x-auto mt-4">
               <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700" style="table-layout: fixed; width: 100%;">
                 <thead class="theme-bg-secondary">
                   <tr>
@@ -1022,7 +1138,7 @@
                   </tr>
                 </thead>
                 <tbody class="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-                  {#each Object.values(groupedReportWorks) as group (group.workCode)}
+                  {#each Object.values(groupedReportWorks) as group (group.workCode + '_' + (group.woDetailsId ?? 'unknown'))}
                     {@const typedGroup = group}
                     <!-- Single Row per Work -->
                     <tr class="hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors" 
@@ -1225,33 +1341,61 @@
                 <thead class="theme-bg-secondary">
                   <tr>
                     <th class="px-4 py-2 text-left text-xs font-medium theme-text-secondary uppercase">Employee</th>
-                    <th class="px-4 py-2 text-left text-xs font-medium theme-text-secondary uppercase">Type</th>
-                    <th class="px-4 py-2 text-left text-xs font-medium theme-text-secondary uppercase">Details</th>
-                    <th class="px-4 py-2 text-left text-xs font-medium theme-text-secondary uppercase">LTP Hours</th>
-                    <th class="px-4 py-2 text-left text-xs font-medium theme-text-secondary uppercase">LTNP Hours</th>
+                    <th class="px-4 py-2 text-left text-xs font-medium theme-text-secondary uppercase">Stage</th>
+                    <th class="px-4 py-2 text-left text-xs font-medium theme-text-secondary uppercase">Attendance</th>
+                    <th class="px-4 py-2 text-right text-xs font-medium theme-text-secondary uppercase">Reported Hours</th>
+                    <th class="px-4 py-2 text-right text-xs font-medium theme-text-secondary uppercase">OT Hours</th>
+                    <th class="px-4 py-2 text-right text-xs font-medium theme-text-secondary uppercase">C-Off Hours</th>
+                    <th class="px-4 py-2 text-right text-xs font-medium theme-text-secondary uppercase">LTP Hours</th>
+                    <th class="px-4 py-2 text-right text-xs font-medium theme-text-secondary uppercase">LTNP Hours</th>
                   </tr>
                 </thead>
                 <tbody class="divide-y theme-border">
-                  {#each manpowerReportData as report}
-                    <tr class="hover:theme-bg-secondary">
+                  {#each manpowerReportRowsSorted as report, i (manpowerRowKey(report, i))}
+                    <tr
+                      class="hover:theme-bg-secondary transition-colors {attendanceIsAbsent(report)
+                        ? 'bg-red-50 dark:bg-red-950/30'
+                        : ''}"
+                    >
                       <td class="px-4 py-2 text-sm theme-text-primary">
                         {report.hr_emp?.emp_name || 'N/A'}
                       </td>
-                      <td class="px-4 py-2 text-sm theme-text-primary">
-                        {report.from_stage_code ? 'Reassignment' : 'Attendance'}
+                      <td class="px-4 py-2 text-sm theme-text-primary whitespace-nowrap">
+                        {stageShiftLabel(report)}
                       </td>
                       <td class="px-4 py-2 text-sm theme-text-primary">
-                        {#if report.from_stage_code}
-                          {report.from_stage_code} → {report.to_stage_code} ({report.from_time} - {report.to_time})
+                        {#if isManpowerReassignmentRow(report)}
+                          <span class="text-xs theme-text-secondary">{attendanceCellSecondary(report)}</span>
                         {:else}
-                          {report.attendance_status}
+                          <span
+                            class="inline-flex h-7 w-7 items-center justify-center rounded-md text-sm font-bold border theme-border {attendanceLetter(report) === 'P'
+                              ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
+                              : attendanceLetter(report) === 'A'
+                                ? 'bg-amber-100 text-amber-900 dark:bg-amber-900/35 dark:text-amber-200'
+                                : ''}"
+                          >
+                            {attendanceLetter(report)}
+                          </span>
                         {/if}
                       </td>
-                      <td class="px-4 py-2 text-sm theme-text-primary">
-                        {report.ltp_hours || 0}
+                      <td class="px-4 py-2 text-sm theme-text-primary text-right tabular-nums">
+                        {isManpowerReassignmentRow(report) ? '—' : formatManpowerHoursCell(report.actual_hours)}
                       </td>
-                      <td class="px-4 py-2 text-sm theme-text-primary">
-                        {report.ltnp_hours || report.calculated_ltnp_hours || 0}
+                      <td class="px-4 py-2 text-sm theme-text-primary text-right tabular-nums">
+                        {isManpowerReassignmentRow(report) ? '—' : formatManpowerHoursCell(report.ot_hours)}
+                      </td>
+                      <td class="px-4 py-2 text-sm theme-text-primary text-right tabular-nums">
+                        {isManpowerReassignmentRow(report) ? '—' : formatManpowerHoursCell(report.c_off_value)}
+                      </td>
+                      <td class="px-4 py-2 text-sm theme-text-primary text-right tabular-nums">
+                        {formatManpowerHoursCell(report.ltp_hours)}
+                      </td>
+                      <td class="px-4 py-2 text-sm theme-text-primary text-right tabular-nums">
+                        {formatManpowerHoursCell(
+                          report.ltnp_hours != null && report.ltnp_hours > 0
+                            ? report.ltnp_hours
+                            : report.calculated_ltnp_hours
+                        )}
                       </td>
                     </tr>
                   {/each}

@@ -315,6 +315,7 @@ export async function submitPlanning(
         modified_dt: now
       })
       .eq('to_stage_code', stageCode)
+      .eq('shift_code', shiftCode)
       .eq('planning_date', planningDate)
       .eq('status', 'draft')
       .eq('is_deleted', false);
@@ -693,25 +694,58 @@ export async function submitReporting(
 
     console.log('Updated manpower reports:', updatedManpower?.length || 0);
 
-    // Update all draft stage reassignment reports (table uses reassignment_date, no reporting_submission_id)
+    // Update all draft stage reassignment reports
+    // Prefer linking reporting_submission_id (same behavior as work/manpower submit flow).
     try {
-      const { data: updatedReassignments, error: reassignmentError } = await supabase
+      let reassignmentUpdate = supabase
         .from('prdn_reporting_stage_reassignment')
         .update({
+          reporting_submission_id: submissionId,
           status: 'pending_approval',
           modified_by: currentUser,
           modified_dt: now
         })
         .eq('to_stage_code', stageCode)
+        .eq('shift_code', shiftCode)
         .eq('reassignment_date', dateStr)
         .eq('status', 'draft')
-        .eq('is_deleted', false)
-        .select();
+        .eq('is_deleted', false);
+
+      let { data: updatedReassignments, error: reassignmentError } = await reassignmentUpdate.select();
+
+      // Backward compatibility: if reporting_submission_id doesn't exist yet, retry without it.
+      if (
+        reassignmentError &&
+        (reassignmentError.code === 'PGRST204' ||
+          reassignmentError.code === '42703' ||
+          reassignmentError.message?.includes('reporting_submission_id') ||
+          reassignmentError.message?.includes('Could not find'))
+      ) {
+        const fallback = await supabase
+          .from('prdn_reporting_stage_reassignment')
+          .update({
+            status: 'pending_approval',
+            modified_by: currentUser,
+            modified_dt: now
+          })
+          .eq('to_stage_code', stageCode)
+          .eq('shift_code', shiftCode)
+          .eq('reassignment_date', dateStr)
+          .eq('status', 'draft')
+          .eq('is_deleted', false)
+          .select();
+
+        updatedReassignments = fallback.data;
+        reassignmentError = fallback.error;
+      }
 
       if (reassignmentError) {
-        if (reassignmentError.code === 'PGRST204' || reassignmentError.code === '42703' ||
-            reassignmentError.message?.includes('Could not find')) {
-          console.warn('Stage reassignment table or column not found - skipping update. This is expected if stage reassignments are not used.');
+        if (
+          reassignmentError.code === 'PGRST204' ||
+          reassignmentError.code === '42703' ||
+          reassignmentError.message?.includes('Could not find')
+        ) {
+          console.warn('Stage reassignment table or expected columns not found - skipping update. This is non-blocking if stage reassignments are not used.');
         } else {
           console.error('Error updating stage reassignments:', reassignmentError);
         }

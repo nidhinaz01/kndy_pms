@@ -18,7 +18,7 @@
   let menus: any[] = [];
   let selectedDate = new Date().toISOString().split('T')[0];
   let selectedStage: string = '';
-  let availableStages: string[] = ['P1S1', 'P1S2', 'P1S3', 'P2S1', 'P2S2', 'P2S3', 'P3S1'];
+  let availableStages: string[] = [];
   
   let activeTab = 'works-plan';
   const tabs = [
@@ -104,12 +104,93 @@
   let manpowerPlanData: any[] = [];
   let isManpowerPlanLoading = false;
 
+  function isManpowerReassignmentRow(plan: any): boolean {
+    return !!(plan?.from_stage_code && plan?.to_stage_code);
+  }
+
+  function manpowerShiftCode(plan: any): string {
+    return (plan?.shift_code || selectedSubmission?.shift_code || '').trim();
+  }
+
+  function stageShiftLabel(plan: any): string {
+    const sh = manpowerShiftCode(plan);
+    const seg = (stage: string) => (stage && sh ? `${stage}-${sh}` : stage || sh || '—');
+    if (isManpowerReassignmentRow(plan)) {
+      return `${seg(plan.from_stage_code)} → ${seg(plan.to_stage_code)}`;
+    }
+    return seg(plan?.stage_code || selectedSubmission?.stage_code || '');
+  }
+
+  function attendanceLetter(plan: any): string {
+    if (isManpowerReassignmentRow(plan)) return '';
+    const s = String(plan?.attendance_status || '').toLowerCase();
+    if (s === 'present' || s === 'p') return 'P';
+    if (s === 'absent' || s === 'a') return 'A';
+    return '—';
+  }
+
+  function attendanceIsAbsent(plan: any): boolean {
+    return attendanceLetter(plan) === 'A';
+  }
+
+  function formatHoursCell(value: unknown): string {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return '0.00';
+    return n.toFixed(2);
+  }
+
+  $: manpowerPlanRowsSorted = [...(manpowerPlanData || [])].sort((a, b) => {
+    const na = (a?.hr_emp?.emp_name || a?.emp_id || '').toString().toLowerCase();
+    const nb = (b?.hr_emp?.emp_name || b?.emp_id || '').toString().toLowerCase();
+    const c = na.localeCompare(nb, undefined, { sensitivity: 'base' });
+    if (c !== 0) return c;
+    return String(a?.emp_id || '').localeCompare(String(b?.emp_id || ''));
+  });
+
+  function manpowerRowKey(plan: any, index: number): string {
+    if (plan?.id != null) return `p-${plan.id}`;
+    if (plan?.reassignment_id != null) return `r-${plan.reassignment_id}`;
+    return `x-${plan?.emp_id || index}-${plan?.from_stage_code || ''}-${plan?.to_stage_code || ''}-${index}`;
+  }
+
   // Approval state
   let showApprovalModal = false;
   let approvalAction: 'approve' | 'reject' = 'approve';
   let rejectionReason = '';
 
+  /** Pending/approved submission card title in sidebar, e.g. P1S1 - GEN */
+  function submissionStageShiftLabel(submission: { stage_code?: string; shift_code?: string } | null | undefined): string {
+    const stage = (submission?.stage_code || '').trim();
+    const shift = (submission?.shift_code || '').trim();
+    if (stage && shift) return `${stage} - ${shift}`;
+    return stage || shift || '—';
+  }
+
+  async function loadAvailableStages() {
+    try {
+      const { data, error } = await supabase
+        .from('sys_data_elements')
+        .select('de_value')
+        .eq('de_name', 'Plant-Stage')
+        .order('de_value', { ascending: true });
+
+      if (error) {
+        console.error('Error loading Plant-Stage values:', error);
+        return;
+      }
+
+      const values = (data || [])
+        .map((row: any) => (row?.de_value || '').toString().trim())
+        .filter((v: string) => v.length > 0);
+
+      availableStages = Array.from(new Set(values));
+    } catch (err) {
+      console.error('Unexpected error loading Plant-Stage values:', err);
+    }
+  }
+
   onMount(async () => {
+    await loadAvailableStages();
     const username = localStorage.getItem('username');
     if (username) {
       menus = await fetchUserMenus(username);
@@ -605,7 +686,7 @@
                 class="w-full text-left p-3 rounded-lg border theme-border transition-colors {selectedSubmission?.id === submission.id && selectedSubmission?.status === 'pending_approval' ? 'bg-blue-50 dark:bg-blue-900/20 border-blue-300' : 'theme-bg-secondary hover:theme-bg-secondary'}"
               >
                 <div class="font-medium theme-text-primary">
-                  {submission.stage_code}
+                  {submissionStageShiftLabel(submission)}
                   {#if submission.version && submission.version > 1}
                     <span class="text-xs font-normal theme-text-secondary"> (v{submission.version})</span>
                   {/if}
@@ -642,7 +723,7 @@
                 class="w-full text-left p-3 rounded-lg border theme-border transition-colors {selectedSubmission?.id === submission.id && selectedSubmission?.status === 'approved' ? 'bg-green-50 dark:bg-green-900/20 border-green-300' : 'theme-bg-secondary hover:theme-bg-secondary'}"
               >
                 <div class="font-medium theme-text-primary">
-                  {submission.stage_code}
+                  {submissionStageShiftLabel(submission)}
                   {#if submission.version && submission.version > 1}
                     <span class="text-xs font-normal theme-text-secondary"> (v{submission.version})</span>
                   {/if}
@@ -773,25 +854,45 @@
                 <thead class="theme-bg-secondary">
                   <tr>
                     <th class="px-4 py-2 text-left text-xs font-medium theme-text-secondary uppercase">Employee</th>
-                    <th class="px-4 py-2 text-left text-xs font-medium theme-text-secondary uppercase">Type</th>
-                    <th class="px-4 py-2 text-left text-xs font-medium theme-text-secondary uppercase">Details</th>
+                    <th class="px-4 py-2 text-left text-xs font-medium theme-text-secondary uppercase">Stage</th>
+                    <th class="px-4 py-2 text-left text-xs font-medium theme-text-secondary uppercase">Attendance</th>
+                    <th class="px-4 py-2 text-right text-xs font-medium theme-text-secondary uppercase">Reported Hours</th>
+                    <th class="px-4 py-2 text-right text-xs font-medium theme-text-secondary uppercase">OT Hours</th>
+                    <th class="px-4 py-2 text-right text-xs font-medium theme-text-secondary uppercase">C-Off Hours</th>
                   </tr>
                 </thead>
                 <tbody class="divide-y theme-border">
-                  {#each manpowerPlanData as plan}
-                    <tr class="hover:theme-bg-secondary">
+                  {#each manpowerPlanRowsSorted as plan, i (manpowerRowKey(plan, i))}
+                    <tr class="hover:theme-bg-secondary transition-colors {attendanceIsAbsent(plan) ? 'bg-red-50 dark:bg-red-950/30' : ''}">
                       <td class="px-4 py-2 text-sm theme-text-primary">
                         {plan.hr_emp?.emp_name || 'N/A'}
                       </td>
-                      <td class="px-4 py-2 text-sm theme-text-primary">
-                        {plan.from_stage_code ? 'Reassignment' : 'Attendance'}
+                      <td class="px-4 py-2 text-sm theme-text-primary whitespace-nowrap">
+                        {stageShiftLabel(plan)}
                       </td>
                       <td class="px-4 py-2 text-sm theme-text-primary">
-                        {#if plan.from_stage_code}
-                          {plan.from_stage_code} → {plan.to_stage_code} ({plan.from_time} - {plan.to_time})
+                        {#if isManpowerReassignmentRow(plan)}
+                          <span class="text-xs theme-text-secondary">Reassigned · {plan.from_time || ''}-{plan.to_time || ''}</span>
                         {:else}
-                          {plan.attendance_status}
+                          <span
+                            class="inline-flex h-7 w-7 items-center justify-center rounded-md text-sm font-bold border theme-border {attendanceLetter(plan) === 'P'
+                              ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
+                              : attendanceLetter(plan) === 'A'
+                                ? 'bg-amber-100 text-amber-900 dark:bg-amber-900/35 dark:text-amber-200'
+                                : ''}"
+                          >
+                            {attendanceLetter(plan)}
+                          </span>
                         {/if}
+                      </td>
+                      <td class="px-4 py-2 text-sm theme-text-primary text-right tabular-nums">
+                        {isManpowerReassignmentRow(plan) ? '—' : formatHoursCell(plan.actual_hours ?? plan.planned_hours)}
+                      </td>
+                      <td class="px-4 py-2 text-sm theme-text-primary text-right tabular-nums">
+                        {isManpowerReassignmentRow(plan) ? '—' : formatHoursCell(plan.ot_hours)}
+                      </td>
+                      <td class="px-4 py-2 text-sm theme-text-primary text-right tabular-nums">
+                        {isManpowerReassignmentRow(plan) ? '—' : formatHoursCell(plan.c_off_value)}
                       </td>
                     </tr>
                   {/each}

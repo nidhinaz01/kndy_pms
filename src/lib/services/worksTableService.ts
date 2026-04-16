@@ -520,7 +520,7 @@ export async function checkPlanningStatus(
     uniqueWoDetailsIds.add(woDetailsId);
   }
 
-  // Must match canPlanWork / PlanWorkModal save: block when an approved submission already covers this stage-shift-date
+  // Must match canPlanWork / PlanWorkModal save: block when an approved submission exists for this stage+shift+date
   if (dateStr && shiftCode) {
     const { isPlanningBlockedForStageShiftDate } = await import('$lib/api/production/productionWorkValidationService');
     const blockCheck = await isPlanningBlockedForStageShiftDate(stageCode, shiftCode, dateStr);

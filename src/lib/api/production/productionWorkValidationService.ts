@@ -2,7 +2,8 @@ import { supabase } from '$lib/supabaseClient';
 import type { WorkPlanning } from './productionTypes';
 
 /**
- * Check if planning is blocked for a stage-shift-date combination due to an approved submission
+ * Check if planning is blocked for a stage-shift-date combination due to an approved submission.
+ * Scoped to the same shift as the route: another shift's approved plan (e.g. GEN) does not block MRN.
  */
 export async function isPlanningBlockedForStageShiftDate(
   stageCode: string,
@@ -15,14 +16,16 @@ export async function isPlanningBlockedForStageShiftDate(
       ? planningDate.split('T')[0] 
       : planningDate;
 
-    // Check if there's an approved planning submission for this stage-date
     const { data: submission, error: submissionError } = await supabase
       .from('prdn_planning_submissions')
       .select('id, status, planning_date, reviewed_dt')
       .eq('stage_code', stageCode)
+      .eq('shift_code', shiftCode)
       .eq('planning_date', dateStr)
       .eq('status', 'approved')
       .eq('is_deleted', false)
+      .order('version', { ascending: false })
+      .limit(1)
       .maybeSingle();
 
     if (submissionError) {
@@ -31,62 +34,18 @@ export async function isPlanningBlockedForStageShiftDate(
     }
 
     if (!submission) {
-      return { isBlocked: false }; // No approved submission, planning is allowed
+      return { isBlocked: false };
     }
 
-    // If there's an approved submission for this stage-date, check if any work plans
-    // in that submission involve workers from the current shift (paginated)
-    const PAGE_SIZE = 1000;
-    const workPlans: any[] = [];
-    let offset = 0;
-    let hasMore = true;
-    while (hasMore) {
-      const { data: page, error: plansError } = await supabase
-        .from('prdn_work_planning')
-        .select(`
-          id, 
-          worker_id,
-          hr_emp!inner(emp_id, shift_code)
-        `)
-        .eq('planning_submission_id', submission.id)
-        .eq('stage_code', stageCode)
-        .eq('from_date', dateStr)
-        .eq('status', 'approved')
-        .eq('is_deleted', false)
-        .order('id')
-        .range(offset, offset + PAGE_SIZE - 1);
-
-      if (plansError) {
-        console.error('❌ Error checking work plans:', plansError);
-        return {
-          isBlocked: true,
-          reason: `Planning is blocked for ${stageCode}-${shiftCode} on ${new Date(dateStr).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' })}. An approved plan already exists for this stage-date combination.`
-        };
-      }
-      const rows = page || [];
-      workPlans.push(...rows);
-      hasMore = rows.length === PAGE_SIZE;
-      offset += PAGE_SIZE;
-    }
-
-    // If there are approved work plans, check if any involve workers from the current shift
-    if (workPlans.length > 0) {
-      const hasWorkersFromShift = workPlans.some((plan: any) => {
-        // Handle both single object and array responses from Supabase
-        const empData = Array.isArray(plan.hr_emp) ? plan.hr_emp[0] : plan.hr_emp;
-        const empShiftCode = empData?.shift_code;
-        return empShiftCode === shiftCode;
-      });
-
-      if (hasWorkersFromShift) {
-        return {
-          isBlocked: true,
-          reason: `Planning is blocked for ${stageCode}-${shiftCode} on ${new Date(dateStr).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' })}. An approved plan already exists for this stage-shift-date combination.`
-        };
-      }
-    }
-
-    return { isBlocked: false };
+    const formatted = new Date(dateStr).toLocaleDateString('en-GB', {
+      day: '2-digit',
+      month: 'short',
+      year: '2-digit'
+    });
+    return {
+      isBlocked: true,
+      reason: `Planning is blocked for ${stageCode}-${shiftCode} on ${formatted}. An approved plan already exists for this stage-shift-date combination.`
+    };
   } catch (error) {
     console.error('❌ Error in isPlanningBlockedForStageShiftDate:', error);
     return { isBlocked: false }; // Don't block on error
