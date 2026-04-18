@@ -2,7 +2,7 @@
   import { createEventDispatcher } from 'svelte';
   import Button from '$lib/components/common/Button.svelte';
   import SortableHeader from '$lib/components/common/SortableHeader.svelte';
-  import { formatTime, formatLostTimeDetails } from '../utils/timeUtils';
+  import { formatTime, formatLostTimeDetails, formatDeviationTypeLabel } from '../utils/timeUtils';
   import { groupReportWorks } from '../utils/planTabUtils';
   import { filterGroupedWorksBySearch } from '../utils/productionTabSearchUtils';
   import { formatDateTimeLocal } from '$lib/utils/formatDate';
@@ -32,6 +32,9 @@
   let allEmployeeReportingComplete = true;
   let searchTerm = '';
   let sortConfig: SortConfig = { column: null, direction: null };
+
+  /** When true, show `prdn_work_reporting.id` column for debugging (default off). */
+  let showDebugIds = false;
 
   // Combine draft work reports (manpower reports have different structure, handle separately if needed)
   $: allDraftReports = draftReportData || [];
@@ -428,6 +431,14 @@
       {/if}
     </div>
     <div class="flex items-center space-x-3">
+      <Button
+        variant={showDebugIds ? 'primary' : 'secondary'}
+        size="sm"
+        title={showDebugIds ? 'Hide reporting row IDs' : 'Show prdn_work_reporting.id column for debugging'}
+        on:click={() => (showDebugIds = !showDebugIds)}
+      >
+        ID
+      </Button>
       <Button variant="secondary" size="sm" on:click={handleRefresh} disabled={isLoading}>
         {isLoading ? 'Loading...' : 'Refresh'}
       </Button>
@@ -598,6 +609,14 @@
                 }}
               />
             </th>
+            {#if showDebugIds}
+              <th
+                class="px-4 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider whitespace-nowrap w-[88px]"
+                title="prdn_work_reporting.id (per worker/skill row)"
+              >
+                ID
+              </th>
+            {/if}
             <SortableHeader column="sortable_woNo" {sortConfig} onSort={handleSort} label="Work Order" headerClass="w-[100px]" />
             <SortableHeader column="sortable_pwoNo" {sortConfig} onSort={handleSort} label="PWO Number" headerClass="w-[120px]" />
             <SortableHeader column="sortable_workCode" {sortConfig} onSort={handleSort} label="Work Code" headerClass="w-[120px]" />
@@ -651,6 +670,17 @@
                   }}
                 />
               </td>
+              {#if showDebugIds}
+                <td class="px-4 py-2 text-sm align-top {typedGroup.hasLostTime ? 'text-gray-800' : 'theme-text-primary'}">
+                  <div class="flex flex-col gap-0.5">
+                    {#each typedGroup.items as report}
+                      <div class="text-xs font-mono tabular-nums" title="prdn_work_reporting.id">
+                        {report.id ?? '—'}
+                      </div>
+                    {/each}
+                  </div>
+                </td>
+              {/if}
               <td class="px-4 py-2 whitespace-nowrap text-sm font-medium {typedGroup.hasLostTime ? 'text-gray-800' : 'theme-text-primary'}">
                 {typedGroup.woNo}
               </td>
@@ -699,15 +729,7 @@
                 <div class="flex flex-col gap-0.5">
                   {#each typedGroup.items as report}
                     <div class="text-xs">
-                      {#if report.deviations && report.deviations.length > 0}
-                        {@const deviation = report.deviations[0]}
-                        <div class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-orange-100 text-orange-800 dark:bg-orange-900/20 dark:text-orange-400">
-                          ⚠️ {deviation.deviation_type}
-                        </div>
-                        <div class="mt-0.5 text-xs text-orange-600 dark:text-orange-400 truncate" title={deviation.reason}>
-                          {deviation.reason}
-                        </div>
-                      {:else if report.worker_id}
+                      {#if report.worker_id}
                         <span class="font-medium">{report.reporting_hr_emp?.emp_name || report.worker_id || 'N/A'}</span>
                         <span class="text-xs {report.lt_minutes_total > 0 ? 'text-gray-600' : 'theme-text-secondary'}"> ({report.reporting_hr_emp?.skill_short || 'N/A'})</span>
                       {:else}
@@ -801,14 +823,25 @@
               <td class="px-4 py-2 text-sm {typedGroup.hasLostTime ? 'text-gray-800' : 'theme-text-primary'}">
                 <div class="flex flex-col gap-0.5">
                   {#each typedGroup.items as report}
-                    <div class="text-xs truncate" title={report.lt_details && Array.isArray(report.lt_details) && report.lt_details.length > 0 ? formatLostTimeDetails(report.lt_details) : ''}>
-                    {#if report.lt_details && Array.isArray(report.lt_details) && report.lt_details.length > 0}
-                        {formatLostTimeDetails(report.lt_details)}
-                    {:else if report.lt_minutes_total > 0}
+                    <div class="text-xs space-y-1">
+                      {#if report.deviations && report.deviations.length > 0}
+                        {@const deviation = report.deviations[0]}
+                        <div class="text-orange-600 dark:text-orange-400">
+                          <span class="font-medium">{formatDeviationTypeLabel(deviation.deviation_type)}</span>
+                          {#if deviation.reason?.trim()}
+                            <div class="mt-0.5 whitespace-normal">{deviation.reason.trim()}</div>
+                          {/if}
+                        </div>
+                      {/if}
+                      {#if report.lt_details && Array.isArray(report.lt_details) && report.lt_details.length > 0}
+                        <div class="truncate theme-text-primary" title={formatLostTimeDetails(report.lt_details)}>
+                          {formatLostTimeDetails(report.lt_details)}
+                        </div>
+                      {:else if report.lt_minutes_total > 0}
                         <span class="theme-text-secondary">N/A</span>
-                    {:else}
+                      {:else if !(report.deviations && report.deviations.length > 0)}
                         <span class="theme-text-secondary">-</span>
-                    {/if}
+                      {/if}
                     </div>
                   {/each}
                 </div>

@@ -11,8 +11,12 @@
     validateReportDateRange,
     formatDdMmmYyyy
   } from '$lib/utils/reportDateRange';
-  import { loadOtReport, type OtReportRow } from './services/otReportService';
-  import { exportOtReportExcel } from './utils/exportOtReportExcel';
+  import {
+    loadAttendancePivotReport,
+    type AttendancePivotReport,
+    type AttendancePivotRow
+  } from './services/attendanceReportService';
+  import { exportAttendanceReportExcel } from './utils/exportAttendanceReportExcel';
   import { reportRowMatchesSearch } from '$lib/utils/reportTableSearch';
 
   let menus: any[] = [];
@@ -20,10 +24,9 @@
 
   let fromDate = firstDayOfMonthIso();
   let toDate = todayIsoLocal();
-  let rows: OtReportRow[] = [];
+  let report: AttendancePivotReport | null = null;
   let loading = false;
   let errorMessage = '';
-  let lastRunSucceeded = false;
   let tableSearch = '';
 
   onMount(async () => {
@@ -43,8 +46,7 @@
   async function generateReport() {
     errorMessage = '';
     tableSearch = '';
-    rows = [];
-    lastRunSucceeded = false;
+    report = null;
     const v = validateReportDateRange(fromDate, toDate);
     if (!v.ok) {
       errorMessage = v.error || 'Invalid dates.';
@@ -52,8 +54,7 @@
     }
     loading = true;
     try {
-      rows = await loadOtReport(v.fromDate!, v.toDate!);
-      lastRunSucceeded = true;
+      report = await loadAttendancePivotReport(v.fromDate!, v.toDate!);
     } catch (e) {
       console.error(e);
       errorMessage = e instanceof Error ? e.message : 'Failed to generate report.';
@@ -63,33 +64,30 @@
   }
 
   function exportExcel() {
-    if (rows.length === 0) return;
+    if (!report || report.rows.length === 0) return;
     const v = validateReportDateRange(fromDate, toDate);
     if (!v.ok) {
       errorMessage = v.error || 'Fix dates before export.';
       return;
     }
     try {
-      exportOtReportExcel(rows, v.fromDate!, v.toDate!);
+      exportAttendanceReportExcel(report, v.fromDate!, v.toDate!);
     } catch (e) {
       console.error(e);
       alert('Export failed. Please try again.');
     }
   }
 
-  function formatOtHours(mins: number | null): string {
-    if (mins == null || !Number.isFinite(mins)) return '—';
-    const h = Math.floor(mins / 60);
-    const m = Math.round(mins % 60);
-    if (h <= 0) return `${m}m`;
-    return `${h}h ${m}m`;
+  function cellDisplay(iso: string, row: AttendancePivotRow): string {
+    return row.cells[iso] ?? '';
   }
 
-  $: filteredRows = rows.filter((r) => reportRowMatchesSearch(tableSearch, r));
+  $: filteredAttendanceRows =
+    report?.rows.filter((r) => reportRowMatchesSearch(tableSearch, r)) ?? [];
 </script>
 
 <svelte:head>
-  <title>Overtime Report</title>
+  <title>Attendance Report</title>
 </svelte:head>
 
 <div class="flex min-h-screen flex-col theme-bg-secondary transition-colors duration-200">
@@ -107,9 +105,9 @@
           </svg>
         </button>
         <div>
-          <h1 class="text-xl font-semibold theme-text-primary">Overtime Report</h1>
+          <h1 class="text-xl font-semibold theme-text-primary">Attendance Report</h1>
           <p class="text-sm theme-text-secondary">
-            Work reports with OT minutes (window overlaps range; max ~3 months)
+            Reporting manpower — one letter per calendar day (P / A(I) / A(U); max ~3 months)
           </p>
         </div>
       </div>
@@ -133,7 +131,7 @@
         <Button variant="primary" size="sm" on:click={generateReport} disabled={loading}>
           {loading ? 'Generating…' : 'Generate Report'}
         </Button>
-        <Button variant="secondary" size="sm" on:click={exportExcel} disabled={rows.length === 0}>
+        <Button variant="secondary" size="sm" on:click={exportExcel} disabled={!report || report.rows.length === 0}>
           Export Excel
         </Button>
         <button
@@ -161,24 +159,24 @@
       <p class="mb-4 text-sm font-medium theme-text-primary" role="status" aria-live="polite">Generating report…</p>
     {/if}
 
-    {#if lastRunSucceeded && !rows.length && !loading}
+    {#if report && !report.rows.length && !loading}
       <p class="mb-4 rounded-lg border theme-border theme-bg-primary px-4 py-3 text-sm theme-text-secondary">
-        No overtime rows match this range.
+        No reporting manpower in this range.
       </p>
     {/if}
 
-    {#if !rows.length && !loading && !errorMessage && !lastRunSucceeded}
+    {#if !report && !loading && !errorMessage}
       <p class="theme-text-secondary mb-4 text-sm">
-        Choose dates and click <strong>Generate Report</strong>. Includes work reporting rows whose from/to dates overlap
-        the range and have <strong>overtime minutes &gt; 0</strong>. Only rows with a <strong>worker name</strong> are shown.
+        Choose <strong>from</strong> and <strong>to</strong> dates and click <strong>Generate Report</strong>. Each row is
+        shift, stage, employee, and skill; date columns show attendance for days covered by the reporting window.
       </p>
     {/if}
 
-    {#if rows.length > 0}
+    {#if report && report.rows.length > 0}
       <section class="rounded-lg border theme-border theme-bg-primary p-4 shadow-sm">
         <div class="mb-3 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end sm:justify-between">
           <h2 class="text-base font-semibold theme-text-primary">
-            Results ({filteredRows.length}{#if tableSearch.trim() && rows.length > 0} of {rows.length}{/if} row{filteredRows.length === 1 ? '' : 's'})
+            Results ({filteredAttendanceRows.length}{#if tableSearch.trim() && report.rows.length > 0} of {report.rows.length}{/if} row{filteredAttendanceRows.length === 1 ? '' : 's'})
           </h2>
           <label class="flex w-full min-w-0 flex-col gap-1 text-sm theme-text-secondary sm:max-w-md sm:flex-1">
             <span>Search table</span>
@@ -191,51 +189,45 @@
             />
           </label>
         </div>
-        {#if filteredRows.length === 0 && tableSearch.trim()}
+        {#if filteredAttendanceRows.length === 0 && tableSearch.trim()}
           <p class="theme-text-secondary mb-3 text-sm">No rows match your search. Clear the box to show all rows.</p>
         {/if}
         <div
           class="min-w-0 overflow-x-auto rounded-md border theme-border [-webkit-overflow-scrolling:touch]"
           role="region"
-          aria-label="Overtime report table"
+          aria-label="Attendance report table"
         >
           <table class="w-max min-w-full border-collapse text-xs">
             <thead>
               <tr class="theme-text-secondary border-b theme-border text-left">
-                <th class="theme-bg-primary sticky left-0 z-10 px-2 py-2 font-medium">Shift</th>
+                <th class="px-2 py-2 font-medium whitespace-nowrap">Shift</th>
                 <th class="px-2 py-2 font-medium whitespace-nowrap">Stage</th>
-                <th class="px-2 py-2 font-medium whitespace-nowrap">WO</th>
-                <th class="px-2 py-2 font-medium whitespace-nowrap">Work code</th>
-                <th class="px-2 py-2 font-medium min-w-[10rem]">Work name + details</th>
-                <th class="px-2 py-2 font-medium whitespace-nowrap">Worker</th>
-                <th class="px-2 py-2 font-medium whitespace-nowrap">Report window</th>
-                <th class="px-2 py-2 font-medium whitespace-nowrap">OT</th>
-                <th class="px-2 py-2 font-medium whitespace-nowrap">OT amount</th>
+                <th class="px-2 py-2 font-medium whitespace-nowrap">Employee</th>
+                <th class="px-2 py-2 font-medium whitespace-nowrap">Skill</th>
+                {#each report.dates as d}
+                  <th class="px-2 py-2 font-medium whitespace-nowrap text-center min-w-[4.5rem]" title={d}>
+                    {formatDdMmmYyyy(d)}
+                  </th>
+                {/each}
               </tr>
             </thead>
             <tbody class="theme-text-primary">
-              {#each filteredRows as r}
+              {#each filteredAttendanceRows as r}
                 <tr class="theme-border border-b align-top">
-                  <td class="theme-bg-primary sticky left-0 z-10 px-2 py-2 font-medium whitespace-nowrap font-mono">{r.shiftCode ?? '—'}</td>
-                  <td class="px-2 py-2 whitespace-nowrap font-mono">{r.stageCode ?? '—'}</td>
-                  <td class="px-2 py-2 whitespace-nowrap">{r.woNo ?? '—'}</td>
-                  <td class="px-2 py-2 whitespace-nowrap font-mono">{r.workCode ?? '—'}</td>
-                  <td class="px-2 py-2 max-w-[14rem] break-words">{r.workNameDetails ?? '—'}</td>
-                  <td class="px-2 py-2 whitespace-nowrap">{r.workerName ?? '—'}</td>
+                  <td class="px-2 py-2 font-mono whitespace-nowrap">{r.shiftCode ?? '—'}</td>
+                  <td class="px-2 py-2 font-mono whitespace-nowrap">{r.stageCode ?? '—'}</td>
                   <td class="px-2 py-2 whitespace-nowrap">
-                    {formatDdMmmYyyy(r.reportFromDate) || '—'} {r.reportFromTime ?? ''} → {formatDdMmmYyyy(r.reportToDate) || '—'}
-                    {r.reportToTime ?? ''}
+                    {r.empName ?? '—'} <span class="theme-text-secondary">({r.empId ?? '—'})</span>
                   </td>
-                  <td class="px-2 py-2 whitespace-nowrap tabular-nums">{formatOtHours(r.overtimeMinutes)}</td>
-                  <td class="px-2 py-2 whitespace-nowrap tabular-nums">{r.overtimeAmount ?? '—'}</td>
+                  <td class="px-2 py-2 whitespace-nowrap">{r.skillShort ?? '—'}</td>
+                  {#each report.dates as d}
+                    <td class="px-2 py-2 text-center tabular-nums whitespace-nowrap">{cellDisplay(d, r) || '—'}</td>
+                  {/each}
                 </tr>
               {/each}
             </tbody>
           </table>
         </div>
-        <p class="theme-text-secondary mt-2 text-xs">
-          <strong>Export Excel</strong> includes customer, skill, report status, and created-by fields.
-        </p>
       </section>
     {/if}
   </main>

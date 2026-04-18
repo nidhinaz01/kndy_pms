@@ -1,4 +1,5 @@
 import type { ProductionEmployee } from '$lib/api/production';
+import type { ManpowerAttendanceStatus } from '$lib/utils/manpowerAttendanceStatus';
 
 export interface ManpowerTableFilters {
   search: string;
@@ -17,7 +18,7 @@ export interface ManpowerTableState {
   showWorksModal: boolean;
   showBulkAttendanceModal: boolean;
   selectedEmployee: ProductionEmployee | null;
-  bulkAttendanceStatus: 'present' | 'absent';
+  bulkAttendanceStatus: ManpowerAttendanceStatus;
   bulkNotes: string;
   bulkFromTime: string;
   bulkToTime: string;

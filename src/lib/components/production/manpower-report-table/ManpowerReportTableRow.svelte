@@ -3,6 +3,7 @@
   import { CheckCircle, XCircle, UserCheck, ArrowRight, Map, ClipboardList, Lock } from 'lucide-svelte';
   import type { ProductionEmployee } from '$lib/api/production';
   import { formatManpowerCOffHoursDisplay, isReportingAttendanceLocked } from '$lib/utils/manpowerTableUtils';
+  import { attendanceIsPresent, attendanceIsAbsentUninformed, normalizeManpowerAttendanceStatus } from '$lib/utils/manpowerAttendanceStatus';
 
   export let employee: ProductionEmployee;
   export let isSelected: boolean = false;
@@ -36,7 +37,7 @@
   $: {
     const workHoursPlanned = employee.hours_planned || 0;
     const workHoursReported = employee.hours_reported || 0;
-    const isPresent = employee.attendance_status === 'present';
+    const isPresent = attendanceIsPresent(employee.attendance_status);
     
     // Check planned hours mismatch
     const hasPlannedHours = shiftHoursPlanned !== null && shiftHoursPlanned !== undefined;
@@ -59,7 +60,7 @@
   $: hasMismatchedHours = hasMismatchedPlannedHours || hasMismatchedReportedHours;
 </script>
 
-<tr class="hover:theme-bg-secondary transition-colors {hasMismatchedHours ? '!bg-yellow-50 dark:!bg-yellow-900/30 !border-l-4 !border-yellow-500' : ''}">
+<tr class="hover:theme-bg-secondary transition-colors {hasMismatchedHours ? '!bg-yellow-50 dark:!bg-yellow-900/30 !border-l-4 !border-yellow-500' : ''} {attendanceIsAbsentUninformed(employee.attendance_status) ? '!bg-red-50 dark:!bg-red-950/25' : ''}">
   <td class="px-6 py-4 whitespace-nowrap">
     <input 
       type="checkbox" 
@@ -78,15 +79,20 @@
     {employee.skill_short}
   </td>
   <td class="px-6 py-4 whitespace-nowrap">
-    {#if employee.attendance_status === 'present'}
+    {#if attendanceIsPresent(employee.attendance_status)}
       <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-600 dark:bg-green-900 dark:text-green-200">
         <CheckCircle class="w-3 h-3 mr-1" />
         Present
       </span>
-    {:else if employee.attendance_status === 'absent'}
-      <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-600 dark:bg-red-900 dark:text-red-200">
+    {:else if normalizeManpowerAttendanceStatus(employee.attendance_status) === 'absent_informed'}
+      <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200">
         <XCircle class="w-3 h-3 mr-1" />
-        Absent
+        Absent (Informed)
+      </span>
+    {:else if attendanceIsAbsentUninformed(employee.attendance_status)}
+      <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-200 ring-1 ring-red-300 dark:ring-red-700">
+        <XCircle class="w-3 h-3 mr-1" />
+        Absent (Uninformed)
       </span>
     {:else}
       <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-600 dark:bg-gray-900 dark:text-gray-200">
@@ -111,7 +117,7 @@
       </div>
       <ManpowerIconHintButton
         label={reassignHint}
-        disabled={!canReassignFromThisStage || employee.attendance_status !== 'present'}
+        disabled={!canReassignFromThisStage || !attendanceIsPresent(employee.attendance_status)}
         on:click={onStageReassignment}
       >
         <ArrowRight class="w-4 h-4" />
@@ -125,14 +131,14 @@
     </div>
   </td>
   <td class="px-6 py-4 whitespace-nowrap text-sm {hasMismatchedPlannedHours ? '!text-gray-900 dark:!text-yellow-100' : 'theme-text-primary'}">
-    {#if employee.attendance_status === 'present' && shiftHoursPlanned !== null}
+    {#if attendanceIsPresent(employee.attendance_status) && shiftHoursPlanned !== null}
       {formatHours(employee.hours_planned || 0)}h/{formatHours(shiftHoursPlanned)}h
     {:else}
       {formatHours(employee.hours_planned || 0)}h
     {/if}
   </td>
   <td class="px-6 py-4 whitespace-nowrap text-sm {hasMismatchedReportedHours ? '!text-gray-900 dark:!text-yellow-100' : 'theme-text-primary'}">
-    {#if employee.attendance_status === 'present' && shiftHoursReported !== null}
+    {#if attendanceIsPresent(employee.attendance_status) && shiftHoursReported !== null}
       {formatHours(employee.hours_reported || 0)}h/{formatHours(shiftHoursReported)}h
     {:else}
       {formatHours(employee.hours_reported || 0)}h

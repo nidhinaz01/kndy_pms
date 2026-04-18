@@ -70,6 +70,18 @@ export interface WorkOrderDocumentGroup {
   documents: DocumentSubmission[];
 }
 
+/** Normalize WO id for Map keys / FK joins (Supabase JSON may use number or string). */
+export function coerceSalesOrderId(id: unknown): number | null {
+  if (id === null || id === undefined) return null;
+  const n =
+    typeof id === 'number' && Number.isFinite(id)
+      ? id
+      : Number.parseInt(String(id), 10);
+  return Number.isFinite(n) ? n : null;
+}
+
+const BATCH_PAGE_SIZE = 1000;
+
 /**
  * Upload a document (replaces old uploadStageDocument and uploadGeneralDocument)
  */
@@ -567,6 +579,28 @@ async function updateRndDocumentsActualDate(salesOrderId: number, username: stri
   }
 }
 
+async function fetchRequirementsForWorkOrdersPaged(salesOrderIds: number[]): Promise<any[]> {
+  const out: any[] = [];
+  let rangeStart = 0;
+  while (true) {
+    const { data, error } = await supabase
+      .from('rnd_document_requirements')
+      .select('*')
+      .in('sales_order_id', salesOrderIds)
+      .range(rangeStart, rangeStart + BATCH_PAGE_SIZE - 1);
+
+    if (error) {
+      console.error('Failed to fetch requirements:', error);
+      break;
+    }
+    const batch = data || [];
+    out.push(...batch);
+    if (batch.length < BATCH_PAGE_SIZE) break;
+    rangeStart += BATCH_PAGE_SIZE;
+  }
+  return out;
+}
+
 /**
  * Batch fetch documents for multiple work orders
  * Returns a map of work order ID -> documents by type
@@ -574,30 +608,51 @@ async function updateRndDocumentsActualDate(salesOrderId: number, username: stri
 export async function getBatchWorkOrderDocuments(
   salesOrderIds: number[]
 ): Promise<Map<number, Map<string, DocumentSubmission[]>>> {
-  if (salesOrderIds.length === 0) {
+  const normalizedIds = [
+    ...new Set(
+      salesOrderIds
+        .map((id) => coerceSalesOrderId(id))
+        .filter((id): id is number => id !== null)
+    )
+  ];
+
+  if (normalizedIds.length === 0) {
     return new Map();
   }
-  
-  const { data, error } = await supabase
-    .from('rnd_document_submissions')
-    .select('*')
-    .in('sales_order_id', salesOrderIds)
-    .eq('is_deleted', false)
-    .order('submission_date', { ascending: false });
-  
-  if (error) {
-    throw new Error(`Failed to fetch documents: ${error.message}`);
+
+  // PostgREST defaults to a max row cap (~1000). Paginate so every WO sees all submissions.
+  const allRows: any[] = [];
+  let rangeStart = 0;
+  while (true) {
+    const { data, error } = await supabase
+      .from('rnd_document_submissions')
+      .select('*')
+      .in('sales_order_id', normalizedIds)
+      .eq('is_deleted', false)
+      .order('submission_date', { ascending: false })
+      .range(rangeStart, rangeStart + BATCH_PAGE_SIZE - 1);
+
+    if (error) {
+      throw new Error(`Failed to fetch documents: ${error.message}`);
+    }
+
+    const batch = data || [];
+    allRows.push(...batch);
+    if (batch.length < BATCH_PAGE_SIZE) break;
+    rangeStart += BATCH_PAGE_SIZE;
   }
-  
+
   // Group by work order, then by document type
   const result = new Map<number, Map<string, DocumentSubmission[]>>();
-  
-  // Initialize maps for all work orders
-  salesOrderIds.forEach(id => {
+
+  normalizedIds.forEach((id) => {
     result.set(id, new Map());
   });
-  
-  (data || []).forEach((doc: any) => {
+
+  allRows.forEach((doc: any) => {
+    const sid = coerceSalesOrderId(doc.sales_order_id);
+    if (sid === null) return;
+
     // Map snake_case to camelCase for consistency
     const mappedDoc: DocumentSubmission = {
       id: doc.id,
@@ -618,30 +673,30 @@ export async function getBatchWorkOrderDocuments(
       modified_by: doc.modified_by,
       modified_dt: doc.modified_dt
     };
-    
-    if (mappedDoc.document_type && mappedDoc.sales_order_id) {
-      const normalizedType = normalizeDocumentType(mappedDoc.document_type);
-      if (normalizedType) {
-        const woMap = result.get(mappedDoc.sales_order_id);
-        if (woMap) {
-          if (!woMap.has(normalizedType)) {
-            woMap.set(normalizedType, []);
-          }
-          
-          // For single-file types, only keep current document
-          // For multi-file types, keep all documents
-          if (isSingleFileType(normalizedType)) {
-            if (mappedDoc.is_current) {
-              woMap.set(normalizedType, [mappedDoc]);
-            }
-          } else {
-            woMap.get(normalizedType)!.push(mappedDoc);
-          }
-        }
+
+    if (!mappedDoc.document_type) return;
+
+    const normalizedType = normalizeDocumentType(mappedDoc.document_type);
+    if (!normalizedType) return;
+
+    const woMap = result.get(sid);
+    if (!woMap) return;
+
+    if (!woMap.has(normalizedType)) {
+      woMap.set(normalizedType, []);
+    }
+
+    // For single-file types, only keep current document
+    // For multi-file types, keep all documents
+    if (isSingleFileType(normalizedType)) {
+      if (mappedDoc.is_current) {
+        woMap.set(normalizedType, [mappedDoc]);
       }
+    } else {
+      woMap.get(normalizedType)!.push(mappedDoc);
     }
   });
-  
+
   return result;
 }
 
@@ -652,56 +707,56 @@ export async function getBatchWorkOrderDocuments(
 export async function getBatchDocumentStatuses(
   salesOrderIds: number[]
 ): Promise<Map<number, DocumentStatus[]>> {
-  if (salesOrderIds.length === 0) {
+  const normalizedIds = [
+    ...new Set(
+      salesOrderIds
+        .map((id) => coerceSalesOrderId(id))
+        .filter((id): id is number => id !== null)
+    )
+  ];
+
+  if (normalizedIds.length === 0) {
     return new Map();
   }
-  
-  // Batch fetch all documents and requirements
-  const [documentsByWorkOrder, { data: requirements, error: reqError }] = await Promise.all([
-    getBatchWorkOrderDocuments(salesOrderIds),
-    supabase
-      .from('rnd_document_requirements')
-      .select('*')
-      .in('sales_order_id', salesOrderIds)
+
+  const [documentsByWorkOrder, requirementsRows] = await Promise.all([
+    getBatchWorkOrderDocuments(normalizedIds),
+    fetchRequirementsForWorkOrdersPaged(normalizedIds)
   ]);
-  
-  if (reqError) {
-    console.error('Failed to fetch requirements:', reqError);
-  }
-  
+
   // Group requirements by work order and document type
   const requirementsByWorkOrder = new Map<number, Map<string, DocumentRequirement>>();
-  
-  // Initialize maps for all work orders
-  salesOrderIds.forEach(id => {
+
+  normalizedIds.forEach((id) => {
     requirementsByWorkOrder.set(id, new Map());
   });
-  
-  (requirements || []).forEach((req: any) => {
+
+  requirementsRows.forEach((req: any) => {
     const normalizedType = normalizeDocumentType(req.document_type);
-    if (normalizedType && req.sales_order_id) {
-      const woMap = requirementsByWorkOrder.get(req.sales_order_id);
-      if (woMap) {
-        woMap.set(normalizedType, {
-          id: req.id,
-          sales_order_id: req.sales_order_id,
-          document_type: req.document_type,
-          is_not_required: req.is_not_required,
-          not_required_comments: req.not_required_comments,
-          marked_by: req.marked_by,
-          marked_dt: req.marked_dt,
-          created_dt: req.created_dt,
-          modified_by: req.modified_by,
-          modified_dt: req.modified_dt
-        });
-      }
-    }
+    const sid = coerceSalesOrderId(req.sales_order_id);
+    if (!normalizedType || sid === null) return;
+
+    const woMap = requirementsByWorkOrder.get(sid);
+    if (!woMap) return;
+
+    woMap.set(normalizedType, {
+      id: req.id,
+      sales_order_id: req.sales_order_id,
+      document_type: req.document_type,
+      is_not_required: req.is_not_required,
+      not_required_comments: req.not_required_comments,
+      marked_by: req.marked_by,
+      marked_dt: req.marked_dt,
+      created_dt: req.created_dt,
+      modified_by: req.modified_by,
+      modified_dt: req.modified_dt
+    });
   });
-  
+
   // Build statuses for each work order
   const result = new Map<number, DocumentStatus[]>();
-  
-  salesOrderIds.forEach(salesOrderId => {
+
+  normalizedIds.forEach((salesOrderId) => {
     const documentsByType = documentsByWorkOrder.get(salesOrderId) || new Map();
     const requirementsMap = requirementsByWorkOrder.get(salesOrderId) || new Map();
     

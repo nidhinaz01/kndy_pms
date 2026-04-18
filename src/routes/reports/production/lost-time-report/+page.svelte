@@ -13,6 +13,7 @@
   } from '$lib/utils/reportDateRange';
   import { loadLostTimeReport, type LostTimeReportRow } from './services/lostTimeReportService';
   import { exportLostTimeReportExcel } from './utils/exportLostTimeReportExcel';
+  import { reportRowMatchesSearch } from '$lib/utils/reportTableSearch';
 
   let menus: any[] = [];
   let showSidebar = false;
@@ -23,6 +24,7 @@
   let loading = false;
   let errorMessage = '';
   let lastRunSucceeded = false;
+  let tableSearch = '';
 
   onMount(async () => {
     try {
@@ -40,6 +42,7 @@
 
   async function generateReport() {
     errorMessage = '';
+    tableSearch = '';
     rows = [];
     lastRunSucceeded = false;
     const v = validateReportDateRange(fromDate, toDate);
@@ -78,6 +81,8 @@
     if (p === null || p === undefined) return '—';
     return p ? 'Yes' : 'No';
   }
+
+  $: filteredRows = rows.filter((r) => reportRowMatchesSearch(tableSearch, r));
 </script>
 
 <svelte:head>
@@ -86,8 +91,8 @@
 
 <div class="flex min-h-screen flex-col theme-bg-secondary transition-colors duration-200">
   <div class="theme-bg-primary border-b theme-border">
-    <div class="flex flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-6">
-      <div class="flex items-center gap-3">
+    <div class="grid gap-3 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:px-6">
+      <div class="flex min-w-0 items-center gap-3">
         <button
           type="button"
           class="rounded-lg p-2 hover:theme-bg-tertiary transition-colors"
@@ -105,14 +110,13 @@
           </p>
         </div>
       </div>
-      <div class="flex flex-wrap items-end gap-3">
+      <div class="flex flex-wrap items-end justify-end gap-3">
         <label class="flex flex-col gap-1 text-sm theme-text-secondary">
           <span>From date</span>
           <input
             type="date"
             bind:value={fromDate}
-            disabled={loading}
-            class="rounded-md border theme-border bg-white px-2 py-1.5 text-gray-900 dark:bg-gray-900 dark:text-gray-100 disabled:opacity-60"
+            class="rounded-md border theme-border bg-white px-2 py-1.5 text-gray-900 dark:bg-gray-900 dark:text-gray-100"
           />
         </label>
         <label class="flex flex-col gap-1 text-sm theme-text-secondary">
@@ -120,14 +124,13 @@
           <input
             type="date"
             bind:value={toDate}
-            disabled={loading}
-            class="rounded-md border theme-border bg-white px-2 py-1.5 text-gray-900 dark:bg-gray-900 dark:text-gray-100 disabled:opacity-60"
+            class="rounded-md border theme-border bg-white px-2 py-1.5 text-gray-900 dark:bg-gray-900 dark:text-gray-100"
           />
         </label>
         <Button variant="primary" size="sm" on:click={generateReport} disabled={loading}>
           {loading ? 'Generating…' : 'Generate Report'}
         </Button>
-        <Button variant="secondary" size="sm" on:click={exportExcel} disabled={loading || rows.length === 0}>
+        <Button variant="secondary" size="sm" on:click={exportExcel} disabled={rows.length === 0}>
           Export Excel
         </Button>
         <button
@@ -171,9 +174,24 @@
 
     {#if rows.length > 0}
       <section class="rounded-lg border theme-border theme-bg-primary p-4 shadow-sm">
-        <h2 class="mb-3 text-base font-semibold theme-text-primary">
-          Results ({rows.length} line{rows.length === 1 ? '' : 's'})
-        </h2>
+        <div class="mb-3 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end sm:justify-between">
+          <h2 class="text-base font-semibold theme-text-primary">
+            Results ({filteredRows.length}{#if tableSearch.trim() && rows.length > 0} of {rows.length}{/if} line{filteredRows.length === 1 ? '' : 's'})
+          </h2>
+          <label class="flex w-full min-w-0 flex-col gap-1 text-sm theme-text-secondary sm:max-w-md sm:flex-1">
+            <span>Search table</span>
+            <input
+              type="search"
+              bind:value={tableSearch}
+              placeholder="Filter by any column…"
+              autocomplete="off"
+              class="rounded-md border theme-border bg-white px-3 py-1.5 text-gray-900 dark:bg-gray-900 dark:text-gray-100"
+            />
+          </label>
+        </div>
+        {#if filteredRows.length === 0 && tableSearch.trim()}
+          <p class="theme-text-secondary mb-3 text-sm">No rows match your search. Clear the box to show all lines.</p>
+        {/if}
         <div
           class="min-w-0 overflow-x-auto rounded-md border theme-border [-webkit-overflow-scrolling:touch]"
           role="region"
@@ -199,7 +217,7 @@
               </tr>
             </thead>
             <tbody class="theme-text-primary">
-              {#each rows as r}
+              {#each filteredRows as r}
                 <tr class="border-b theme-border align-top">
                   <td class="sticky left-0 z-10 bg-inherit px-2 py-2 font-medium theme-bg-primary whitespace-nowrap font-mono">{r.shiftCode ?? '—'}</td>
                   <td class="px-2 py-2 whitespace-nowrap font-mono">{r.stageCode ?? '—'}</td>

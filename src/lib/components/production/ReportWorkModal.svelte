@@ -4,8 +4,10 @@
   import { X } from 'lucide-svelte';
   import { supabase } from '$lib/supabaseClient';
   import { loadWorkers, loadStandardTime, loadLostTimeReasons, loadEmployeeSalary, checkWorkerConflict } from '$lib/services/reportWorkService';
+  import { loadShiftInfo } from '$lib/services/multiSkillReportService';
   import { saveWorkReport, updatePlanningStatus, updateProductionDatesIfFirstReport, updateWorkStatus } from '$lib/services/reportWorkSaveService';
-  import { calculateActualTime, calculateHoursWorkedToday, calculateLostTime, calculateChunkCost } from '$lib/utils/reportWorkUtils';
+  import { calculateHoursWorkedToday, calculateLostTime, calculateChunkCost } from '$lib/utils/reportWorkUtils';
+  import { calculateActualTime } from '$lib/utils/multiSkillReportUtils';
   import { validateSave } from '$lib/utils/reportWorkValidation';
   import type { ReportWorkFormData, ReportWorkState, LostTimeChunk } from '$lib/types/reportWork';
   import { initialReportWorkFormData, initialReportWorkState } from '$lib/types/reportWork';
@@ -29,6 +31,7 @@
   let isLoading = false;
   let availableWorkers: any[] = [];
   let lostTimeReasons: LostTimeReason[] = [];
+  let shiftInfo: any = null;
 
   // Watch for plannedWork changes
   $: if (plannedWork && isOpen) {
@@ -49,9 +52,10 @@
     loadAllData();
   }
 
-  // Watch for date changes to reload workers
+  // Watch for date changes to reload workers and shift breaks (for net hours)
   $: if (plannedWork && formData.fromDate) {
     loadWorkersData();
+    loadShiftInfoData();
   }
 
   // Watch for worker selection to load salary
@@ -71,7 +75,8 @@
         formData.fromDate,
         formData.fromTime,
         formData.toDate,
-        formData.toTime
+        formData.toTime,
+        shiftInfo?.breakTimes
       );
       formData.hoursWorkedToday = calculateHoursWorkedToday(state.actualTimeMinutes);
       
@@ -110,6 +115,14 @@
   async function loadWorkersData() {
     if (!plannedWork?.stage_code || !formData.fromDate) return;
     availableWorkers = await loadWorkers(plannedWork.stage_code, formData.fromDate, shiftCode);
+  }
+
+  async function loadShiftInfoData() {
+    if (!plannedWork?.stage_code || !formData.fromDate) {
+      shiftInfo = null;
+      return;
+    }
+    shiftInfo = await loadShiftInfo(plannedWork.stage_code, formData.fromDate);
   }
 
   async function loadStandardTimeData() {
@@ -374,6 +387,7 @@
     state = { ...initialReportWorkState };
     availableWorkers = [];
     lostTimeReasons = [];
+    shiftInfo = null;
     isLoading = false;
   }
 

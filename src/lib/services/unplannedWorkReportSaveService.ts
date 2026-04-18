@@ -2,6 +2,7 @@ import { supabase } from '$lib/supabaseClient';
 import type { MultiSkillReportFormData, BreakdownData } from '$lib/types/multiSkillReport';
 import type { LostTimeReason } from '$lib/api/lostTimeReasons';
 import { getEffectiveRowTimes } from '$lib/utils/planWorkUtils';
+import { netHoursWorkedForReportingRow } from '$lib/utils/multiSkillReportUtils';
 import { calculatePieceRateForPlanning } from './pieceRateCalculationService';
 
 /**
@@ -14,7 +15,8 @@ export async function saveUnplannedWorkReports(
   formData: MultiSkillReportFormData,
   lostTimeReasons: LostTimeReason[],
   stageCode: string,
-  shiftCode: string
+  shiftCode: string,
+  shiftBreakTimes: Array<{ start_time: string; end_time: string }> = []
 ): Promise<{ success: boolean; data?: any[]; error?: string }> {
   try {
     const { getCurrentUsername, getCurrentTimestamp } = await import('$lib/utils/userUtils');
@@ -183,7 +185,7 @@ export async function saveUnplannedWorkReports(
       const wsmId = virtualWork.wsm_id;
       
       const eff = getEffectiveRowTimes(String(virtualWork.id), formData);
-      const rowHours = eff.plannedHours;
+      const rowHours = netHoursWorkedForReportingRow(eff, shiftBreakTimes);
 
       const hoursWorkedTillDate = timeWorkedTillDateByWorker[workerId] || 0;
       const totalHoursWorked = hoursWorkedTillDate + rowHours;
@@ -302,7 +304,7 @@ export async function saveUnplannedWorkReports(
       for (let ti = 0; ti < formData.selectedTrainees.length; ti++) {
         const trainee = formData.selectedTrainees[ti];
         const eff = getEffectiveRowTimes(`trainee-${ti}`, formData);
-        const rowHours = eff.plannedHours;
+        const rowHours = netHoursWorkedForReportingRow(eff, shiftBreakTimes);
 
         const hoursWorkedTillDate = timeWorkedTillDateByWorker[trainee.emp_id] || 0;
         const totalHoursWorked = hoursWorkedTillDate + rowHours;

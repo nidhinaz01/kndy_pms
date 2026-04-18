@@ -1,4 +1,5 @@
 import type { ReportWorkFormData, LostTimeChunk } from '$lib/types/reportWork';
+import { reportingEndMustNotBeAfterNow } from './reportingEndTimeValidation';
 
 export interface ValidationResult {
   isValid: boolean;
@@ -26,6 +27,11 @@ export function validateStage1(formData: ReportWorkFormData): ValidationResult {
 
   if (!formData.toTime) {
     errors.toTime = 'To time is required';
+  }
+
+  const endAfterNow = reportingEndMustNotBeAfterNow(formData.toDate, formData.toTime);
+  if (endAfterNow) {
+    errors.toTime = endAfterNow;
   }
 
   return {

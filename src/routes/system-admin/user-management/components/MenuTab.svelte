@@ -64,8 +64,46 @@
     return rows;
   }
 
+  /** IDs of menus under `rootId` (not including rootId). Used to avoid picking a descendant as parent when editing. */
+  function getDescendantMenuIds(rootId: string, items: any[]): Set<string> {
+    const childrenByParent = new Map<string, string[]>();
+    for (const m of items || []) {
+      const pid = m.parent_menu_id;
+      if (!pid) continue;
+      const list = childrenByParent.get(pid) ?? [];
+      list.push(m.menu_id);
+      childrenByParent.set(pid, list);
+    }
+    const blocked = new Set<string>();
+    const stack = [...(childrenByParent.get(rootId) ?? [])];
+    while (stack.length) {
+      const id = stack.pop()!;
+      blocked.add(id);
+      for (const kid of childrenByParent.get(id) ?? []) stack.push(kid);
+    }
+    return blocked;
+  }
+
+  function formatParentOptionLabel(row: FlatMenuRow): string {
+    const pad = '\u00A0\u00A0'.repeat(row.depth);
+    return `${pad}${row.menu_name}`;
+  }
+
   $: menuTree = buildMenuTree(menuItems || []);
   $: flattenedMenuRows = flattenMenuTree(menuTree);
+
+  $: descendantIdsForEdit =
+    isEditMode && selectedMenu?.menu_id
+      ? getDescendantMenuIds(selectedMenu.menu_id, menuItems)
+      : new Set<string>();
+
+  $: parentMenuSelectRows = flattenedMenuRows.filter((row) => {
+    if (isEditMode && selectedMenu?.menu_id) {
+      if (row.menu_id === selectedMenu.menu_id) return false;
+      if (descendantIdsForEdit.has(row.menu_id)) return false;
+    }
+    return true;
+  });
 </script>
 
 <div class="flex flex-1 gap-6">
@@ -135,12 +173,8 @@
             class="w-full px-3 py-2 border theme-border rounded-lg theme-bg-primary theme-text-primary focus:ring-2 focus:ring-blue-500 focus:border-transparent"
           >
             <option value={null}>No Parent</option>
-            {#each menuItems.filter(menu => {
-              if (menu.parent_menu_id) return false;
-              if (isEditMode && selectedMenu && menu.menu_id === selectedMenu.menu_id) return false;
-              return true;
-            }).sort((a, b) => a.menu_name.localeCompare(b.menu_name)) as menu}
-              <option value={menu.menu_id}>{menu.menu_name}</option>
+            {#each parentMenuSelectRows as row}
+              <option value={row.menu_id}>{formatParentOptionLabel(row)}</option>
             {/each}
           </select>
         </div>

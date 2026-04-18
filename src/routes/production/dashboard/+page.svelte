@@ -8,6 +8,7 @@
   import { supabase } from '$lib/supabaseClient';
 
   import type { ProductionEmployee } from '$lib/api/production';
+  import { attendanceIsAbsent } from '$lib/utils/manpowerAttendanceStatus';
 
   import { fetchConfiguredStageShifts, type StageShiftPair } from './services/dashboardDataService';
   import ProductionCircleDiagram from './components/ProductionCircleDiagram.svelte';
@@ -125,7 +126,7 @@
   function computeManpowerMetrics(data: ProductionEmployee[]) {
     const total = data.length;
     const presentCount = data.filter(e => e.attendance_status === 'present').length;
-    const absentCount = data.filter(e => e.attendance_status === 'absent').length;
+    const absentCount = data.filter(e => attendanceIsAbsent(e.attendance_status)).length;
     const plannedHoursTotal = data.reduce((sum, e) => sum + toNumberOrZero((e as any).planned_hours), 0);
     const actualHoursTotal = data.reduce((sum, e) => sum + toNumberOrZero((e as any).actual_hours), 0);
 

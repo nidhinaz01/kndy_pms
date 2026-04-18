@@ -15,8 +15,12 @@
       <span class="ml-2">Present</span>
     </label>
     <label class="inline-flex items-center text-sm">
-      <input type="checkbox" checked={filters.selectedStatus === 'absent'} on:change={() => onFilterChange('selectedStatus', filters.selectedStatus === 'absent' ? '' : 'absent')} />
-      <span class="ml-2">Absent</span>
+      <input type="checkbox" checked={filters.selectedStatus === 'absent_informed'} on:change={() => onFilterChange('selectedStatus', filters.selectedStatus === 'absent_informed' ? '' : 'absent_informed')} />
+      <span class="ml-2">Absent (Informed)</span>
+    </label>
+    <label class="inline-flex items-center text-sm">
+      <input type="checkbox" checked={filters.selectedStatus === 'absent_uninformed'} on:change={() => onFilterChange('selectedStatus', filters.selectedStatus === 'absent_uninformed' ? '' : 'absent_uninformed')} />
+      <span class="ml-2">Absent (Uninformed)</span>
     </label>
     <label class="inline-flex items-center text-sm">
       <input type="checkbox" checked={filters.selectedStatus === 'not_marked'} on:change={() => onFilterChange('selectedStatus', filters.selectedStatus === 'not_marked' ? '' : 'not_marked')} />

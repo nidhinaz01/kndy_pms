@@ -13,6 +13,10 @@
   import PDFViewer from './components/PDFViewer.svelte';
   import { X } from 'lucide-svelte';
   import { goto } from '$app/navigation';
+  import {
+    attendanceIsAbsentUninformed,
+    formatManpowerAttendanceShort
+  } from '$lib/utils/manpowerAttendanceStatus';
 
   let showSidebar = false;
   let menus: any[] = [];
@@ -121,16 +125,24 @@
     return seg(plan?.stage_code || selectedSubmission?.stage_code || '');
   }
 
-  function attendanceLetter(plan: any): string {
+  function attendanceLetterDisplay(plan: any): string {
     if (isManpowerReassignmentRow(plan)) return '';
-    const s = String(plan?.attendance_status || '').toLowerCase();
-    if (s === 'present' || s === 'p') return 'P';
-    if (s === 'absent' || s === 'a') return 'A';
-    return '—';
+    return formatManpowerAttendanceShort(plan?.attendance_status);
   }
 
-  function attendanceIsAbsent(plan: any): boolean {
-    return attendanceLetter(plan) === 'A';
+  function attendanceBadgeClass(plan: any): string {
+    if (isManpowerReassignmentRow(plan)) return '';
+    const t = formatManpowerAttendanceShort(plan?.attendance_status);
+    if (t === 'P') {
+      return 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300';
+    }
+    if (t === 'A(I)') {
+      return 'bg-amber-100 text-amber-900 dark:bg-amber-900/35 dark:text-amber-200';
+    }
+    if (t === 'A(U)') {
+      return 'bg-red-100 text-red-800 dark:bg-red-950/40 dark:text-red-200 ring-1 ring-red-300 dark:ring-red-800';
+    }
+    return 'theme-text-secondary';
   }
 
   function formatHoursCell(value: unknown): string {
@@ -863,7 +875,7 @@
                 </thead>
                 <tbody class="divide-y theme-border">
                   {#each manpowerPlanRowsSorted as plan, i (manpowerRowKey(plan, i))}
-                    <tr class="hover:theme-bg-secondary transition-colors {attendanceIsAbsent(plan) ? 'bg-red-50 dark:bg-red-950/30' : ''}">
+                    <tr class="hover:theme-bg-secondary transition-colors {attendanceIsAbsentUninformed(plan?.attendance_status) ? 'bg-red-50 dark:bg-red-950/30' : ''}">
                       <td class="px-4 py-2 text-sm theme-text-primary">
                         {plan.hr_emp?.emp_name || 'N/A'}
                       </td>
@@ -875,13 +887,9 @@
                           <span class="text-xs theme-text-secondary">Reassigned · {plan.from_time || ''}-{plan.to_time || ''}</span>
                         {:else}
                           <span
-                            class="inline-flex h-7 w-7 items-center justify-center rounded-md text-sm font-bold border theme-border {attendanceLetter(plan) === 'P'
-                              ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
-                              : attendanceLetter(plan) === 'A'
-                                ? 'bg-amber-100 text-amber-900 dark:bg-amber-900/35 dark:text-amber-200'
-                                : ''}"
+                            class="inline-flex min-h-7 min-w-7 items-center justify-center rounded-md border border-transparent px-1.5 py-0.5 text-xs font-bold leading-tight {attendanceBadgeClass(plan)}"
                           >
-                            {attendanceLetter(plan)}
+                            {attendanceLetterDisplay(plan)}
                           </span>
                         {/if}
                       </td>

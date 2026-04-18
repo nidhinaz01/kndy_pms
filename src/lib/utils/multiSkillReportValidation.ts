@@ -1,4 +1,5 @@
 import type { MultiSkillReportFormData, BreakdownData } from '$lib/types/multiSkillReport';
+import { reportingEndMustNotBeAfterNow } from './reportingEndTimeValidation';
 
 export interface ValidationResult {
   isValid: boolean;
@@ -74,6 +75,11 @@ export function validateStage1(
 
   if (!formData.toTime) {
     errors.toTime = 'To time is required';
+  }
+
+  const endAfterNow = reportingEndMustNotBeAfterNow(formData.toDate, formData.toTime);
+  if (endAfterNow) {
+    errors.toTime = endAfterNow;
   }
 
   // New trainees require a deviation reason (existing draft rows already have one)

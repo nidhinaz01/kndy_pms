@@ -1,6 +1,10 @@
 import type { ProductionEmployee } from '$lib/api/production';
 import type { ManpowerTableFilters } from '$lib/types/manpowerTable';
 import { cOffNetWorkHours } from '$lib/utils/cOffWindowUtils';
+import {
+  attendanceIsPresent,
+  normalizeManpowerAttendanceStatus
+} from '$lib/utils/manpowerAttendanceStatus';
 
 export function filterEmployees(
   data: ProductionEmployee[],
@@ -13,9 +17,12 @@ export function filterEmployees(
       employee.skill_short.toLowerCase().includes(filters.search.toLowerCase()) ||
       employee.shift_code.toLowerCase().includes(filters.search.toLowerCase());
     
-    const matchesStatus = !filters.selectedStatus || 
-      (filters.selectedStatus === 'present' && ((employee.attendance_status === 'present') || (employee.hours_reported && employee.hours_reported > 0))) ||
-      (filters.selectedStatus === 'absent' && (employee.attendance_status === 'absent')) ||
+    const norm = normalizeManpowerAttendanceStatus(employee.attendance_status);
+    const matchesStatus = !filters.selectedStatus ||
+      (filters.selectedStatus === 'present' &&
+        (attendanceIsPresent(employee.attendance_status) || (employee.hours_reported && employee.hours_reported > 0))) ||
+      (filters.selectedStatus === 'absent_informed' && norm === 'absent_informed') ||
+      (filters.selectedStatus === 'absent_uninformed' && norm === 'absent_uninformed') ||
       (filters.selectedStatus === 'not_marked' && (!employee.attendance_status || employee.attendance_status === null)) ||
       (filters.selectedStatus === 'overtime' && employee.ot_hours && employee.ot_hours > 0) ||
       (filters.selectedStatus === 'undertime' && employee.lt_hours && employee.lt_hours > 0);

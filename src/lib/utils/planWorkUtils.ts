@@ -327,3 +327,35 @@ export function getIndividualSkills(skillMapping: any): string[] {
   }
 }
 
+/**
+ * Stable identity for a Works-tab row / Plan Work session.
+ * Includes WO line, standard-work id, and work code so two competencies on the same WO
+ * do not collapse to the same modal instance key (fixes stale worker state across plans).
+ */
+export function getCanonicalPlanWorkKey(work: any): string {
+  if (!work || typeof work !== 'object') return 'unknown';
+
+  const woRaw = work.wo_details_id ?? work.prdn_wo_details_id;
+  const wo = woRaw != null && woRaw !== '' ? String(woRaw) : 'unknown';
+
+  const swRaw = work.sw_id ?? work.id;
+  const sw = swRaw != null && swRaw !== '' ? String(swRaw) : 'new';
+
+  const derivedRaw = work.std_work_type_details?.derived_sw_code;
+  const derived =
+    derivedRaw != null && String(derivedRaw).trim() !== '' ? String(derivedRaw).trim() : '';
+
+  const otherRaw = work.sw_code ?? work.other_work_code;
+  const other =
+    !derived && otherRaw != null && String(otherRaw).trim() !== ''
+      ? String(otherRaw).trim()
+      : '';
+
+  const kind = work.is_added_work ? 'add' : 'std';
+
+  const wsmFirst = work.skill_mappings?.[0]?.wsm_id;
+  const wsm = wsmFirst != null && wsmFirst !== '' ? String(wsmFirst) : '';
+
+  return [kind, wo, sw, derived || '_', other || '_', wsm || '_'].join('|');
+}
+

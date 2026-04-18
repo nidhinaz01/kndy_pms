@@ -88,3 +88,15 @@ export function formatLostTimeDetails(ltDetails: any[] | null): string {
   }).join('; ');
 }
 
+/** Human-readable label for `prdn_work_reporting_deviations.deviation_type` (UI tables). */
+export function formatDeviationTypeLabel(deviationType: string | null | undefined): string {
+  if (!deviationType || typeof deviationType !== 'string') return 'Deviation';
+  const t = deviationType.trim().toLowerCase();
+  const map: Record<string, string> = {
+    no_worker: 'No worker',
+    skill_mismatch: 'Skill mismatch',
+    exceeds_std_time: 'Exceeds standard time'
+  };
+  return map[t] || deviationType.replace(/_/g, ' ');
+}
+

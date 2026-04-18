@@ -39,6 +39,24 @@ export function calculateActualTime(
   }
 }
 
+/**
+ * Net worked hours for a reporting row: clock span minus overlapping shift breaks.
+ * Persist as {@code prdn_work_reporting.hours_worked_today}.
+ */
+export function netHoursWorkedForReportingRow(
+  eff: { fromDate: string; toDate: string; fromTime: string; toTime: string },
+  shiftBreakTimes?: Array<{ start_time: string; end_time: string }>
+): number {
+  const minutes = calculateActualTime(
+    eff.fromDate,
+    eff.fromTime,
+    eff.toDate,
+    eff.toTime,
+    shiftBreakTimes
+  );
+  return Math.max(0, minutes / 60);
+}
+
 // Re-export standard function
 export const calculateBreakTimeInPeriod = calculateBreakTimeInMinutes;
 

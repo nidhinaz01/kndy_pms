@@ -2,7 +2,30 @@ import { supabase } from '$lib/supabaseClient';
 import { createWorkPlanning } from '$lib/api/production';
 import { getIndividualSkills, getEffectiveRowTimes } from '$lib/utils/planWorkUtils';
 import { getCurrentUsername, getCurrentTimestamp } from '$lib/utils/userUtils';
-import type { PlanWorkFormData, WorkContinuation } from '$lib/types/planWork';
+import type { PlanWorkFormData, WorkContinuation, SelectedWorker } from '$lib/types/planWork';
+
+/**
+ * Works without skill_mappings store the chosen worker under key `general` (WorkerSelection).
+ * Never use Object.values()[0] — leftover keys from another slot can reorder and save the wrong emp_id.
+ */
+function resolveWorkerForNoSkillMappings(formData: PlanWorkFormData): SelectedWorker | null {
+  const sw = formData.selectedWorkers;
+  const general = sw['general'];
+  if (general && (general as SelectedWorker).emp_id) {
+    return general as SelectedWorker;
+  }
+
+  const entries = Object.entries(sw).filter(
+    ([, v]) => v != null && typeof v === 'object' && String((v as SelectedWorker).emp_id || '').length > 0
+  ) as [string, SelectedWorker][];
+
+  if (entries.length === 0) return null;
+  if (entries.length === 1) return entries[0][1];
+
+  throw new Error(
+    'Multiple worker slots are set for this work. Close the Plan Work modal, reopen it, and select one worker again.'
+  );
+}
 
 export async function saveWorkPlanning(
   work: any,
@@ -115,7 +138,7 @@ export async function saveWorkPlanning(
       }
     });
   } else {
-    const worker = Object.values(formData.selectedWorkers)[0];
+    const worker = resolveWorkerForNoSkillMappings(formData);
     if (worker) {
       const workerId = (worker as any).emp_id;
       const matchKey = `GEN-${workerId}`;

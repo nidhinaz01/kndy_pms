@@ -7,15 +7,20 @@
   import { computeCOffToEndWithBreaks } from '$lib/utils/cOffWindowUtils';
   import { validateCOffWithinAttendanceWindow } from '$lib/utils/attendanceCOffSpanUtils';
   import { getShiftHourLimitHours, validateManpowerOtCoffBalance } from '$lib/utils/shiftHourLimitUtils';
+  import {
+    attendanceClearsPlanReportFields,
+    attendanceIsPresent,
+    type ManpowerAttendanceStatus
+  } from '$lib/utils/manpowerAttendanceStatus';
 
   export let showModal: boolean = false;
   export let selectedCount: number = 0;
   export let selectedDate: string = '';
   export let shiftCode: string = ''; // Shift code for bulk operations
-  export let bulkAttendanceStatus: 'present' | 'absent' = 'present';
+  export let bulkAttendanceStatus: ManpowerAttendanceStatus = 'present';
   export let bulkNotes: string = '';
   export let isSubmitting: boolean = false;
-  export let onStatusChange: (status: 'present' | 'absent') => void = () => {};
+  export let onStatusChange: (status: ManpowerAttendanceStatus) => void = () => {};
   export let onNotesChange: (notes: string) => void = () => {};
   export let onSubmit: () => void = () => {};
   export let onClose: () => void = () => {};
@@ -46,7 +51,7 @@
   let isLoadingShiftInfo = false;
   let shiftHourLimitHours: number = 8;
 
-  $: if (bulkAttendanceStatus === 'absent') {
+  $: if (attendanceClearsPlanReportFields(bulkAttendanceStatus)) {
     bulkCOffValue = 0;
     bulkCOffFromDate = '';
     bulkCOffFromTime = '';
@@ -69,9 +74,9 @@
   }
 
   $: bulkOtNum = bulkOtNumeric(bulkOtHours);
-  $: bulkShowOtDateTimeFields = bulkAttendanceStatus === 'present' && bulkOtNum > 0;
+  $: bulkShowOtDateTimeFields = attendanceIsPresent(bulkAttendanceStatus) && bulkOtNum > 0;
 
-  $: if (bulkAttendanceStatus === 'present') {
+  $: if (attendanceIsPresent(bulkAttendanceStatus)) {
     if (bulkOtNum > 0) {
       const d = bulkDayStr();
       if (d) {
@@ -101,7 +106,7 @@
 
   // Calculate if notes is required
   $: isNotesRequired =
-    bulkAttendanceStatus === 'present' && plannedHours !== null && plannedHours < fullShiftHours;
+    attendanceIsPresent(bulkAttendanceStatus) && plannedHours !== null && plannedHours < fullShiftHours;
   $: notesLabel = isNotesRequired
     ? 'Reason (Required for partial attendance):'
     : 'Notes (Optional):';
@@ -211,7 +216,7 @@
   }
 
   // Watch time changes to recalculate hours
-  $: if (fromTime && toTime && bulkAttendanceStatus === 'present') {
+  $: if (fromTime && toTime && attendanceIsPresent(bulkAttendanceStatus)) {
     calculateHoursFromTimes();
   }
 
@@ -224,7 +229,7 @@
   }
 
   async function handleSaveClick() {
-    if (bulkAttendanceStatus !== 'present') {
+    if (!attendanceIsPresent(bulkAttendanceStatus)) {
       onSubmit();
       return;
     }
@@ -332,14 +337,23 @@
                 />
                 <span class="text-sm text-slate-800">Present</span>
               </label>
+              <label class="mb-2 flex cursor-pointer items-center gap-2">
+                <input
+                  class="accent-blue-600"
+                  type="radio"
+                  checked={bulkAttendanceStatus === 'absent_informed'}
+                  on:change={() => onStatusChange('absent_informed')}
+                />
+                <span class="text-sm text-slate-800">Absent (Informed)</span>
+              </label>
               <label class="flex cursor-pointer items-center gap-2">
                 <input
                   class="accent-blue-600"
                   type="radio"
-                  checked={bulkAttendanceStatus === 'absent'}
-                  on:change={() => onStatusChange('absent')}
+                  checked={bulkAttendanceStatus === 'absent_uninformed'}
+                  on:change={() => onStatusChange('absent_uninformed')}
                 />
-                <span class="text-sm text-slate-800">Absent</span>
+                <span class="text-sm text-slate-800">Absent (Uninformed)</span>
               </label>
             </fieldset>
           </section>
@@ -347,7 +361,7 @@
           <section
             class="min-w-[180px] max-w-full flex-1 basis-[200px] rounded-lg border border-sky-300/80 bg-sky-50 p-3 text-slate-900 dark:border-sky-400/50 dark:bg-sky-100 dark:text-slate-900"
           >
-            {#if bulkAttendanceStatus === 'present'}
+            {#if attendanceIsPresent(bulkAttendanceStatus)}
               {#if isLoadingShiftInfo}
                 <p class="text-sm text-slate-600">Loading shift…</p>
               {:else}
@@ -393,7 +407,7 @@
           <section
             class="min-w-[180px] max-w-full flex-1 basis-[200px] rounded-lg border border-sky-300/80 bg-sky-50 p-3 text-slate-900 dark:border-sky-400/50 dark:bg-sky-100 dark:text-slate-900"
           >
-            {#if bulkAttendanceStatus === 'present'}
+            {#if attendanceIsPresent(bulkAttendanceStatus)}
               <p class="mb-2 text-sm font-semibold text-slate-900">C-Off (optional)</p>
               <label class="mb-1 block text-xs font-medium text-slate-700" for="bulk-coff-value"
                 >Value (days)</label
@@ -491,7 +505,7 @@
           <section
             class="min-w-[180px] max-w-full flex-1 basis-[200px] rounded-lg border border-sky-300/80 bg-sky-50 p-3 text-slate-900 dark:border-sky-400/50 dark:bg-sky-100 dark:text-slate-900"
           >
-            {#if bulkAttendanceStatus === 'present'}
+            {#if attendanceIsPresent(bulkAttendanceStatus)}
               <p class="mb-2 text-sm font-semibold text-slate-900">Overtime (optional)</p>
               <label class="mb-1 block text-xs font-medium text-slate-700" for="bulk-ot-hours">OT hours</label>
               <input

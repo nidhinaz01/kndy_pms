@@ -3,7 +3,7 @@
   import Button from '$lib/components/common/Button.svelte';
   import { X } from 'lucide-svelte';
   import { supabase } from '$lib/supabaseClient';
-  import { calculatePlannedHours, calculateBreakTimeInSlot, autoCalculateEndTime, getIndividualSkills, getSkillShort, generateTimeSlots, getEffectiveRowTimes } from '$lib/utils/planWorkUtils';
+  import { calculatePlannedHours, calculateBreakTimeInSlot, autoCalculateEndTime, getIndividualSkills, getSkillShort, generateTimeSlots, getEffectiveRowTimes, getCanonicalPlanWorkKey } from '$lib/utils/planWorkUtils';
   import { formatTime } from '$lib/utils/timeFormatUtils';
   import { checkTimeOverlap, checkTimeExcess, checkSkillMismatch } from '$lib/utils/planWorkValidation';
   import { loadWorkers, loadWorkContinuation, loadExistingPlans, loadShiftInfo, checkAlternativeSkillCombinations } from '$lib/services/planWorkService';
@@ -53,15 +53,22 @@
   let previousWorkId: string | null = null;
   let previousIsOpen: boolean = false;
   $: if (work && isOpen) {
-    const currentWorkId = `${work?.sw_id || work?.id || 'new'}-${work?.wo_details_id || 'unknown'}`;
+    const currentWorkId = getCanonicalPlanWorkKey(work);
     /** True only on the transition into an open modal (previousIsOpen reset when modal closes). */
     const opening = !previousIsOpen && isOpen;
 
-    // CRITICAL: Clear selectedWorkers when modal first opens (even if same work)
-    // This prevents stale data from previous modal sessions
+    // Full session reset on every open — avoids stale workers / saved step-2 state / overrides from prior plans.
     if (opening) {
-      formData = { ...formData, selectedWorkers: {}, selectedTrainees: [], traineeDeviationReason: '' };
-      console.log('🧹 Cleared selected workers and trainees on modal open');
+      savedSelectedWorkers = {};
+      hasPrefilledWorkers = false;
+      formData = {
+        ...formData,
+        selectedWorkers: {},
+        selectedTrainees: [],
+        traineeDeviationReason: '',
+        rowTimeOverrides: {}
+      };
+      console.log('🧹 Plan session reset on open (workers, trainees, row overrides, saved step-2 snapshot)');
     }
 
     // Only reset if this is actually a different work

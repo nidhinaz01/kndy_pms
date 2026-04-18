@@ -12,6 +12,7 @@
   import { calculatePlannedHours } from '$lib/utils/planWorkUtils';
   import type { LostTimeReason } from '$lib/api/lostTimeReasons';
   import { supabase } from '$lib/supabaseClient';
+  import { attendanceIsPresent } from '$lib/utils/manpowerAttendanceStatus';
   import WorkDetailsDisplay from './multi-skill-report/WorkDetailsDisplay.svelte';
   import EmployeeAssignment from './multi-skill-report/EmployeeAssignment.svelte';
   import SharedTimeSelection from './multi-skill-report/SharedTimeSelection.svelte';
@@ -493,7 +494,7 @@
             const worker = availableWorkers.find((w: any) => w.emp_id === workerId);
             const workerName = worker?.emp_name || workerId;
             missingAttendance.push(`${workerName} (${workerId})`);
-          } else if (attendanceStatus !== 'present') {
+          } else if (!attendanceIsPresent(attendanceStatus)) {
             // Worker is marked as absent
             const worker = availableWorkers.find((w: any) => w.emp_id === workerId);
             const workerName = worker?.emp_name || workerId;
@@ -536,7 +537,12 @@
     try {
       formData.actualTimeMinutes = state.actualTimeMinutes;
       
-      const result = await saveMultiSkillReports(selectedWorks, formData, lostTimeReasons);
+      const result = await saveMultiSkillReports(
+        selectedWorks,
+        formData,
+        lostTimeReasons,
+        shiftInfo?.breakTimes ?? []
+      );
       if (!result.success) {
         alert('Error saving report: ' + (result.error || 'Unknown error'));
         return;

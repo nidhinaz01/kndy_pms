@@ -10,7 +10,11 @@
   import { goto } from '$app/navigation';
   import PDFViewer from '../plan-review/components/PDFViewer.svelte';
   import { X } from 'lucide-svelte';
-  import { formatTime, formatLostTimeDetails } from '../[stage_Shift]/utils/timeUtils';
+  import { formatTime, formatLostTimeDetails, formatDeviationTypeLabel } from '../[stage_Shift]/utils/timeUtils';
+  import {
+    attendanceIsAbsentUninformed,
+    formatManpowerAttendanceShort
+  } from '$lib/utils/manpowerAttendanceStatus';
   import { groupReportWorks } from '../[stage_Shift]/utils/planTabUtils';
 
   let showSidebar = false;
@@ -97,18 +101,24 @@
     return n.toFixed(2);
   }
 
-  function attendanceIsAbsent(report: any): boolean {
-    if (isManpowerReassignmentRow(report)) return false;
-    const s = String(report?.attendance_status || '').toLowerCase();
-    return s === 'absent' || s === 'a';
+  function attendanceLetterDisplay(report: any): string {
+    if (isManpowerReassignmentRow(report)) return '';
+    return formatManpowerAttendanceShort(report?.attendance_status);
   }
 
-  function attendanceLetter(report: any): string {
+  function attendanceBadgeClassReport(report: any): string {
     if (isManpowerReassignmentRow(report)) return '';
-    const s = String(report?.attendance_status || '').toLowerCase();
-    if (s === 'present' || s === 'p') return 'P';
-    if (s === 'absent' || s === 'a') return 'A';
-    return '—';
+    const t = formatManpowerAttendanceShort(report?.attendance_status);
+    if (t === 'P') {
+      return 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300';
+    }
+    if (t === 'A(I)') {
+      return 'bg-amber-100 text-amber-900 dark:bg-amber-900/35 dark:text-amber-200';
+    }
+    if (t === 'A(U)') {
+      return 'bg-red-100 text-red-800 dark:bg-red-950/40 dark:text-red-200 ring-1 ring-red-300 dark:ring-red-800';
+    }
+    return 'theme-text-secondary';
   }
 
   function attendanceCellSecondary(report: any): string {
@@ -1198,17 +1208,9 @@
                         <div class="flex flex-col gap-0.5">
                           {#each typedGroup.items as report}
                             <div class="text-xs">
-                              {#if report.deviations && report.deviations.length > 0}
-                                {@const deviation = report.deviations[0]}
-                                <div class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-orange-100 text-orange-800 dark:bg-orange-900/20 dark:text-orange-400">
-                                  ⚠️ {deviation.deviation_type}
-                                </div>
-                                <div class="mt-0.5 text-xs text-orange-600 dark:text-orange-400 truncate" title={deviation.reason}>
-                                  {deviation.reason}
-                                </div>
-                              {:else if report.worker_id && report.prdn_work_planning?.hr_emp}
-                                <span class="font-medium">{report.prdn_work_planning.hr_emp.emp_name || 'N/A'}</span>
-                                <span class="text-xs {report.lt_minutes_total > 0 ? 'text-gray-600' : 'theme-text-secondary'}"> ({report.prdn_work_planning.hr_emp.skill_short || 'N/A'})</span>
+                              {#if report.worker_id}
+                                <span class="font-medium">{report.reporting_hr_emp?.emp_name || report.prdn_work_planning?.hr_emp?.emp_name || report.worker_id || 'N/A'}</span>
+                                <span class="text-xs {report.lt_minutes_total > 0 ? 'text-gray-600' : 'theme-text-secondary'}"> ({report.reporting_hr_emp?.skill_short || report.prdn_work_planning?.hr_emp?.skill_short || 'N/A'})</span>
                               {:else}
                                 <span class="text-gray-400 italic text-xs">No worker</span>
                               {/if}
@@ -1300,12 +1302,23 @@
                       <td class="px-4 py-2 text-sm text-gray-900 dark:text-gray-100">
                         <div class="flex flex-col gap-0.5">
                           {#each typedGroup.items as report}
-                            <div class="text-xs truncate text-gray-700 dark:text-gray-300" title={report.lt_details && Array.isArray(report.lt_details) && report.lt_details.length > 0 ? formatLostTimeDetails(report.lt_details) : ''}>
+                            <div class="text-xs space-y-1 text-gray-700 dark:text-gray-300">
+                              {#if report.deviations && report.deviations.length > 0}
+                                {@const deviation = report.deviations[0]}
+                                <div class="text-orange-600 dark:text-orange-400">
+                                  <span class="font-medium">{formatDeviationTypeLabel(deviation.deviation_type)}</span>
+                                  {#if deviation.reason?.trim()}
+                                    <div class="mt-0.5 whitespace-normal">{deviation.reason.trim()}</div>
+                                  {/if}
+                                </div>
+                              {/if}
                               {#if report.lt_details && Array.isArray(report.lt_details) && report.lt_details.length > 0}
-                                {formatLostTimeDetails(report.lt_details)}
+                                <div class="truncate" title={formatLostTimeDetails(report.lt_details)}>
+                                  {formatLostTimeDetails(report.lt_details)}
+                                </div>
                               {:else if report.lt_minutes_total > 0}
                                 <span class="text-gray-500 dark:text-gray-400">N/A</span>
-                              {:else}
+                              {:else if !(report.deviations && report.deviations.length > 0)}
                                 <span class="text-gray-500 dark:text-gray-400">-</span>
                               {/if}
                             </div>
@@ -1353,7 +1366,7 @@
                 <tbody class="divide-y theme-border">
                   {#each manpowerReportRowsSorted as report, i (manpowerRowKey(report, i))}
                     <tr
-                      class="hover:theme-bg-secondary transition-colors {attendanceIsAbsent(report)
+                      class="hover:theme-bg-secondary transition-colors {attendanceIsAbsentUninformed(report?.attendance_status)
                         ? 'bg-red-50 dark:bg-red-950/30'
                         : ''}"
                     >
@@ -1368,13 +1381,9 @@
                           <span class="text-xs theme-text-secondary">{attendanceCellSecondary(report)}</span>
                         {:else}
                           <span
-                            class="inline-flex h-7 w-7 items-center justify-center rounded-md text-sm font-bold border theme-border {attendanceLetter(report) === 'P'
-                              ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
-                              : attendanceLetter(report) === 'A'
-                                ? 'bg-amber-100 text-amber-900 dark:bg-amber-900/35 dark:text-amber-200'
-                                : ''}"
+                            class="inline-flex min-h-7 min-w-7 items-center justify-center rounded-md border border-transparent px-1.5 py-0.5 text-xs font-bold leading-tight {attendanceBadgeClassReport(report)}"
                           >
-                            {attendanceLetter(report)}
+                            {attendanceLetterDisplay(report)}
                           </span>
                         {/if}
                       </td>

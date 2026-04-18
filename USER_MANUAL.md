@@ -27,7 +27,7 @@
 
 ## Introduction
 
-The Production Management System is a comprehensive web-based application designed to manage production workflows, employee data, work orders, planning, reporting, and operational reports (including month-to-date production status, lost time, deviation, C-Off, and overtime reports) for manufacturing operations. This manual provides detailed instructions for using each module and feature of the system.
+The Production Management System is a comprehensive web-based application designed to manage production workflows, employee data, work orders, planning, reporting, and operational reports (including month-to-date production status, lost time, deviation, C-Off, overtime, and HR attendance pivot reports) for manufacturing operations. This manual provides detailed instructions for using each module and feature of the system.
 
 ### System Requirements
 
@@ -221,7 +221,7 @@ Production is done **per stage and per shift** (e.g. P1S2-GEN). The same sequenc
 
 | Step | Where in the app | What happens |
 |------|------------------|---------------|
-| Record attendance | Production > [Stage_Shift] > **Manpower Plan** / **Manpower Report** | Use **Mark Attendance** to set present/absent, attendance **from/to date and time**, optional **C-Off**, and notes when required. See [Step 7.1: Record Employee Attendance](#step-71-record-employee-attendance-manpower-report). |
+| Record attendance | Production > [Stage_Shift] > **Manpower Plan** / **Manpower Report** | Use **Mark Attendance** to set **Present**, **Absent (Informed)**, or **Absent (Uninformed)**; when Present, set attendance **from/to date and time**, optional **C-Off**, and notes when required. See [Step 7.1: Record Employee Attendance](#step-71-record-employee-attendance-manpower-report). |
 | Report work completion | Production > [Stage_Shift] > **Plan** tab → **Report** on each work | For each completed (or partially completed) work, click **Report** and fill in completion status, times, lost time, etc. See [How to Report a Plan (Report Work Completion)](#7-how-to-report-a-plan-report-work-completion). |
 | Draft report & overtime | Production > [Stage_Shift] > **Draft Report** tab | Review draft report, report overtime if needed (Report OT), then **Submit Report**. See [Step 7.5: Submit Final Report](#step-75-submit-final-report). |
 
@@ -318,7 +318,7 @@ When a work order is no longer needed in active operations (e.g. after delivery)
 - **Production manager views:** [Central Production Dashboard](#central-production-dashboard), [Shift change](#shift-change)
 - **HR and Standards (setup):** [HR Module](#hr-module), [Standards Module](#standards-module); bulk add works: [Add Multiple Standard Works](#add-multiple-standard-works)
 - **Piece Rate (per employee vs by stage Excel):** [Piece Rate Module](#piece-rate-module)
-- **Reports (daily production status, lost time, deviations, C-Off, overtime):** [Reports Module](#reports-module)
+- **Reports (daily production status, lost time, deviations, C-Off, overtime, attendance pivot):** [Reports Module](#reports-module)
 - **Archive:** [Archive Work Order](#archive-work-order)
 
 ---
@@ -937,7 +937,7 @@ If a work has multiple skill competencies planned, you can delete all at once:
 
 #### Step 7.1: Record Employee Attendance (Manpower Plan & Manpower Report)
 
-Before reporting work, record **who was present** and their **attendance window** (and optional **C-Off**) on **Manpower Report**. For **planning**, use **Manpower Plan** the same way so planned hours and attendance line up with works.
+Before reporting work, record each employee’s **attendance** (Present, Absent Informed, or Absent Uninformed) and, when Present, their **attendance window** and optional **C-Off** on **Manpower Report**. For **planning**, use **Manpower Plan** the same way so planned hours and attendance line up with works.
 
 1. **Navigate to Manpower Plan or Manpower Report**:
    - Go to **Production** > Your Stage/Shift
@@ -948,9 +948,9 @@ Before reporting work, record **who was present** and their **attendance window*
    - In the employee table, click **Mark Attendance** (or **Attendance Locked** if the plan/report for that date is already submitted or approved and attendance cannot be changed)
    - The **Mark Attendance** modal opens
 
-3. **In the Mark Attendance modal — Present**:
-   - Choose **Present** or **Absent** (absent clears dates/times and C-Off)
-   - **Shift times** (when Present):
+3. **In the Mark Attendance modal — status**:
+   - Choose **Present**, **Absent (Informed)**, or **Absent (Uninformed)**. Any absence clears attendance **from/to** date and time, **C-Off**, and **OT** for that row (same as the on-screen hints).
+   - **Shift times** (when **Present** only):
      - **From date** / **From time** and **To date** / **To time**: the wall-clock span this employee is counted present for that stage/shift. Usually all four are the **same calendar day** as the selected production date; you can extend **To date** (e.g. overnight shift) when your process requires it
      - Hours (**Planned** on Manpower Plan, **Actual** on Manpower Report) are derived from the time range **minus configured shift breaks**
    - **C-Off (optional)** — only when **Present**:
@@ -961,15 +961,16 @@ Before reporting work, record **who was present** and their **attendance window*
 
 4. **Bulk mark attendance**:
    - Select multiple employees (checkboxes), then use the bulk attendance action when available
-   - Same fields apply: status, from/to date and time, optional C-Off for **Present**, notes when partial
+   - Same fields apply: status (including informed vs uninformed absence), from/to date and time for **Present**, optional C-Off for **Present**, notes when partial
 
-5. **Table columns** (Plan and Report tables):
-   - **Status**, **C-Off value** (sortable), planned/reported hours columns, and actions (**Mark Attendance**, reassign, journey, etc.) as shown on screen
+5. **Filters** (Manpower Plan and Manpower Report toolbars, when shown):
+   - You can narrow the table by attendance status, including **Absent (Informed)** and **Absent (Uninformed)** separately
 
-6. **Report Overtime** (if applicable):
-   - If employees worked overtime, click **"Report Overtime"**
-   - Enter overtime hours
-   - Save the record
+6. **Table columns** (Plan and Report tables):
+   - **Status** (Present / Absent informed / Absent uninformed — labels may abbreviate, e.g. **A(I)** / **A(U)**), **C-Off value** (sortable), planned/reported hours columns, and actions (**Mark Attendance**, reassign, journey, etc.) as shown on screen
+   - On **Manpower Report**, rows with **Absent (Uninformed)** may use a **red-tinted** row background so they stand out in the list
+
+7. **Overtime** (shift totals): Calculated and confirmed from **Draft Report** (**Report OT**), not inside this modal — see **Detailed Overtime Reporting** below.
 
 **Detailed Overtime Reporting**:
 
@@ -1016,7 +1017,7 @@ Overtime can be reported from the Draft Report tab:
 - The system validates that overtime is reasonable (not exceeding maximum limits)
 
 **Prerequisites**:
-- Employees must have **attendance** recorded (present/absent and from/to date and time on **Manpower Report** when applicable)
+- Employees must have **attendance** recorded on **Manpower Report** when applicable (**Present** with times, or **Absent** informed/uninformed as appropriate)
 - Work must be reported with actual times
 - Shift must be configured with start/end times
 - Report must be in draft status
@@ -1269,7 +1270,7 @@ You can report multiple works at once:
 
 **Features**:
 - View planned employee attendance, **Status**, and **C-Off value** (sortable column)
-- **Mark Attendance** / **Bulk** mark: present/absent, **from/to date and time**, optional **C-Off** (value and window), notes when partial attendance applies
+- **Mark Attendance** / **Bulk** mark: Present / Absent (Informed) / Absent (Uninformed); **from/to date and time** when Present; optional **C-Off** (value and window); notes when partial attendance applies
 - Assign employees to shifts; stage reassignment for part of the day
 - Export manpower plan
 
@@ -1383,7 +1384,7 @@ Full detail and examples for teams and developers: see **`PRODUCTION_STAGE_REASS
 **Purpose**: Record **actual** employee attendance for the date before or while reporting work.
 
 **Features**:
-- **Mark Attendance** (single or bulk): present/absent; **from date/time** and **to date/time** for the attendance window; optional **C-Off** (0 / 0.5 / 1 / 1.5 days with from/to window inside attendance); **Notes** when partial
+- **Mark Attendance** (single or bulk): Present / Absent (Informed) / Absent (Uninformed); **from date/time** and **to date/time** when Present; optional **C-Off** when Present; **Notes** when partial
 - Table columns include **Status**, **C-Off value**, planned vs actual hours, reassign/journey actions as on screen
 - Overtime for the shift is handled from **Draft Report** (**Report OT**), not from this tab’s old entry/exit-only flow
 
@@ -1578,18 +1579,18 @@ Before using the Production module, ensure:
 **Path**: `/production/plan-review`
 
 **Description**: 
-Review and view finalized production plans in PDF format.
+Review submitted planning for a shift/date: compare the **works plan** (PDF-style view) with a **Manpower Plan** grid for the same submission.
 
 **Features**:
-- View production plans as PDF documents
-- Navigate through different work orders
-- Print or download plan documents
+- Tabs typically include **Works Plan** (plan PDF viewer) and **Manpower Plan** (table of planned attendance per employee / reassignment rows)
+- On **Manpower Plan**, rows marked **Absent (Uninformed)** use a **highlight** (e.g. light red background) so uninformed absences stand out during approval/review
+- Navigate through submissions/work orders per your screen flow; print or download plan documents where available
 
 **How to Use**:
 1. Navigate to Production > Plan Review
-2. Select a work order or date range
-3. View the plan PDF
-4. Use navigation controls to browse different plans
+2. Select the submission or context your site uses (work order / date range as shown)
+3. Review **Works Plan** and switch to **Manpower Plan** to inspect attendance badges (**P**, **A(I)**, **A(U)**) and hours
+4. Use on-screen navigation controls as provided
 
 **Prerequisites**:
 - Production plans must be submitted
@@ -1603,18 +1604,18 @@ Review and view finalized production plans in PDF format.
 **Path**: `/production/report-review`
 
 **Description**: 
-Review and view finalized production reports in PDF format.
+Review submitted reporting for a shift/date: works report viewing plus a **Manpower Report** table aligned to the submission.
 
 **Features**:
-- View production reports as PDF documents
-- Navigate through different work orders
-- Print or download report documents
+- Tabs typically include works/report viewing and **Manpower Report**
+- On **Manpower Report**, rows with **Absent (Uninformed)** may be **highlighted** like Plan Review so reviewers spot uninformed absences quickly
+- Print or download report documents where available
 
 **How to Use**:
 1. Navigate to Production > Report Review
-2. Select a work order or date range
-3. View the report PDF
-4. Use navigation controls to browse different reports
+2. Select the submission or filters as shown on screen
+3. Open the **Manpower Report** tab when you need attendance-level detail
+4. Use navigation controls to browse different reports or submissions
 
 **Prerequisites**:
 - Production reports must be submitted
@@ -3626,8 +3627,9 @@ The **Reports** area provides read-only operational reports. Your administrator 
 - **Deviation Report** — planning and reporting deviations overlapping a date range  
 - **C-Off Report** (`/reports/hr/c-off-report`) — planning and reporting manpower rows with C-Off, where the attendance window overlaps the range  
 - **Overtime Report** (`/reports/hr/ot-report`) — work reporting rows with overtime minutes &gt; 0 and a worker name, where the report window overlaps the range  
+- **Attendance Report** (`/reports/hr/attendance-report`) — **reporting** manpower in a **pivot** table: one row per shift / stage / employee / skill, with a **letter per calendar day** (**P** = present, **A(I)** = absent informed, **A(U)** = absent uninformed) for days covered by the reporting window  
 
-**Shared date rules** (Lost Time, Deviation, C-Off Report, Overtime Report): **From** and **To** dates must both be set; **from** ≤ **to**; **to** cannot be after today; the range cannot exceed **93 days** (about three months). Defaults are often the first day of the current month through today. **Daily Production Status** uses a single **As of date** (month-to-date from the 1st of that month) instead.
+**Shared date rules** (Lost Time, Deviation, C-Off Report, Overtime Report, **Attendance Report**): **From** and **To** dates must both be set; **from** ≤ **to**; **to** cannot be after today; the range cannot exceed **93 days** (about three months). Defaults are often the first day of the current month through today. **Daily Production Status** uses a single **As of date** (month-to-date from the 1st of that month) instead.
 
 ### Daily Production Status
 
@@ -3750,6 +3752,8 @@ Lists **planning** and **reporting** manpower lines whose **attendance window ov
 
 **Path**: `/reports/hr/ot-report`
 
+**Note**: Your sidebar menu may show **OT Report** (seed data) while the screen title reads **Overtime Report**.
+
 **Description**:  
 Lists **work reporting** detail whose **report from/to window overlaps** the selected range, where **overtime minutes &gt; 0**, and the row has a **worker name** (same spirit as Lost Time Report’s named-worker filter).
 
@@ -3770,6 +3774,32 @@ Lists **work reporting** detail whose **report from/to window overlaps** the sel
 **Areas Affected**:
 - None (read-only)
 
+<span id="attendance-report"></span>
+
+### Attendance Report
+
+**Path**: `/reports/hr/attendance-report`
+
+**Description**:  
+A **pivot** view of **reporting** manpower from production **Manpower Report** data over a **From** / **To** range. Each row is a **shift, stage, employee, and skill**; one column per **calendar day** in the range. Each cell shows a short code: **P** (present), **A(I)** (absent informed), **A(U)** (absent uninformed), or **—** when there is no value. The page subtitle in the app is: *Reporting manpower — one letter per calendar day (P / A(I) / A(U); max ~3 months).*
+
+**Features**:
+- Same **From** / **To** validation as [Lost Time Report](#lost-time-report) (max ~93 days, **to** ≤ today).
+- **Search** box to filter rows by any column text.
+- **Generate Report** then **Export Excel** (export is available when at least one data row exists).
+
+**How to Use**:
+
+1. Open **Reports > Attendance Report** (or **HR** group, depending on how your administrator placed the menu; path is `/reports/hr/attendance-report`).
+2. Set **From** and **To** dates.
+3. Click **Generate Report**; use the search box to narrow results; **Export Excel** if you need a file.
+
+**Prerequisites**:
+- Menu access; **Manpower Report** attendance data for the period (so reporting manpower rows exist in range).
+
+**Areas Affected**:
+- None (read-only)
+
 ---
 
 ## Common Features
@@ -3780,7 +3810,7 @@ Many modules support exporting data to Excel or PDF:
 
 - **Excel Export**: Click "Export to Excel" button to download data as Excel file
 - **PDF Export**: Click "Export to PDF" button to generate PDF document
-- **Reports**: **Daily Production Status**, **Lost Time Report**, **Deviation Report**, **C-Off Report**, and **Overtime Report** each offer **Export Excel** after you generate the on-screen report (where rows exist)
+- **Reports**: **Daily Production Status**, **Lost Time Report**, **Deviation Report**, **C-Off Report**, **Overtime Report**, and **Attendance Report** each offer **Export Excel** after you generate the on-screen report (where rows exist)
 
 ### Search and Filter
 
@@ -3854,7 +3884,7 @@ This section provides quick reference for the most common tasks. For detailed in
 **Mark attendance (Manpower Plan / Manpower Report)**:
 1. Production > [Stage/Shift] > **Manpower Plan** or **Manpower Report**
 2. Select the date
-3. **Mark Attendance** (or select rows and use bulk mark): set Present/Absent, from/to date and time, optional C-Off, notes if partial
+3. **Mark Attendance** (or select rows and use bulk mark): set Present / Absent (Informed) / Absent (Uninformed); when Present set from/to date and time; optional C-Off; notes if partial
 4. See [Step 7.1](#step-71-record-employee-attendance-manpower-report) for C-Off rules (4/8/12 h net, window inside attendance)
 
 #### Planning Tasks
@@ -3956,6 +3986,11 @@ This section provides quick reference for the most common tasks. For detailed in
 2. From / To dates (same rules)
 3. Generate Report → Export Excel if needed
 
+**Attendance Report**:
+1. Reports > Attendance Report (`/reports/hr/attendance-report`)
+2. From / To dates (max ~3 months, to ≤ today)
+3. Generate Report → search optional → Export Excel if needed
+
 ### Navigation Quick Reference
 
 | Task | Menu path | URL path (typical) |
@@ -3984,6 +4019,7 @@ This section provides quick reference for the most common tasks. For detailed in
 | Deviation Report | Reports > Deviation Report | `/reports/production/deviation-report` |
 | C-Off Report | Reports > C-Off Report | `/reports/hr/c-off-report` |
 | Overtime Report | Reports > Overtime Report | `/reports/hr/ot-report` |
+| Attendance Report | Reports > Attendance Report | `/reports/hr/attendance-report` |
 
 ### Status Reference
 
@@ -4160,7 +4196,10 @@ A: Go to **Draft Report** tab, ensure all work is reported (and overtime if need
 A: In **Draft Report** tab, click **Report Unplanned Work**, select the unplanned work, then click **Report** and fill in the same details as for planned work. See the Production section on reporting unplanned work.
 
 **Q: How do I record employee attendance (entry/exit)?**  
-A: Use **Manpower Plan** (planned) and/or **Manpower Report** (actual), select the date, then **Mark Attendance** on each row (or bulk mark). Set **Present** or **Absent**; when Present, set **from/to date and time** for the attendance window, optional **C-Off**, and **Notes** if the system requires them for partial attendance. Overtime is reported from **Draft Report** (**Report OT**), not from separate Entry/Exit buttons. See [Step 7.1: Record Employee Attendance](#step-71-record-employee-attendance-manpower-report).
+A: Use **Manpower Plan** (planned) and/or **Manpower Report** (actual), select the date, then **Mark Attendance** on each row (or bulk mark). Choose **Present**, **Absent (Informed)**, or **Absent (Uninformed)**. When **Present**, set **from/to date and time**, optional **C-Off**, and **Notes** if required for partial attendance. Any **Absent** clears times, C-Off, and OT on that attendance row. Shift overtime is finalized from **Draft Report** (**Report OT**). See [Step 7.1: Record Employee Attendance](#step-71-record-employee-attendance-manpower-report).
+
+**Q: What is the difference between Absent (Informed) and Absent (Uninformed)?**  
+A: Both mean the employee is **not present** for that attendance record; dates/times and C-Off do not apply. **Informed** means the absence was communicated per your process; **Uninformed** flags a no-show-style case. **Absent (Uninformed)** rows are visually emphasized on **Manpower Report** and in **Plan Review** / **Report Review** manpower tables so reviewers notice them.
 
 **Q: What is C-Off in Mark Attendance, and when can I use it?**  
 A: **C-Off** (compensatory off) is optional time off recorded inside the employee’s attendance window. You choose a **value** (0, 0.5, 1, or 1.5 “days” tied to 4 / 8 / 12 net hours) and a **C-Off from/to** window that must sit **fully inside** the attendance from/to times. Net attendance hours (excluding shift breaks) must be **exactly 4, 8, or 12** to allow C-Off &gt; 0. See [Step 7.1](#step-71-record-employee-attendance-manpower-report).
@@ -4293,6 +4332,9 @@ A: **Reports > C-Off Report** lists planning and reporting manpower rows whose a
 
 **Q: What is the Overtime Report?**  
 A: **Reports > Overtime Report** lists work reporting lines with **OT minutes &gt; 0** and a **worker name**, where the report window overlaps your date range. See [Overtime Report](#overtime-report).
+
+**Q: What is the Attendance Report (HR)?**  
+A: **Reports > Attendance Report** builds a **date-range pivot** over **reporting** manpower: each row is shift / stage / employee / skill; each date column shows **P**, **A(I)**, or **A(U)** for that day. Same **From** / **To** limits as other ~93-day HR reports. See [Attendance Report](#attendance-report).
 
 ---
 

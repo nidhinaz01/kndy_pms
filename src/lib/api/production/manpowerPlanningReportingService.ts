@@ -7,19 +7,24 @@ import { getCurrentUsername, getCurrentTimestamp } from '$lib/utils/userUtils';
 import { calculateBreakTimeInMinutes } from '$lib/utils/breakTimeUtils';
 import type { ManpowerCOffSave, ManpowerOTSave } from './productionTypes';
 import { getShiftHourLimitHours, validateManpowerOtCoffBalance } from '$lib/utils/shiftHourLimitUtils';
+import {
+  attendanceClearsPlanReportFields,
+  attendanceIsPresent,
+  type ManpowerAttendanceStatus
+} from '$lib/utils/manpowerAttendanceStatus';
 
 /**
  * Row date span for manpower attendance — same as planning_from/to / reporting_from/to.
  * Absent rows stay pinned to the anchor day; present uses modal dates or defaults to anchor.
  */
 function manpowerRowDateSpan(
-  attendanceStatus: 'present' | 'absent',
+  attendanceStatus: ManpowerAttendanceStatus,
   anchorDay: string,
   spanFrom?: string | null,
   spanTo?: string | null
 ): { from: string; to: string } {
   const day = typeof anchorDay === 'string' ? anchorDay.split('T')[0] : '';
-  if (attendanceStatus === 'absent') {
+  if (attendanceClearsPlanReportFields(attendanceStatus)) {
     return { from: day, to: day };
   }
   const fd = (spanFrom && String(spanFrom).trim()) || day;
@@ -29,10 +34,10 @@ function manpowerRowDateSpan(
 
 /** DB columns for c_off_* on prdn_planning_manpower / prdn_reporting_manpower. */
 function manpowerCOffColumns(
-  attendanceStatus: 'present' | 'absent',
+  attendanceStatus: ManpowerAttendanceStatus,
   cOff?: ManpowerCOffSave | null
 ): Record<string, unknown> {
-  if (attendanceStatus === 'absent') {
+  if (attendanceClearsPlanReportFields(attendanceStatus)) {
     return {
       c_off_value: 0.0,
       c_off_from_date: null,
@@ -64,10 +69,10 @@ function manpowerCOffColumns(
 
 /** DB columns for ot_* on prdn_planning_manpower / prdn_reporting_manpower. */
 function manpowerOTColumns(
-  attendanceStatus: 'present' | 'absent',
+  attendanceStatus: ManpowerAttendanceStatus,
   ot?: ManpowerOTSave | null
 ): Record<string, unknown> {
-  if (attendanceStatus === 'absent') {
+  if (attendanceClearsPlanReportFields(attendanceStatus)) {
     return {
       ot_hours: 0,
       ot_from_date: null,
@@ -97,12 +102,12 @@ function manpowerOTColumns(
 }
 
 async function validatePresentNetOtCoff(
-  attendanceStatus: 'present' | 'absent',
+  attendanceStatus: ManpowerAttendanceStatus,
   netHours: number | null | undefined,
   cOff?: ManpowerCOffSave | null,
   ot?: ManpowerOTSave | null
 ): Promise<{ ok: true } | { ok: false; message: string }> {
-  if (attendanceStatus !== 'present' || netHours == null || !Number.isFinite(netHours)) {
+  if (!attendanceIsPresent(attendanceStatus) || netHours == null || !Number.isFinite(netHours)) {
     return { ok: true };
   }
   const L = await getShiftHourLimitHours();
@@ -182,7 +187,7 @@ export async function savePlannedAttendance(
   empId: string,
   stageCode: string,
   planningDate: string,
-  attendanceStatus: 'present' | 'absent',
+  attendanceStatus: ManpowerAttendanceStatus,
   shiftCode: string,
   notes?: string,
   plannedHours?: number,
@@ -211,8 +216,8 @@ export async function savePlannedAttendance(
     const currentUser = getCurrentUsername();
     const now = getCurrentTimestamp();
 
-    // If absent, clear time/hours fields
-    if (attendanceStatus === 'absent') {
+    // If absent (any kind), clear time/hours fields
+    if (attendanceClearsPlanReportFields(attendanceStatus)) {
       plannedHours = undefined;
       fromTime = undefined;
       toTime = undefined;
@@ -549,7 +554,7 @@ export async function saveReportedManpower(
   empId: string,
   stageCode: string,
   reportingDate: string,
-  attendanceStatus: 'present' | 'absent',
+  attendanceStatus: ManpowerAttendanceStatus,
   shiftCode: string,
   ltpHours: number,
   ltnpHours: number,
@@ -571,8 +576,8 @@ export async function saveReportedManpower(
       return { success: false, error: 'LTP and LTNP hours must be non-negative' };
     }
 
-    // If absent, clear time/hours fields
-    if (attendanceStatus === 'absent') {
+    // If absent (any kind), clear time/hours fields
+    if (attendanceClearsPlanReportFields(attendanceStatus)) {
       actualHours = undefined;
       fromTime = undefined;
       toTime = undefined;

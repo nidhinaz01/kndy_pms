@@ -7,6 +7,12 @@
   import { computeCOffToEndWithBreaks } from '$lib/utils/cOffWindowUtils';
   import { validateCOffWithinAttendanceWindow } from '$lib/utils/attendanceCOffSpanUtils';
   import { getShiftHourLimitHours, validateManpowerOtCoffBalance } from '$lib/utils/shiftHourLimitUtils';
+  import {
+    attendanceClearsPlanReportFields,
+    attendanceIsPresent,
+    normalizeManpowerAttendanceStatus,
+    type ManpowerAttendanceStatus
+  } from '$lib/utils/manpowerAttendanceStatus';
 
   export let showModal: boolean = false;
   export let employee: ProductionEmployee | null = null;
@@ -16,7 +22,7 @@
   const dispatch = createEventDispatcher();
 
   // Form state
-  let attendanceStatus: 'present' | 'absent' = 'present';
+  let attendanceStatus: ManpowerAttendanceStatus = 'present';
   let notes: string = '';
   let isSubmitting = false;
   
@@ -65,7 +71,7 @@
   // For planning: if plannedHours < fullShiftHours
   // For reporting: if actualHours < plannedHours OR actualHours < fullShiftHours
   $: currentHours = isPlanningMode ? plannedHours : actualHours;
-  $: isNotesRequired = attendanceStatus === 'present' && currentHours !== null && (
+  $: isNotesRequired = attendanceIsPresent(attendanceStatus) && currentHours !== null && (
     isPlanningMode 
       ? currentHours < fullShiftHours
       : (currentHours < (employee?.planned_hours ?? fullShiftHours) || currentHours < fullShiftHours)
@@ -84,10 +90,10 @@
   }
 
   $: otHoursNum = otHoursNumeric(otHours);
-  $: showOtDateTimeFields = attendanceStatus === 'present' && otHoursNum > 0;
+  $: showOtDateTimeFields = attendanceIsPresent(attendanceStatus) && otHoursNum > 0;
 
   /** When OT &gt; 0, default OT dates to the attendance day; clear when OT is 0. */
-  $: if (attendanceStatus === 'present') {
+  $: if (attendanceIsPresent(attendanceStatus)) {
     if (otHoursNum > 0) {
       const d = dayFromSelected();
       if (d) {
@@ -115,7 +121,7 @@
     cOffToTime = toTime;
   }
 
-  $: if (attendanceStatus === 'absent') {
+  $: if (attendanceClearsPlanReportFields(attendanceStatus)) {
     cOffValue = 0;
     cOffFromDate = '';
     cOffFromTime = '';
@@ -130,7 +136,7 @@
     attendanceToDate = '';
   }
 
-  $: if (showModal && employee && attendanceStatus === 'present' && selectedDate) {
+  $: if (showModal && employee && attendanceIsPresent(attendanceStatus) && selectedDate) {
     const ds = dayFromSelected();
     if (ds) {
       if (!attendanceFromDate) attendanceFromDate = ds;
@@ -323,7 +329,7 @@
   }
 
   // Watch time changes to recalculate hours (only if not loading saved data and we don't have saved hours)
-  $: if (fromTime && toTime && attendanceStatus === 'present' && !isLoadingSavedData && !hasSavedHours) {
+  $: if (fromTime && toTime && attendanceIsPresent(attendanceStatus) && !isLoadingSavedData && !hasSavedHours) {
     console.log('🔍 [AttendanceModal] Reactive statement triggered - recalculating hours from times:', {
       fromTime,
       toTime,
@@ -390,14 +396,14 @@
       previousEmployeeId = currentEmployeeId;
       formInitialized = true;
       isLoadingSavedData = true; // Prevent recalculation while loading
-      attendanceStatus = employee.attendance_status || 'present';
+      attendanceStatus = normalizeManpowerAttendanceStatus(employee.attendance_status) ?? 'present';
       // Load saved values if they exist (normalize to HH:MM)
       notes = employee.attendance_notes || '';
       fromTime = employee.attendance_from_time ? employee.attendance_from_time.substring(0,5) : '';
       toTime = employee.attendance_to_time ? employee.attendance_to_time.substring(0,5) : '';
 
       const dayStr = dayFromSelected();
-      if (attendanceStatus === 'absent') {
+      if (attendanceClearsPlanReportFields(attendanceStatus)) {
         cOffValue = 0;
         cOffFromDate = '';
         cOffFromTime = '';
@@ -512,7 +518,7 @@
       return;
     }
 
-    if (attendanceStatus === 'present' && cOffValue > 0) {
+    if (attendanceIsPresent(attendanceStatus) && cOffValue > 0) {
       if (!cOffFromDate?.trim() || !cOffFromTime?.trim()) {
         alert('C-Off: please set From Date and From Time when C-Off value is greater than zero.');
         return;
@@ -536,7 +542,7 @@
       }
     }
 
-    if (attendanceStatus === 'present') {
+    if (attendanceIsPresent(attendanceStatus)) {
       const otH = Number(otHours);
       const otNum = Number.isFinite(otH) ? Math.max(0, otH) : 0;
       if (otNum > 0.001) {
@@ -576,7 +582,7 @@
     };
 
     // Add time/hours fields only for present employees
-    if (attendanceStatus === 'present') {
+    if (attendanceIsPresent(attendanceStatus)) {
       eventData.fromTime = fromTime;
       eventData.toTime = toTime;
       eventData.attendanceFromDate = attendanceFromDate?.trim() || dayFromSelected();
@@ -707,9 +713,13 @@
                   <input class="accent-blue-600" type="radio" bind:group={attendanceStatus} value="present" />
                   <span class="text-sm text-slate-800">Present</span>
                 </label>
+                <label class="mb-2 flex cursor-pointer items-center gap-2">
+                  <input class="accent-blue-600" type="radio" bind:group={attendanceStatus} value="absent_informed" />
+                  <span class="text-sm text-slate-800">Absent (Informed)</span>
+                </label>
                 <label class="flex cursor-pointer items-center gap-2">
-                  <input class="accent-blue-600" type="radio" bind:group={attendanceStatus} value="absent" />
-                  <span class="text-sm text-slate-800">Absent</span>
+                  <input class="accent-blue-600" type="radio" bind:group={attendanceStatus} value="absent_uninformed" />
+                  <span class="text-sm text-slate-800">Absent (Uninformed)</span>
                 </label>
               </fieldset>
             </section>
@@ -717,7 +727,7 @@
             <section
               class="min-w-[180px] max-w-full flex-1 basis-[200px] rounded-lg border border-sky-300/80 bg-sky-50 p-3 text-slate-900 dark:border-sky-400/50 dark:bg-sky-100 dark:text-slate-900"
             >
-              {#if attendanceStatus === 'present'}
+              {#if attendanceIsPresent(attendanceStatus)}
                 {#if isLoadingShiftInfo}
                   <p class="text-sm text-slate-600">Loading shift…</p>
                 {:else}
@@ -786,7 +796,7 @@
             <section
               class="min-w-[180px] max-w-full flex-1 basis-[200px] rounded-lg border border-sky-300/80 bg-sky-50 p-3 text-slate-900 dark:border-sky-400/50 dark:bg-sky-100 dark:text-slate-900"
             >
-              {#if attendanceStatus === 'present'}
+              {#if attendanceIsPresent(attendanceStatus)}
                 <p class="mb-2 text-sm font-semibold text-slate-900">C-Off (optional)</p>
                 <label class="mb-1 block text-xs font-medium text-slate-700" for="coff-value">Value (days)</label>
                 <select
@@ -873,7 +883,7 @@
             <section
               class="min-w-[180px] max-w-full flex-1 basis-[200px] rounded-lg border border-sky-300/80 bg-sky-50 p-3 text-slate-900 dark:border-sky-400/50 dark:bg-sky-100 dark:text-slate-900"
             >
-              {#if attendanceStatus === 'present'}
+              {#if attendanceIsPresent(attendanceStatus)}
                 <p class="mb-2 text-sm font-semibold text-slate-900">Overtime (optional)</p>
                 <label class="mb-1 block text-xs font-medium text-slate-700" for="ot-hours">OT hours</label>
                 <input

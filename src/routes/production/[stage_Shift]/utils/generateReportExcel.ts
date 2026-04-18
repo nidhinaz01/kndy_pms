@@ -1,6 +1,7 @@
 import * as XLSX from 'xlsx';
 import { groupReportWorks } from './planTabUtils';
 import { formatTime } from './timeUtils';
+import { formatManpowerAttendanceLong } from '$lib/utils/manpowerAttendanceStatus';
 
 interface ReportWork {
   id: number;
@@ -128,7 +129,7 @@ export function generateReportExcel(
     const workerSummaryData = (manpowerEmployees || []).map(emp => ({
       'Employee': emp.emp_name || '',
       'Skill': emp.skill_short || '',
-      'Attendance Status': emp.attendance_status === 'present' ? 'Present' : emp.attendance_status === 'absent' ? 'Absent' : (emp.attendance_status ? String(emp.attendance_status) : ''),
+      'Attendance Status': formatManpowerAttendanceLong(emp.attendance_status),
       'Hours Planned': emp.hours_planned != null ? emp.hours_planned : '',
       'Hours Reported': emp.hours_reported != null ? emp.hours_reported : 0,
       'Manpower OT (h)': emp.manpower_ot_hours != null ? emp.manpower_ot_hours : 0,

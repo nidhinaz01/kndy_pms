@@ -76,6 +76,26 @@ export function isoRangesOverlap(from: string, to: string, aStart: string, aEnd:
   return aStart <= to && aEnd >= from;
 }
 
+/** Every calendar ISO date from `fromIso` through `toIso` inclusive (yyyy-mm-dd). Empty if invalid or from > to. */
+export function eachIsoDateInclusive(fromIso: string, toIso: string): string[] {
+  const from = fromIso.split('T')[0];
+  const to = toIso.split('T')[0];
+  const [fy, fm, fd] = from.split('-').map(Number);
+  const [ty, tm, td] = to.split('-').map(Number);
+  if (!fy || !fm || !fd || !ty || !tm || !td) return [];
+  const d0 = new Date(fy, fm - 1, fd);
+  const d1 = new Date(ty, tm - 1, td);
+  if (d0 > d1) return [];
+  const out: string[] = [];
+  for (let t = d0.getTime(); t <= d1.getTime(); t += MS_PER_DAY) {
+    const d = new Date(t);
+    out.push(
+      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    );
+  }
+  return out;
+}
+
 const MONTH_SHORT = [
   'Jan',
   'Feb',

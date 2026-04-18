@@ -2,6 +2,7 @@ import * as XLSX from 'xlsx';
 import { formatStageShiftExportFilename } from '../../utils/stageUtils';
 import { formatTime, calculateBreakTimeInRange } from './timeUtils';
 import { groupPlannedWorks } from './planTabUtils';
+import { formatManpowerAttendanceLong } from '$lib/utils/manpowerAttendanceStatus';
 
 interface PlannedWork {
   id: number;
@@ -109,7 +110,7 @@ export function generatePlanExcel(
     const workerSummaryData = (manpowerEmployees || []).map(emp => ({
       'Employee': emp.emp_name || '',
       'Skill': emp.skill_short || '',
-      'Attendance Status': emp.attendance_status === 'present' ? 'Present' : emp.attendance_status === 'absent' ? 'Absent' : (emp.attendance_status ? String(emp.attendance_status) : ''),
+      'Attendance Status': formatManpowerAttendanceLong(emp.attendance_status),
       'Hours Planned': emp.hours_planned != null ? emp.hours_planned : '',
       'To Other Stage': emp.to_other_stage_hours != null ? emp.to_other_stage_hours : 0,
       'From Other Stage': emp.from_other_stage_hours != null ? emp.from_other_stage_hours : 0

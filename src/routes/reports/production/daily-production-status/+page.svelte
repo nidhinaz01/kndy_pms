@@ -76,8 +76,8 @@
 
 <div class="flex min-h-screen flex-col theme-bg-secondary transition-colors duration-200">
   <div class="theme-bg-primary border-b theme-border">
-    <div class="flex flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-6">
-      <div class="flex items-center gap-3">
+    <div class="grid gap-3 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:px-6">
+      <div class="flex min-w-0 items-center gap-3">
         <button
           type="button"
           class="rounded-lg p-2 hover:theme-bg-tertiary transition-colors"
@@ -95,7 +95,7 @@
           </p>
         </div>
       </div>
-      <div class="flex flex-wrap items-end gap-3">
+      <div class="flex flex-wrap items-end justify-end gap-3">
         <label class="flex flex-col gap-1 text-sm theme-text-secondary">
           <span>As of date</span>
           <input

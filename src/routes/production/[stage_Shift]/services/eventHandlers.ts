@@ -10,6 +10,10 @@ import {
   validateCOffWithinAttendanceWindow
 } from '$lib/utils/attendanceCOffSpanUtils';
 import { getShiftHourLimitHours, validateManpowerOtCoffBalance } from '$lib/utils/shiftHourLimitUtils';
+import {
+  attendanceIsPresent,
+  type ManpowerAttendanceStatus
+} from '$lib/utils/manpowerAttendanceStatus';
 
 /**
  * Update work status when skill competencies are deleted
@@ -1089,10 +1093,10 @@ export function handleExitModalClose(context: EventHandlerContext) {
 }
 
 function cOffPayloadFromEventDetail(
-  status: 'present' | 'absent',
+  status: string,
   detail: Record<string, unknown>
 ): ManpowerCOffSave | null | undefined {
-  if (status === 'absent') return undefined;
+  if (!attendanceIsPresent(status)) return undefined;
   const raw = detail.cOffValue;
   const cOffValue = raw != null && raw !== '' ? Number(raw) : 0;
   return {
@@ -1105,10 +1109,10 @@ function cOffPayloadFromEventDetail(
 }
 
 function otPayloadFromEventDetail(
-  status: 'present' | 'absent',
+  status: string,
   detail: Record<string, unknown>
 ): ManpowerOTSave | null | undefined {
-  if (status === 'absent') return undefined;
+  if (!attendanceIsPresent(status)) return undefined;
   const raw = detail.otHours ?? detail.ot_hours;
   const otHours = raw != null && raw !== '' ? Number(raw) : 0;
   return {
@@ -1134,17 +1138,17 @@ export async function handleAttendanceMarked(context: EventHandlerContext, event
   const { empId, stageCode, date, status, shiftCode, notes, plannedHours, fromTime, toTime, actualHours } = event.detail;
   const dayStr = typeof date === 'string' ? date.split('T')[0] : '';
   const attendanceFromDate =
-    status === 'present'
+    attendanceIsPresent(status)
       ? ((event.detail as Record<string, unknown>).attendanceFromDate as string)?.trim() || dayStr
       : undefined;
   const attendanceToDate =
-    status === 'present'
+    attendanceIsPresent(status)
       ? ((event.detail as Record<string, unknown>).attendanceToDate as string)?.trim() || attendanceFromDate
       : undefined;
   const cOff = cOffPayloadFromEventDetail(status, event.detail as Record<string, unknown>);
   const ot = otPayloadFromEventDetail(status, event.detail as Record<string, unknown>);
 
-  if (status === 'present') {
+  if (attendanceIsPresent(status)) {
     const netHours =
       context.activeTab === 'manpower-plan'
         ? plannedHours != null && plannedHours !== ''
@@ -1203,7 +1207,7 @@ export async function handleAttendanceMarked(context: EventHandlerContext, event
         empId, 
         stageCode, 
         date, 
-        status, 
+        status as ManpowerAttendanceStatus, 
         shiftCode || context.shiftCode, 
         notes, 
         plannedHours, 
@@ -1227,7 +1231,7 @@ export async function handleAttendanceMarked(context: EventHandlerContext, event
         empId, 
         stageCode, 
         date, 
-        status, 
+        status as ManpowerAttendanceStatus, 
         shiftCode || context.shiftCode, 
         ltpHours, 
         ltnpHours, 
@@ -1267,17 +1271,17 @@ export async function handleBulkAttendanceMarked(context: EventHandlerContext, e
   const { employees, date, status, shiftCode, notes, plannedHours, fromTime, toTime, actualHours } = event.detail;
   const bulkDay = typeof date === 'string' ? date.split('T')[0] : '';
   const attendanceFromDate =
-    status === 'present'
+    attendanceIsPresent(status)
       ? ((event.detail as Record<string, unknown>).attendanceFromDate as string)?.trim() || bulkDay
       : undefined;
   const attendanceToDate =
-    status === 'present'
+    attendanceIsPresent(status)
       ? ((event.detail as Record<string, unknown>).attendanceToDate as string)?.trim() || attendanceFromDate
       : undefined;
   const cOff = cOffPayloadFromEventDetail(status, event.detail as Record<string, unknown>);
   const ot = otPayloadFromEventDetail(status, event.detail as Record<string, unknown>);
 
-  if (status === 'present') {
+  if (attendanceIsPresent(status)) {
     const netHours =
       context.activeTab === 'manpower-plan'
         ? plannedHours != null && plannedHours !== ''
@@ -1332,7 +1336,7 @@ export async function handleBulkAttendanceMarked(context: EventHandlerContext, e
             emp.empId, 
             emp.stageCode, 
             date, 
-            status, 
+            status as ManpowerAttendanceStatus, 
             effectiveShiftCode, 
             notes, 
             plannedHours, 
@@ -1355,7 +1359,7 @@ export async function handleBulkAttendanceMarked(context: EventHandlerContext, e
             emp.empId, 
             emp.stageCode, 
             date, 
-            status, 
+            status as ManpowerAttendanceStatus, 
             effectiveShiftCode, 
             ltpHours, 
             ltnpHours, 

@@ -1,5 +1,9 @@
 import { supabase } from '$lib/supabaseClient';
-import { getBatchDocumentStatuses, type DocumentStatus } from './documentUploadService';
+import {
+  getBatchDocumentStatuses,
+  coerceSalesOrderId,
+  type DocumentStatus
+} from './documentUploadService';
 
 export interface DocumentRelease {
   id: string;
@@ -19,11 +23,10 @@ export interface DocumentRelease {
  * Load document releases for all work orders
  * Shows work orders with their document statuses
  * 
- * OPTIMIZED: Uses batch queries instead of N+1 queries
+ * OPTIMIZED: Uses batch queries instead of per-WO document fetches
  * - 1 query for work orders
- * - 1 query for all documents
- * - 1 query for all requirements
- * Total: 3 queries regardless of work order count
+ * - Paginated queries for submissions + requirements (PostgREST row cap ~1000/page)
+ * The modal uses per-WO loads; this path must paginate or counts can show false "pending".
  */
 export async function loadDocumentReleases(): Promise<DocumentRelease[]> {
   try {
@@ -51,7 +54,9 @@ export async function loadDocumentReleases(): Promise<DocumentRelease[]> {
     
     // Build document releases
     const releases: DocumentRelease[] = workOrders.map(wo => {
-      const statuses = statusMap.get(wo.id) || [];
+      const woKey = coerceSalesOrderId(wo.id);
+      const statuses =
+        woKey !== null ? statusMap.get(woKey) || [] : [];
       
       // Calculate completion status
       const allCompleted = statuses.every(s => 

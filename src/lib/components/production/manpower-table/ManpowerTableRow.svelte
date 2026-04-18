@@ -3,6 +3,7 @@
   import { CheckCircle, XCircle, UserCheck, ArrowRight, Map, ClipboardList, Lock } from 'lucide-svelte';
   import type { ProductionEmployee } from '$lib/api/production';
   import { formatManpowerCOffHoursDisplay, isPlanningAttendanceLocked } from '$lib/utils/manpowerTableUtils';
+  import { attendanceIsPresent, attendanceIsAbsentUninformed, normalizeManpowerAttendanceStatus } from '$lib/utils/manpowerAttendanceStatus';
 
   export let employee: ProductionEmployee;
   export let isSelected: boolean = false;
@@ -37,7 +38,7 @@
   $: {
     const workHours = Number(employee.hours_planned) || 0;
     const shiftHours = shiftHoursPlanned;
-    const isPresent = employee.attendance_status === 'present';
+    const isPresent = attendanceIsPresent(employee.attendance_status);
     const hasShiftHours = shiftHours !== null && shiftHours !== undefined;
     // Highlight when work hours ≠ shift hours (any mismatch - under or over allocation)
     const shouldHighlight = isPresent && hasShiftHours && workHours !== shiftHours;
@@ -88,15 +89,20 @@
     {employee.skill_short}
   </td>
   <td class="px-6 py-4 whitespace-nowrap">
-    {#if employee.attendance_status === 'present'}
+    {#if attendanceIsPresent(employee.attendance_status)}
       <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-600 dark:bg-green-900 dark:text-green-200">
         <CheckCircle class="w-3 h-3 mr-1" />
         Present
       </span>
-    {:else if employee.attendance_status === 'absent'}
-      <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-600 dark:bg-red-900 dark:text-red-200">
+    {:else if normalizeManpowerAttendanceStatus(employee.attendance_status) === 'absent_informed'}
+      <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200">
         <XCircle class="w-3 h-3 mr-1" />
-        Absent
+        Absent (Informed)
+      </span>
+    {:else if attendanceIsAbsentUninformed(employee.attendance_status)}
+      <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-200 ring-1 ring-red-300 dark:ring-red-700">
+        <XCircle class="w-3 h-3 mr-1" />
+        Absent (Uninformed)
       </span>
     {:else}
       <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-600 dark:bg-gray-900 dark:text-gray-200">
@@ -124,7 +130,7 @@
         disabled={disableRowActions ||
           !canReassignFromThisStage ||
           isPlanningAttendanceLocked(employee, planningSubmissionStatus) ||
-          employee.attendance_status !== 'present' ||
+          !attendanceIsPresent(employee.attendance_status) ||
           !employee.attendance_from_time ||
           !employee.attendance_to_time}
         on:click={onStageReassignment}
@@ -140,7 +146,7 @@
     </div>
   </td>
   <td class="px-6 py-4 whitespace-nowrap text-sm {hasMismatchedHours ? 'text-gray-900 dark:text-yellow-100' : 'theme-text-primary'}">
-    {#if employee.attendance_status === 'present' && shiftHoursPlanned != null}
+    {#if attendanceIsPresent(employee.attendance_status) && shiftHoursPlanned != null}
       {formatHours(employee.hours_planned ?? 0)}h/{formatHours(shiftHoursPlanned)}h
     {:else}
       {formatHours(employee.hours_planned ?? 0)}h

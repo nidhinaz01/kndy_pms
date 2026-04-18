@@ -27,7 +27,13 @@ export interface ProductionEmployee {
   shift_name?: string;
   current_stage: string;
   original_stage?: string; // Original assigned stage from hr_emp.stage
-  attendance_status?: 'present' | 'absent' | null;
+  /** `absent` only before DB migration; prefer absent_informed / absent_uninformed */
+  attendance_status?:
+    | 'present'
+    | 'absent_informed'
+    | 'absent_uninformed'
+    | 'absent'
+    | null;
   // Attendance details (from prdn_planning_manpower or prdn_reporting_manpower)
   planned_hours?: number | null; // For planning mode
   actual_hours?: number | null; // For reporting mode

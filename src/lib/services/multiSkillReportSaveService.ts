@@ -2,6 +2,7 @@ import { supabase } from '$lib/supabaseClient';
 import type { MultiSkillReportFormData, BreakdownData } from '$lib/types/multiSkillReport';
 import type { LostTimeReason } from '$lib/api/lostTimeReasons';
 import { getEffectiveRowTimes } from '$lib/utils/planWorkUtils';
+import { netHoursWorkedForReportingRow } from '$lib/utils/multiSkillReportUtils';
 import { calculatePieceRateForPlanning } from './pieceRateCalculationService';
 
 function isTraineePlanningRow(work: any): boolean {
@@ -16,7 +17,8 @@ function normalizeReportingDateStr(d: string | null | undefined): string {
 export async function saveMultiSkillReports(
   selectedWorks: any[],
   formData: MultiSkillReportFormData,
-  lostTimeReasons: LostTimeReason[]
+  lostTimeReasons: LostTimeReason[],
+  shiftBreakTimes: Array<{ start_time: string; end_time: string }> = []
 ): Promise<{ success: boolean; data?: any[]; error?: string }> {
   try {
     const { getCurrentUsername, getCurrentTimestamp } = await import('$lib/utils/userUtils');
@@ -161,7 +163,7 @@ export async function saveMultiSkillReports(
         const hasDeviation = formData.deviations[work.id]?.hasDeviation || false;
         const workerId = hasDeviation ? null : (formData.skillEmployees[work.id] || null);
         const workerLtDetails = calculateLtDetailsForWorker(workerId);
-        const rowHoursWorked = eff.plannedHours;
+        const rowHoursWorked = netHoursWorkedForReportingRow(eff, shiftBreakTimes);
         reportDataOnlyNewPlans.push({
           planning_id: work.id,
           worker_id: workerId,
@@ -209,7 +211,7 @@ export async function saveMultiSkillReports(
       const workerId = hasDeviation ? null : (formData.skillEmployees[work.id] || null);
       const workerLtDetails = calculateLtDetailsForWorker(workerId);
       const eff = getEffectiveRowTimes(String(work.id), formData);
-      const rowHoursWorked = eff.plannedHours;
+      const rowHoursWorked = netHoursWorkedForReportingRow(eff, shiftBreakTimes);
 
       const updateData = {
         worker_id: workerId,
@@ -338,7 +340,7 @@ export async function saveMultiSkillReports(
       for (let ti = 0; ti < formData.selectedTrainees.length; ti++) {
         const trainee = formData.selectedTrainees[ti];
         const eff = getEffectiveRowTimes(`trainee-${ti}`, formData);
-        const rowHours = eff.plannedHours;
+        const rowHours = netHoursWorkedForReportingRow(eff, shiftBreakTimes);
 
         if (trainee.reporting_id && trainee.planning_id) {
           const { error: repErr } = await supabase

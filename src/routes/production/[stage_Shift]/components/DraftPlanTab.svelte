@@ -29,6 +29,9 @@
   let searchTerm = '';
   let sortConfig: SortConfig = { column: null, direction: null };
 
+  /** When true, show `prdn_work_planning.id` column for debugging (default off). */
+  let showDebugIds = false;
+
   // Combine draft work plans and manpower plans (only work plans for now, as manpower plans have different structure)
   $: allDraftPlans = draftPlanData || [];
   $: groupedPlannedWorks = groupPlannedWorks(allDraftPlans);
@@ -231,6 +234,14 @@
         </div>
       </div>
       <div class="flex items-center space-x-3">
+        <Button
+          variant={showDebugIds ? 'primary' : 'secondary'}
+          size="sm"
+          title={showDebugIds ? 'Hide planning row IDs' : 'Show prdn_work_planning.id column for debugging'}
+          on:click={() => (showDebugIds = !showDebugIds)}
+        >
+          ID
+        </Button>
         <Button variant="secondary" size="sm" on:click={handleRefresh} disabled={isLoading}>
           {isLoading ? 'Loading...' : 'Refresh'}
         </Button>
@@ -345,6 +356,14 @@
                 }}
               />
             </th>
+            {#if showDebugIds}
+              <th
+                class="px-6 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider whitespace-nowrap w-[88px]"
+                title="prdn_work_planning.id (per skill row)"
+              >
+                ID
+              </th>
+            {/if}
             <SortableHeader column="sortable_woNo" {sortConfig} onSort={handleSort} label="Work Order" />
             <SortableHeader column="sortable_pwoNo" {sortConfig} onSort={handleSort} label="PWO Number" />
             <SortableHeader column="sortable_workCode" {sortConfig} onSort={handleSort} label="Work Code" />
@@ -391,6 +410,17 @@
                   }}
                 />
               </td>
+              {#if showDebugIds}
+                <td class="px-6 py-4 text-sm theme-text-primary align-top">
+                  <div class="flex flex-col gap-0.5">
+                    {#each typedGroup.items as plannedWork}
+                      <div class="text-xs font-mono tabular-nums" title="prdn_work_planning.id">
+                        {plannedWork.id ?? '—'}
+                      </div>
+                    {/each}
+                  </div>
+                </td>
+              {/if}
               <td class="px-6 py-4 whitespace-nowrap text-sm font-medium theme-text-primary">{typedGroup.woNo}</td>
               <td class="px-6 py-4 whitespace-nowrap text-sm theme-text-primary">{typedGroup.pwoNo}</td>
               <td class="px-6 py-4 whitespace-nowrap text-sm font-medium theme-text-primary">{typedGroup.workCode}</td>

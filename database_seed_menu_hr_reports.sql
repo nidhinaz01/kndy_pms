@@ -1,5 +1,5 @@
 -- ============================================================================
--- Menu: Reports → HR — C-Off Report & OT Report
+-- Menu: Reports → HR — C-Off Report, OT Report, Attendance Report
 -- ============================================================================
 -- Set parent_menu_id to your Reports menu UUID (or NULL for top-level).
 -- Adjust menu_order among siblings as needed.
@@ -23,6 +23,17 @@ VALUES (
   '/reports/hr/ot-report',
   NULL,
   21,
+  true,
+  true
+);
+
+INSERT INTO menu (menu_id, menu_name, menu_path, parent_menu_id, menu_order, is_visible, is_enabled)
+VALUES (
+  gen_random_uuid(),
+  'Attendance Report',
+  '/reports/hr/attendance-report',
+  NULL,
+  22,
   true,
   true
 );
