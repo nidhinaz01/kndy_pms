@@ -238,7 +238,7 @@
 </script>
 
 <svelte:head>
-  <title>Data Elements Management</title>
+  <title>PMS - Data Elements</title>
 </svelte:head>
 
 <!-- Sidebar Overlay -->

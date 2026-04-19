@@ -268,7 +268,7 @@
 </style>
 
 <svelte:head>
-	<title>Login - Production Management System</title>
+	<title>PMS - Login</title>
 </svelte:head>
 
 <div class="flex items-center justify-center min-h-screen theme-bg-secondary">

@@ -148,6 +148,10 @@
   });
 </script>
 
+<svelte:head>
+  <title>PMS - Models</title>
+</svelte:head>
+
 <DataTablePage
   pageTitle="Models"
   {isLoading}

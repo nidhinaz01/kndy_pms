@@ -10,6 +10,7 @@
   import { groupPlannedWorks } from '../[stage_Shift]/utils/planTabUtils';
   import { formatTime, calculateBreakTimeInRange } from '../[stage_Shift]/utils/timeUtils';
   import { generateWorksPlanPDF } from './utils/generateWorksPlanPDF';
+  import { exportPlanReviewExcel } from './utils/exportPlanReviewExcel';
   import PDFViewer from './components/PDFViewer.svelte';
   import { X } from 'lucide-svelte';
   import { goto } from '$app/navigation';
@@ -17,6 +18,7 @@
     attendanceIsAbsentUninformed,
     formatManpowerAttendanceShort
   } from '$lib/utils/manpowerAttendanceStatus';
+  import { prefersExternalPdfOpen } from '$lib/utils/pdfViewerDevice';
 
   let showSidebar = false;
   let menus: any[] = [];
@@ -55,14 +57,27 @@
     generatePDF();
   }
   
-  // Open fullscreen when PDF is ready and user is on Works Plan tab (only if not manually closed)
-  $: if (pdfBlob && activeTab === 'works-plan' && !isGeneratingPDF && !showWorksPlanFullscreen && !hasManuallyClosedFullscreen) {
-    // Small delay to ensure UI is ready
+  // Open fullscreen when PDF is ready (desktop only — mobile uses Open PDF link in viewer)
+  $: if (
+    pdfBlob &&
+    activeTab === 'works-plan' &&
+    !isGeneratingPDF &&
+    !showWorksPlanFullscreen &&
+    !hasManuallyClosedFullscreen &&
+    typeof window !== 'undefined' &&
+    !prefersExternalPdfOpen()
+  ) {
     setTimeout(() => {
       if (!hasManuallyClosedFullscreen) {
         showWorksPlanFullscreen = true;
       }
     }, 100);
+  }
+
+  function worksPlanPdfDownloadName(): string {
+    const stage = (selectedSubmission?.stage_code || selectedStage || 'plan').replace(/[^\w.-]+/g, '_');
+    const date = (selectedSubmission?.planning_date || selectedDate || '').replace(/[^\w.-]+/g, '_');
+    return `Works-Plan_${stage}_${date}.pdf`;
   }
   
   async function generatePDF() {
@@ -96,7 +111,21 @@
   }
   
   function handleGenerateExcel() {
-    alert('Excel generation - to be implemented');
+    if (!selectedSubmission) {
+      alert('Select a submission to review first.');
+      return;
+    }
+    if (worksPlanData.length === 0 && manpowerPlanData.length === 0) {
+      alert('No plan or manpower data loaded for this submission.');
+      return;
+    }
+    exportPlanReviewExcel(worksPlanData, manpowerPlanData, {
+      planningDate: selectedSubmission.planning_date || selectedDate,
+      stageCode: selectedSubmission.stage_code || selectedStage,
+      shiftCode: (selectedSubmission.shift_code || '').trim(),
+      submission: selectedSubmission,
+      shiftBreakTimes
+    });
   }
   
   function handleGeneratePDF() {
@@ -604,7 +633,7 @@
 </script>
 
 <svelte:head>
-  <title>Planning Review</title>
+  <title>PMS - Plan Review</title>
 </svelte:head>
 
 <!-- Sidebar Overlay -->
@@ -819,7 +848,12 @@
                 </p>
               </div>
               <div class="flex items-center space-x-3">
-                <Button variant="primary" size="sm" on:click={handleGenerateExcel} disabled={worksPlanData.length === 0}>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  on:click={handleGenerateExcel}
+                  disabled={!selectedSubmission || (worksPlanData.length === 0 && manpowerPlanData.length === 0)}
+                >
                   Generate Excel
                 </Button>
                 <Button variant="primary" size="sm" on:click={handleGeneratePDF} disabled={worksPlanData.length === 0 || isGeneratingPDF}>
@@ -847,7 +881,11 @@
           {:else}
             <!-- PDF Viewer - Full Width -->
             <div class="w-full" style="padding: 0;">
-              <PDFViewer {pdfBlob} isLoading={isGeneratingPDF} />
+              <PDFViewer
+                {pdfBlob}
+                isLoading={isGeneratingPDF}
+                downloadFileName={worksPlanPdfDownloadName()}
+              />
             </div>
           {/if}
         {:else if activeTab === 'manpower-plan'}
@@ -861,6 +899,16 @@
               <p class="theme-text-secondary">No manpower plans in this submission</p>
             </div>
           {:else}
+            <div class="px-6 py-4 border-b theme-border flex justify-end">
+              <Button
+                variant="primary"
+                size="sm"
+                on:click={handleGenerateExcel}
+                disabled={!selectedSubmission || (worksPlanData.length === 0 && manpowerPlanData.length === 0)}
+              >
+                Generate Excel
+              </Button>
+            </div>
             <div class="overflow-x-auto">
               <table class="w-full">
                 <thead class="theme-bg-secondary">
@@ -985,7 +1033,11 @@
     
     <!-- PDF Viewer - Fullscreen -->
     <div class="flex-1 overflow-hidden" style="height: calc(100vh - 80px);">
-      <PDFViewer {pdfBlob} isLoading={isGeneratingPDF} />
+      <PDFViewer
+        {pdfBlob}
+        isLoading={isGeneratingPDF}
+        downloadFileName={worksPlanPdfDownloadName()}
+      />
     </div>
   </div>
 {/if}

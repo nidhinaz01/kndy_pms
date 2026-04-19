@@ -240,7 +240,7 @@
 </script>
 
 <svelte:head>
-  <title>Order of Stages - Production Management</title>
+  <title>PMS - Order of Stages</title>
 </svelte:head>
 
 <!-- Sidebar Overlay -->

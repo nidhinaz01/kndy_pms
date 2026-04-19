@@ -100,7 +100,7 @@
 </script>
 
 <svelte:head>
-  <title>Authentication - Production Management System</title>
+  <title>PMS - Authentication</title>
 </svelte:head>
 
 <div class="flex items-center justify-center min-h-screen theme-bg-secondary">

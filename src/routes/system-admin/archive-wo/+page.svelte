@@ -153,7 +153,7 @@
 </script>
 
 <svelte:head>
-  <title>Archive Work Order</title>
+  <title>PMS - Archive Work Order</title>
 </svelte:head>
 
 {#if showSidebar}

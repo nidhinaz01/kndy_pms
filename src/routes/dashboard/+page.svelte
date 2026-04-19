@@ -1,5 +1,5 @@
 <svelte:head>
-	<title>Dashboard - Production Management System</title>
+	<title>PMS - Dashboard</title>
 </svelte:head>
 
 <div class="flex items-center justify-center h-full min-h-screen theme-bg-secondary">

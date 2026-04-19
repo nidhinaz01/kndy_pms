@@ -117,7 +117,7 @@
 </script>
 
 <svelte:head>
-  <title>HR Shift Master - KNDY PMS</title>
+  <title>PMS - Shift Master</title>
 </svelte:head>
 
 <div class="min-h-screen theme-bg-primary">

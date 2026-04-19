@@ -311,6 +311,10 @@
   });
 </script>
 
+<svelte:head>
+  <title>PMS - Work Standards</title>
+</svelte:head>
+
 <div class="min-h-screen theme-bg-primary">
   <!-- Header with Burger, Tabs, and Favicon -->
   <div class="theme-bg-primary shadow-sm border-b theme-border">

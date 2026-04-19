@@ -89,7 +89,7 @@
 </script>
 
 <svelte:head>
-  <title>Overtime Report</title>
+  <title>PMS - Overtime Report</title>
 </svelte:head>
 
 <div class="flex min-h-screen flex-col theme-bg-secondary transition-colors duration-200">

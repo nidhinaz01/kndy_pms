@@ -77,7 +77,7 @@
 </script>
 
 <svelte:head>
-  <title>Schedule - Planning</title>
+  <title>PMS - Schedule</title>
 </svelte:head>
 
 <!-- Sidebar Overlay -->

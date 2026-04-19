@@ -57,6 +57,10 @@
   });
 </script>
 
+<svelte:head>
+  <title>PMS - Skill Combinations</title>
+</svelte:head>
+
 <DataTablePage
   pageTitle="Skill Combinations"
   {isLoading}

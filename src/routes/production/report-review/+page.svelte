@@ -16,6 +16,8 @@
     formatManpowerAttendanceShort
   } from '$lib/utils/manpowerAttendanceStatus';
   import { groupReportWorks } from '../[stage_Shift]/utils/planTabUtils';
+  import { prefersExternalPdfOpen } from '$lib/utils/pdfViewerDevice';
+  import { exportReportReviewExcel } from './utils/exportReportReviewExcel';
 
   let showSidebar = false;
   let menus: any[] = [];
@@ -54,14 +56,27 @@
     generateWorksReportPDF();
   }
   
-  // Open fullscreen when PDF is ready and user is on Works Report tab (only if not manually closed)
-  $: if (pdfBlob && activeTab === 'works-report' && !isGeneratingPDF && !showWorksReportFullscreen && !hasManuallyClosedFullscreen) {
-    // Small delay to ensure UI is ready
+  // Open fullscreen when PDF is ready (desktop only — mobile uses Open PDF link in viewer)
+  $: if (
+    pdfBlob &&
+    activeTab === 'works-report' &&
+    !isGeneratingPDF &&
+    !showWorksReportFullscreen &&
+    !hasManuallyClosedFullscreen &&
+    typeof window !== 'undefined' &&
+    !prefersExternalPdfOpen()
+  ) {
     setTimeout(() => {
       if (!hasManuallyClosedFullscreen) {
         showWorksReportFullscreen = true;
       }
     }, 100);
+  }
+
+  function worksReportPdfDownloadName(): string {
+    const stage = (selectedSubmission?.stage_code || 'report').replace(/[^\w.-]+/g, '_');
+    const date = (selectedSubmission?.reporting_date || '').replace(/[^\w.-]+/g, '_');
+    return `Works-Report_${stage}_${date}.pdf`;
   }
 
   // Works report data
@@ -575,6 +590,23 @@
     generateWorksReportPDF();
   }
 
+  function handleGenerateExcel() {
+    if (!selectedSubmission) {
+      alert('Select a submission to review first.');
+      return;
+    }
+    if (worksReportData.length === 0 && manpowerReportData.length === 0) {
+      alert('No report or manpower data loaded for this submission.');
+      return;
+    }
+    exportReportReviewExcel(worksReportData, manpowerReportData, {
+      reportingDate: selectedSubmission.reporting_date,
+      stageCode: selectedSubmission.stage_code || '',
+      shiftCode: (selectedSubmission.shift_code || '').trim(),
+      submission: selectedSubmission
+    });
+  }
+
   function handleApprove() {
     approvalAction = 'approve';
     showApprovalModal = true;
@@ -891,7 +923,7 @@
 </script>
 
 <svelte:head>
-  <title>Reporting Review</title>
+  <title>PMS - Report Review</title>
 </svelte:head>
 
 <!-- Sidebar Overlay -->
@@ -1074,6 +1106,16 @@
                 View PDF
               </Button>
             {/if}
+            <Button
+              variant="secondary"
+              size="sm"
+              on:click={handleGenerateExcel}
+              disabled={
+                !selectedSubmission || (worksReportData.length === 0 && manpowerReportData.length === 0)
+              }
+            >
+              Generate Excel
+            </Button>
             {#if activeTab === 'works-report'}
               <Button variant="primary" size="sm" on:click={handleGeneratePDF} disabled={isGeneratingPDF || worksReportData.length === 0}>
                 {isGeneratingPDF ? 'Generating...' : 'Generate PDF'}
@@ -1122,7 +1164,11 @@
               </p>
             </div>
             <div class="w-full" style="padding: 0; min-height: 560px;">
-              <PDFViewer {pdfBlob} isLoading={isGeneratingPDF} />
+              <PDFViewer
+                {pdfBlob}
+                isLoading={isGeneratingPDF}
+                downloadFileName={worksReportPdfDownloadName()}
+              />
             </div>
             <div class="overflow-x-auto mt-4">
               <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700" style="table-layout: fixed; width: 100%;">
@@ -1349,6 +1395,18 @@
               <p class="theme-text-secondary">No manpower reports in this submission</p>
             </div>
           {:else}
+            <div class="px-6 py-4 border-b theme-border flex justify-end">
+              <Button
+                variant="primary"
+                size="sm"
+                on:click={handleGenerateExcel}
+                disabled={
+                  !selectedSubmission || (worksReportData.length === 0 && manpowerReportData.length === 0)
+                }
+              >
+                Generate Excel
+              </Button>
+            </div>
             <div class="overflow-x-auto">
               <table class="w-full">
                 <thead class="theme-bg-secondary">
@@ -1489,7 +1547,11 @@
     
     <!-- PDF Viewer - Fullscreen -->
     <div class="flex-1 overflow-hidden" style="height: calc(100vh - 80px);">
-      <PDFViewer {pdfBlob} isLoading={isGeneratingPDF} />
+      <PDFViewer
+        {pdfBlob}
+        isLoading={isGeneratingPDF}
+        downloadFileName={worksReportPdfDownloadName()}
+      />
     </div>
   </div>
 {/if}

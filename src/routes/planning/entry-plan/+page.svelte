@@ -238,7 +238,7 @@
 </script>
 
 <svelte:head>
-  <title>Entry Plan Management - Planning</title>
+  <title>PMS - Entry Plan</title>
 </svelte:head>
 
 <!-- Sidebar Overlay -->

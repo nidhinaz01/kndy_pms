@@ -12,6 +12,7 @@
   import { fetchUserMenus } from '$lib/services/menuService';
   import type { ProductionEmployee, ProductionWork } from '$lib/api/production';
   import { parseStageShiftParam, getStageShiftDisplayName } from '../utils/stageUtils';
+  import { getCanonicalPlanWorkKey } from '$lib/utils/planWorkUtils';
   
   // Import all tab components
   import PageHeader from './components/PageHeader.svelte';
@@ -143,6 +144,15 @@
   let showUnplannedWorkReportModal = false;
   let selectedWorkForUnplannedReporting: any = null;
 
+  /** Full-screen blocking overlay during bulk manpower attendance save + reload. */
+  let bulkAttendanceOverlay: eventHandlers.BulkAttendanceOverlayState = null;
+
+  /** Remount Plan Work modal per session so internal state cannot leak across closes/opens. */
+  $: planWorkModalKey =
+    showPlanModal && selectedWorkForPlanning
+      ? getCanonicalPlanWorkKey(selectedWorkForPlanning)
+      : 'idle';
+
   // Load the component when modal needs to be shown (after variable declaration)
   $: if (browser && showReportUnplannedWorkModal && !ReportUnplannedWorkModal) {
     console.log('Loading ReportUnplannedWorkModal component...');
@@ -192,6 +202,7 @@
   // Create event handler context (reactive)
   let eventHandlerContext: eventHandlers.EventHandlerContext;
   $: eventHandlerContext = {
+    setBulkAttendanceOverlay: (v) => (bulkAttendanceOverlay = v),
     setShowAddWorkModal: (v) => showAddWorkModal = v,
     setAvailableWorkOrdersForAdd: (v) => availableWorkOrdersForAdd = v,
     setShowViewWorkHistoryModal: (v) => showViewWorkHistoryModal = v,
@@ -607,15 +618,17 @@
   <FloatingThemeToggle />
 
   <!-- Modals -->
-  <PlanWorkModal 
-    isOpen={showPlanModal}
-    work={selectedWorkForPlanning}
-    {selectedDate}
-    {stageCode}
-    {shiftCode}
-    on:close={() => eventHandlers.handlePlanModalClose(eventHandlerContext)}
-    on:save={() => eventHandlers.handlePlanSave(eventHandlerContext)}
-  />
+  {#key planWorkModalKey}
+    <PlanWorkModal
+      isOpen={showPlanModal}
+      work={selectedWorkForPlanning}
+      {selectedDate}
+      {stageCode}
+      {shiftCode}
+      on:close={() => eventHandlers.handlePlanModalClose(eventHandlerContext)}
+      on:save={() => eventHandlers.handlePlanSave(eventHandlerContext)}
+    />
+  {/key}
 
   <ReportWorkModal 
     isOpen={showReportModal}
@@ -740,6 +753,29 @@
         }
       }}
     />
+  {/if}
+
+  {#if bulkAttendanceOverlay}
+    <div
+      class="fixed inset-0 z-[15000] flex cursor-wait items-center justify-center bg-black/50 p-4"
+      role="alertdialog"
+      aria-modal="true"
+      aria-busy="true"
+      aria-live="polite"
+    >
+      <div
+        class="max-w-md rounded-lg border theme-border theme-bg-primary p-6 shadow-2xl"
+      >
+        <p class="text-center text-base font-medium theme-text-primary">
+          {#if bulkAttendanceOverlay.phase === 'saving'}
+            Updating attendance: {bulkAttendanceOverlay.current} of {bulkAttendanceOverlay.total} employees
+          {:else}
+            Refreshing manpower data…
+          {/if}
+        </p>
+        <p class="mt-2 text-center text-sm theme-text-secondary">Please wait — do not close this page.</p>
+      </div>
+    </div>
   {/if}
 </div>
 

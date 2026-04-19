@@ -6,6 +6,18 @@ export interface ValidationResult {
   errors: Record<string, string>;
 }
 
+/** True if at least one skill row has an employee selected (non-empty skillEmployees). */
+export function multiSkillHasAtLeastOneAssignedWorker(
+  formData: MultiSkillReportFormData,
+  selectedWorks: any[]
+): boolean {
+  if (!selectedWorks?.length) return true;
+  return selectedWorks.some((work) => {
+    const v = formData.skillEmployees[work.id];
+    return v != null && String(v).trim() !== '';
+  });
+}
+
 export function validateStage1(
   formData: MultiSkillReportFormData,
   selectedWorks: any[]
@@ -59,6 +71,12 @@ export function validateStage1(
         errors.skillEmployees = `Please assign workers to the following ${skillsNeedingWorker.length} skills: ${skillNames}, or mark them as deviations with reasons.`;
       }
     }
+  }
+
+  // At least one skill row must have a real worker (not deviation-only on every row)
+  if (selectedWorks.length > 0 && !multiSkillHasAtLeastOneAssignedWorker(formData, selectedWorks)) {
+    errors.atLeastOneWorker =
+      'At least one skill competency must have a worker assigned. You cannot use only "No worker available" for every skill.';
   }
 
   if (!formData.fromDate) {

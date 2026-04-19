@@ -3,6 +3,7 @@ import type { MultiSkillReportFormData, BreakdownData } from '$lib/types/multiSk
 import type { LostTimeReason } from '$lib/api/lostTimeReasons';
 import { getEffectiveRowTimes } from '$lib/utils/planWorkUtils';
 import { netHoursWorkedForReportingRow } from '$lib/utils/multiSkillReportUtils';
+import { multiSkillHasAtLeastOneAssignedWorker } from '$lib/utils/multiSkillReportValidation';
 import { calculatePieceRateForPlanning } from './pieceRateCalculationService';
 
 /**
@@ -22,7 +23,15 @@ export async function saveUnplannedWorkReports(
     const { getCurrentUsername, getCurrentTimestamp } = await import('$lib/utils/userUtils');
     const currentUser = getCurrentUsername();
     const now = getCurrentTimestamp();
-    
+
+    if (virtualWorks.length > 0 && !multiSkillHasAtLeastOneAssignedWorker(formData, virtualWorks)) {
+      return {
+        success: false,
+        error:
+          'At least one skill competency must have a worker assigned. You cannot use only "No worker available" for every skill.'
+      };
+    }
+
     const hasBreakdown = formData.breakdownData.breakdownItems.length > 0;
     
     // Calculate lt_total for each breakdown item

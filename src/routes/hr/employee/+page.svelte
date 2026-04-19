@@ -284,7 +284,7 @@
 </script>
 
 <svelte:head>
-  <title>Employee Management</title>
+  <title>PMS - Employee Management</title>
 </svelte:head>
 
 <!-- Sidebar Overlay -->

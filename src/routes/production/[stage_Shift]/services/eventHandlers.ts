@@ -1,3 +1,4 @@
+import { tick } from 'svelte';
 import { supabase } from '$lib/supabaseClient';
 import { getWaitingWorkOrdersForEntry, getAvailableWorkOrdersForExit, recordWorkOrderEntry, recordWorkOrderExit } from '../../services/stageWorkOrderService';
 import { submitPlanning, submitReporting } from '$lib/api/production/planningReportingService';
@@ -57,8 +58,15 @@ async function updateWorkStatusAfterDeletion(
   }
 }
 
+/** Blocking overlay during bulk manpower attendance saves + refresh. */
+export type BulkAttendanceOverlayState =
+  | null
+  | { phase: 'saving'; current: number; total: number }
+  | { phase: 'refreshing' };
+
 export interface EventHandlerContext {
   // State setters
+  setBulkAttendanceOverlay: (value: BulkAttendanceOverlayState) => void;
   setShowAddWorkModal: (value: boolean) => void;
   setAvailableWorkOrdersForAdd: (value: any[]) => void;
   setShowViewWorkHistoryModal: (value: boolean) => void;
@@ -1324,76 +1332,82 @@ export async function handleBulkAttendanceMarked(context: EventHandlerContext, e
     return;
   }
 
+  if (context.activeTab !== 'manpower-plan' && context.activeTab !== 'manpower-report') {
+    console.error('Unknown tab for bulk attendance marking:', context.activeTab);
+    return;
+  }
+
+  const total = employees.length;
+  const effectiveShiftCode = shiftCode || context.shiftCode;
+  const ltpHours = event.detail.ltpHours || 0;
+  const ltnpHours = event.detail.ltnpHours || 0;
+
   try {
-    let results;
-    const effectiveShiftCode = shiftCode || context.shiftCode;
-    
-    if (context.activeTab === 'manpower-plan') {
-      // Save to planning table for the selected date
-      results = await Promise.all(
-        employees.map((emp: { empId: string; stageCode: string }) =>
-          savePlannedAttendance(
-            emp.empId, 
-            emp.stageCode, 
-            date, 
-            status as ManpowerAttendanceStatus, 
-            effectiveShiftCode, 
-            notes, 
-            plannedHours, 
-            fromTime, 
-            toTime,
-            attendanceFromDate ?? null,
-            attendanceToDate ?? null,
-            cOff,
-            ot ?? null
-          )
-        )
-      );
-    } else if (context.activeTab === 'manpower-report') {
-      // Save to reporting table (for current day) - default LTP/LTNP to 0 if not provided
-      const ltpHours = event.detail.ltpHours || 0;
-      const ltnpHours = event.detail.ltnpHours || 0;
-      results = await Promise.all(
-        employees.map((emp: { empId: string; stageCode: string }) =>
-          saveReportedManpower(
-            emp.empId, 
-            emp.stageCode, 
-            date, 
-            status as ManpowerAttendanceStatus, 
-            effectiveShiftCode, 
-            ltpHours, 
-            ltnpHours, 
-            notes, 
-            actualHours, 
-            fromTime, 
-            toTime,
-            attendanceFromDate ?? null,
-            attendanceToDate ?? null,
-            cOff,
-            ot ?? null
-          )
-        )
-      );
-    } else {
-      console.error('Unknown tab for bulk attendance marking:', context.activeTab);
-      return;
+    const results: { success: boolean; error?: string }[] = [];
+
+    for (let i = 0; i < total; i++) {
+      const emp = employees[i] as { empId: string; stageCode: string };
+      context.setBulkAttendanceOverlay({ phase: 'saving', current: i + 1, total });
+      await tick();
+
+      if (context.activeTab === 'manpower-plan') {
+        const r = await savePlannedAttendance(
+          emp.empId,
+          emp.stageCode,
+          date,
+          status as ManpowerAttendanceStatus,
+          effectiveShiftCode,
+          notes,
+          plannedHours,
+          fromTime,
+          toTime,
+          attendanceFromDate ?? null,
+          attendanceToDate ?? null,
+          cOff,
+          ot ?? null
+        );
+        results.push(r);
+      } else {
+        const r = await saveReportedManpower(
+          emp.empId,
+          emp.stageCode,
+          date,
+          status as ManpowerAttendanceStatus,
+          effectiveShiftCode,
+          ltpHours,
+          ltnpHours,
+          notes,
+          actualHours,
+          fromTime,
+          toTime,
+          attendanceFromDate ?? null,
+          attendanceToDate ?? null,
+          cOff,
+          ot ?? null
+        );
+        results.push(r);
+      }
     }
 
-    // Check if any failed
-    const failed = results.filter(r => !r.success);
+    const failed = results.filter((r) => !r.success);
     if (failed.length > 0) {
       alert(`Error saving attendance for ${failed.length} employee(s). Please try again.`);
       return;
     }
 
+    context.setBulkAttendanceOverlay({ phase: 'refreshing' });
+    await tick();
+
     if (context.activeTab === 'manpower-plan') {
       await context.loadManpowerPlanData();
-    } else if (context.activeTab === 'manpower-report') {
+    } else {
       await context.loadManpowerReportData();
     }
   } catch (error) {
     console.error('Error marking bulk attendance:', error);
     alert('Error marking bulk attendance: ' + ((error as Error).message || 'Unknown error'));
+  } finally {
+    context.setBulkAttendanceOverlay(null);
   }
 }
 

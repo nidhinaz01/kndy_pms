@@ -392,7 +392,7 @@
 </script>
 
 <svelte:head>
-  <title>Piece Rate - Time Period</title>
+  <title>PMS - Piece Rate - Time Period</title>
 </svelte:head>
 
 <!-- Sidebar Overlay -->

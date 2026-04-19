@@ -406,7 +406,7 @@
 </script>
 
 <svelte:head>
-  <title>User Management - System Admin</title>
+  <title>PMS - User Management</title>
 </svelte:head>
 
 <!-- Sidebar Overlay -->

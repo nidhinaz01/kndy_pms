@@ -87,7 +87,7 @@
 </script>
 
 <svelte:head>
-  <title>Attendance Report</title>
+  <title>PMS - Attendance Report</title>
 </svelte:head>
 
 <div class="flex min-h-screen flex-col theme-bg-secondary transition-colors duration-200">

@@ -135,7 +135,7 @@
 </script>
 
 <svelte:head>
-  <title>View Documents - {documentType}</title>
+  <title>PMS - View - {documentType}</title>
 </svelte:head>
 
 <!-- Sidebar Overlay -->

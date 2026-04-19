@@ -197,7 +197,7 @@
 </script>
 
 <svelte:head>
-  <title>Holiday Management - KNDY PMS</title>
+  <title>PMS - Holiday List</title>
 </svelte:head>
 
 <!-- Sidebar Overlay -->

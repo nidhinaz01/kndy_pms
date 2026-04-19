@@ -318,6 +318,10 @@
   });
 </script>
 
+<svelte:head>
+  <title>PMS - Work Orders</title>
+</svelte:head>
+
 <!-- Loading State -->
 {#if isLoading}
   <div class="flex items-center justify-center h-screen theme-bg-secondary">

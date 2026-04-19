@@ -86,7 +86,7 @@
 </script>
 
 <svelte:head>
-  <title>Lost Time Report</title>
+  <title>PMS - Lost Time Report</title>
 </svelte:head>
 
 <div class="flex min-h-screen flex-col theme-bg-secondary transition-colors duration-200">

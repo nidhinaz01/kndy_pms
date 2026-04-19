@@ -196,7 +196,7 @@
 </script>
 
 <svelte:head>
-  <title>Chassis Receival Templates - System Admin</title>
+  <title>PMS - Chassis Receival Templates</title>
 </svelte:head>
 
 <!-- Sidebar Overlay -->

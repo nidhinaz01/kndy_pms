@@ -179,7 +179,7 @@
 </script>
 
 <svelte:head>
-  <title>Add Standard Work to Work Order</title>
+  <title>PMS - Add Std Work to WO</title>
 </svelte:head>
 
 <!-- Sidebar Overlay -->

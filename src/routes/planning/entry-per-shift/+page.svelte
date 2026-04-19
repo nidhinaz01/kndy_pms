@@ -121,6 +121,10 @@
   }
 </script>
 
+<svelte:head>
+  <title>PMS - Entry Per Shift</title>
+</svelte:head>
+
 <!-- Main Content -->
 <DataTablePage
   pageTitle="Production Plans (Shift-Based)"

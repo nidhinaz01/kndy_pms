@@ -210,7 +210,7 @@
 </script>
 
 <svelte:head>
-  <title>Chassis Receival - Sales</title>
+  <title>PMS - Chassis Receival</title>
 </svelte:head>
 
 <!-- Sidebar Overlay -->

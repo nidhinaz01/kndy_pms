@@ -6,6 +6,84 @@ import { supabase } from '$lib/supabaseClient';
 
 const PAGE_SIZE = 1000;
 
+/** Secondary sync: non-blocking for UX; if it fails or times out, stage entry is already saved. */
+const WO_PRDN_START_SYNC_TIMEOUT_MS = 25_000;
+
+/**
+ * Compute earliest entry date and set `wo_prdn_start` on `prdn_wo_details`.
+ * Runs after successful stage entry; failures are logged only.
+ */
+async function syncWoPrdnStartAfterEntry(
+  woDetailsId: number,
+  currentUser: string,
+  now: string
+): Promise<void> {
+  const { data: allEntryDates, error: entryDatesError } = await supabase
+    .from('prdn_dates')
+    .select('actual_date')
+    .eq('sales_order_id', woDetailsId)
+    .eq('date_type', 'entry')
+    .not('actual_date', 'is', null);
+
+  if (entryDatesError) {
+    console.error('syncWoPrdnStartAfterEntry: failed to read entry dates', entryDatesError);
+    return;
+  }
+  if (!allEntryDates?.length) {
+    return;
+  }
+
+  const entryDates = allEntryDates
+    .map((d: { actual_date?: string }) => d.actual_date)
+    .filter(Boolean)
+    .sort();
+
+  if (entryDates.length === 0) {
+    return;
+  }
+
+  const firstEntryDate = entryDates[0] as string;
+
+  const { error: woUpdateError } = await supabase
+    .from('prdn_wo_details')
+    .update({
+      wo_prdn_start: firstEntryDate,
+      modified_by: currentUser,
+      modified_dt: now
+    })
+    .eq('id', woDetailsId);
+
+  if (woUpdateError) {
+    console.error('syncWoPrdnStartAfterEntry: wo_prdn_start update failed', woUpdateError);
+  } else {
+    console.log(`✅ Updated wo_prdn_start to ${firstEntryDate} for work order ${woDetailsId}`);
+  }
+}
+
+/**
+ * Run `wo_prdn_start` sync without blocking the entry modal; cap wait time so the UI never depended on a hung query.
+ */
+function scheduleWoPrdnStartSync(woDetailsId: number, currentUser: string, now: string): void {
+  const run = async () => {
+    await Promise.race([
+      syncWoPrdnStartAfterEntry(woDetailsId, currentUser, now),
+      new Promise<never>((_, reject) => {
+        setTimeout(() => {
+          reject(
+            new Error(
+              `wo_prdn_start sync timed out after ${WO_PRDN_START_SYNC_TIMEOUT_MS}ms (wo_details_id=${woDetailsId})`
+            )
+          );
+        }, WO_PRDN_START_SYNC_TIMEOUT_MS);
+      })
+    ]);
+  };
+
+  void run().catch((err: unknown) => {
+    console.error('scheduleWoPrdnStartSync:', err);
+  });
+}
+
 /**
  * Get work orders waiting for entry (have planned entry date but no actual entry date).
  * Paginated to avoid Supabase 1000-row limit.
@@ -263,45 +341,9 @@ export async function recordWorkOrderEntry(
 
     console.log(`✅ Marked work order ${woDetailsId} entry on ${entryDate}`);
 
-    // Check if this is the first entry date for this work order (across all stages)
-    // and update wo_prdn_start if needed
-    onProgress?.('Checking production start date...');
-    const { data: allEntryDates, error: entryDatesError } = await supabase
-      .from('prdn_dates')
-      .select('actual_date')
-      .eq('sales_order_id', woDetailsId)
-      .eq('date_type', 'entry')
-      .not('actual_date', 'is', null);
+    // Sync wo_prdn_start from earliest entry date — non-blocking so the modal does not wait on this query.
+    scheduleWoPrdnStartSync(woDetailsId, currentUser, now);
 
-    if (!entryDatesError && allEntryDates && allEntryDates.length > 0) {
-      // Find the earliest entry date
-      const entryDates = allEntryDates
-        .map((d: any) => d.actual_date)
-        .filter(Boolean)
-        .sort();
-      
-      if (entryDates.length > 0) {
-        const firstEntryDate = entryDates[0];
-        
-        // Update wo_prdn_start with the earliest entry date
-        const { error: woUpdateError } = await supabase
-          .from('prdn_wo_details')
-          .update({
-            wo_prdn_start: firstEntryDate,
-            modified_by: currentUser,
-            modified_dt: now
-          })
-          .eq('id', woDetailsId);
-
-        if (woUpdateError) {
-          console.error('Error updating wo_prdn_start:', woUpdateError);
-          // Don't throw error, just log it as this is a secondary operation
-        } else {
-          console.log(`✅ Updated wo_prdn_start to ${firstEntryDate} for work order ${woDetailsId}`);
-        }
-      }
-    }
-    
     return {
       success: true,
       statusRecordsCount: statusRecords.length

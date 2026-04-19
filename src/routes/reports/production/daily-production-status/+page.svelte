@@ -71,7 +71,7 @@
 </script>
 
 <svelte:head>
-  <title>Daily Production Status</title>
+  <title>PMS - Daily Production Status</title>
 </svelte:head>
 
 <div class="flex min-h-screen flex-col theme-bg-secondary transition-colors duration-200">

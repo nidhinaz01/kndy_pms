@@ -198,6 +198,8 @@
     previousIsOpen = false;
     hasPrefilledWorkers = false;
     savedSelectedWorkers = {}; // Fix 4: Clear saved workers when modal closes or work changes
+    // Next open must not think we are still on the last work (avoids skipped reset when keys collide)
+    previousWorkId = null;
   }
   
   /** Additional trainees are saved with notes like `Trainee: Name` — not skill-mapping slots. */

@@ -128,7 +128,7 @@
 </script>
 
 <svelte:head>
-  <title>R&D Document Sharing - Document Management</title>
+  <title>PMS - Document Management</title>
 </svelte:head>
 
 <!-- Sidebar Overlay -->

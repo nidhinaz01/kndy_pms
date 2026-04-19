@@ -4707,6 +4707,19 @@ A: See the [Process Flow](#process-flow) section for the end-to-end flow and lin
 
 ## Appendix
 
+### Repository scripts (database administrators)
+
+The project includes **SQL maintenance scripts** in the source tree (for **DBAs** and **Supabase/Postgres** operators). They are **not** part of the end-user web app; run them in your database environment when you own that process.
+
+| Script (under `scripts/`) | Purpose |
+|---------------------------|--------|
+| `db_performance_diagnose.sql` | **Step A** — row counts, selectivity checks, and `EXPLAIN` for the same query shapes the app uses (e.g. active work orders). Run on **staging** first. |
+| `db_performance_indexes_migration.sql` | **Step B** — optional **partial indexes** and `ANALYZE` to improve hot paths. In **PostgreSQL**, `CREATE INDEX CONCURRENTLY` must run **outside** a transaction: in the Supabase SQL editor, execute **one statement at a time**. Prefer a **low-traffic** window the first time. |
+| `db_performance_indexes_rollback.sql` | Drops the indexes created in Step B (`DROP INDEX CONCURRENTLY`), if you need to roll back. |
+| `export_ddl_production_context.sql` | Helpers to capture **DDL** (functions, tables, constraints, RLS) for production-related objects — useful for audits, migrations, or comparing environments. Follow the comments inside the file (some steps use `pg_dump` from a terminal). |
+
+**Suggested order**: run diagnostics → review plans → apply indexes → `ANALYZE` → re-run `EXPLAIN` from diagnostics and compare buffer/scan behavior.
+
 ### Glossary
 
 - **Work Order (WO)**: A production order for manufacturing a product
@@ -4735,7 +4748,7 @@ A: See the [Process Flow](#process-flow) section for the end-to-end flow and lin
 
 ---
 
-**Document Version**: 1.0  
-**Last Updated**: 21 December 2025  
+**Document Version**: 1.1  
+**Last Updated**: 19 April 2026  
 **System Version**: Production Management System v1.0
 

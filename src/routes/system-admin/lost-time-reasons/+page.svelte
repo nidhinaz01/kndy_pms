@@ -180,7 +180,7 @@
 </script>
 
 <svelte:head>
-  <title>Lost Time Reasons Management</title>
+  <title>PMS - Lost Time Reasons</title>
 </svelte:head>
 
 <!-- Sidebar Overlay -->

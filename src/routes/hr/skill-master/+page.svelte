@@ -321,7 +321,7 @@
 </script>
 
 <svelte:head>
-  <title>Skill Master Management</title>
+  <title>PMS - Skill Master</title>
 </svelte:head>
 
 <!-- Sidebar Overlay -->

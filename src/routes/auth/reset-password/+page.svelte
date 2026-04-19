@@ -165,7 +165,7 @@
 </script>
 
 <svelte:head>
-  <title>{isFirstLogin ? 'Set Your Password' : 'Reset Password'} - Production Management System</title>
+  <title>{isFirstLogin ? 'PMS - Set Your Password' : 'PMS - Reset Password'}</title>
 </svelte:head>
 
 <div class="flex items-center justify-center min-h-screen theme-bg-secondary">

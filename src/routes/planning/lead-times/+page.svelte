@@ -242,7 +242,7 @@
 </script>
 
 <svelte:head>
-  <title>Lead Times Management - Production Planning</title>
+  <title>PMS - Lead Times</title>
 </svelte:head>
 
 <!-- Sidebar Overlay -->

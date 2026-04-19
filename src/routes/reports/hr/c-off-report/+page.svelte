@@ -81,7 +81,7 @@
 </script>
 
 <svelte:head>
-  <title>C-Off Report</title>
+  <title>PMS - C-Off Report</title>
 </svelte:head>
 
 <div class="flex min-h-screen flex-col theme-bg-secondary transition-colors duration-200">

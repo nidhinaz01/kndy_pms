@@ -182,10 +182,7 @@
 </script>
 
 <svelte:head>
-  <title>
-    Accounts —
-    {viewMode === 'list' ? 'Non-commercial work orders' : 'Create non-commercial work order'}
-  </title>
+  <title>PMS - Non-commercial WO</title>
 </svelte:head>
 
 {#if showSidebar}

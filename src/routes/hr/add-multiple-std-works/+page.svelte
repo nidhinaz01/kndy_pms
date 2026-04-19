@@ -317,7 +317,7 @@
 </script>
 
 <svelte:head>
-  <title>Add Multiple Standard Works</title>
+  <title>PMS - Add Multiple Std Works</title>
 </svelte:head>
 
 {#if showSidebar}

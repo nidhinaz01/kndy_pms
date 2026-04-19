@@ -367,7 +367,7 @@
 </script>
 
 <svelte:head>
-  <title>Piece Rate - Stage</title>
+  <title>PMS - Piece Rate - Stage</title>
 </svelte:head>
 
 {#if showSidebar}

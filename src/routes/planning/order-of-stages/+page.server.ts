@@ -2,6 +2,6 @@ import type { ServerLoad } from '@sveltejs/kit';
 
 export const load: ServerLoad = async () => {
   return {
-    title: 'Order of Stages - Production Management'
+    title: 'PMS - Order of Stages'
   };
 }; 

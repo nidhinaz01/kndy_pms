@@ -85,6 +85,10 @@
   }
 </script>
 
+<svelte:head>
+  <title>PMS - Daily Shift</title>
+</svelte:head>
+
 <DataTablePage
   pageTitle="Daily Shift Schedule"
   {isLoading}

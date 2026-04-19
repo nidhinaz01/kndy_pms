@@ -81,7 +81,7 @@
 </script>
 
 <svelte:head>
-  <title>Deviation Report</title>
+  <title>PMS - Deviation Report</title>
 </svelte:head>
 
 <div class="flex min-h-screen flex-col theme-bg-secondary transition-colors duration-200">

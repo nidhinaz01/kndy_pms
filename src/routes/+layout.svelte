@@ -7,10 +7,10 @@
 	import { browser } from '$app/environment';
 
 	// Get session data from server with default values
-	export let data: { title: string } = { title: 'Production Management' };
+	export let data: { title: string } = { title: 'PMS' };
 
 	// Reactive title based on authentication status with safe access
-	$: pageTitle = data?.title || 'Production Management';
+	$: pageTitle = data?.title || 'PMS';
 
 	onMount(async () => {
 		if (!browser) return;

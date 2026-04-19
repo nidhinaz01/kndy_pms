@@ -187,7 +187,7 @@
 </script>
 
 <svelte:head>
-  <title>Production — Shift change</title>
+  <title>PMS - Shift Change</title>
 </svelte:head>
 
 {#if showSidebar}
