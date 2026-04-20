@@ -47,6 +47,7 @@
   let shiftBreakTimes: Array<{ start_time: string; end_time: string }> = [];
   let pdfBlob: Blob | null = null;
   let isGeneratingPDF = false;
+  let pdfErrorMessage = '';
   let showWorksPlanFullscreen = false;
   let hasManuallyClosedFullscreen = false;
   
@@ -87,12 +88,20 @@
     }
     
     isGeneratingPDF = true;
+    pdfErrorMessage = '';
     try {
-      const doc = generateWorksPlanPDF(worksPlanData, selectedStage, selectedDate, shiftBreakTimes);
+      const doc = generateWorksPlanPDF(
+        worksPlanData,
+        selectedStage,
+        selectedDate,
+        shiftBreakTimes,
+        { compact: false }
+      );
       pdfBlob = doc.output('blob');
     } catch (error) {
       console.error('Error generating PDF:', error);
       pdfBlob = null;
+      pdfErrorMessage = 'Unable to build PDF on this device. Please try again.';
     } finally {
       isGeneratingPDF = false;
     }
@@ -884,6 +893,7 @@
               <PDFViewer
                 {pdfBlob}
                 isLoading={isGeneratingPDF}
+                errorMessage={pdfErrorMessage}
                 downloadFileName={worksPlanPdfDownloadName()}
               />
             </div>
@@ -1036,6 +1046,7 @@
       <PDFViewer
         {pdfBlob}
         isLoading={isGeneratingPDF}
+        errorMessage={pdfErrorMessage}
         downloadFileName={worksPlanPdfDownloadName()}
       />
     </div>

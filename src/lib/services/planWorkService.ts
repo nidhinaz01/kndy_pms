@@ -164,7 +164,13 @@ export async function loadExistingPlans(
 
     let query = supabase
       .from('prdn_work_planning')
-      .select('*')
+      .select(`
+        *,
+        hr_emp(
+          emp_id,
+          emp_name
+        )
+      `)
       .eq('stage_code', stageCode)
       .eq('wo_details_id', woDetailsId)
       .eq('from_date', selectedDate)

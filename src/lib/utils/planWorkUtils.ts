@@ -328,6 +328,16 @@ export function getIndividualSkills(skillMapping: any): string[] {
 }
 
 /**
+ * Canonical key for worker slots in Plan Work.
+ * Always use "<skillShort>-<index>" (including non-standard/general as "GEN-0").
+ */
+export function getWorkerSlotKey(skillShort: string, index: number): string {
+  const normalizedSkill = String(skillShort || 'GEN').trim().toUpperCase() || 'GEN';
+  const normalizedIndex = Number.isInteger(index) && index >= 0 ? index : 0;
+  return `${normalizedSkill}-${normalizedIndex}`;
+}
+
+/**
  * Stable identity for a Works-tab row / Plan Work session.
  * Includes WO line, standard-work id, and work code so two competencies on the same WO
  * do not collapse to the same modal instance key (fixes stale worker state across plans).

@@ -42,6 +42,7 @@
   // PDF viewing
   let pdfBlob: Blob | null = null;
   let isGeneratingPDF = false;
+  let pdfErrorMessage = '';
   let showWorksReportFullscreen = false;
   let hasManuallyClosedFullscreen = false;
   
@@ -563,14 +564,21 @@
     }
     
     isGeneratingPDF = true;
+    pdfErrorMessage = '';
     try {
       // Import PDF generator (we'll create this)
       const { generateWorksReportPDF } = await import('./utils/generateWorksReportPDF');
-      const doc = generateWorksReportPDF(worksReportData, selectedSubmission.stage_code, selectedSubmission.reporting_date);
+      const doc = generateWorksReportPDF(
+        worksReportData,
+        selectedSubmission.stage_code,
+        selectedSubmission.reporting_date,
+        { compact: false }
+      );
       pdfBlob = doc.output('blob');
     } catch (error) {
       console.error('Error generating PDF:', error);
       pdfBlob = null;
+      pdfErrorMessage = 'Unable to build PDF on this device. Please try again.';
     } finally {
       isGeneratingPDF = false;
     }
@@ -1167,6 +1175,7 @@
               <PDFViewer
                 {pdfBlob}
                 isLoading={isGeneratingPDF}
+                errorMessage={pdfErrorMessage}
                 downloadFileName={worksReportPdfDownloadName()}
               />
             </div>
@@ -1550,6 +1559,7 @@
       <PDFViewer
         {pdfBlob}
         isLoading={isGeneratingPDF}
+        errorMessage={pdfErrorMessage}
         downloadFileName={worksReportPdfDownloadName()}
       />
     </div>

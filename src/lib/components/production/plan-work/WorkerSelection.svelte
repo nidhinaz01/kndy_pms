@@ -1,7 +1,7 @@
 <script lang="ts">
   import { supabase } from '$lib/supabaseClient';
   import type { Worker, SelectedWorker, RowTimeOverride, ShiftInfo } from '$lib/types/planWork';
-  import { getSkillShort, getIndividualSkills } from '$lib/utils/planWorkUtils';
+  import { getSkillShort, getIndividualSkills, getWorkerSlotKey } from '$lib/utils/planWorkUtils';
   import PlanWorkRowCustomTimes from './PlanWorkRowCustomTimes.svelte';
 
   export let work: any = null;
@@ -177,7 +177,7 @@
                   <h5 class="font-medium theme-text-primary mb-2">{skillShort || skill.sc_name}</h5>
                   <div class="space-y-3">
                     {#each individualSkills as individualSkill, skillIndex}
-                      {@const currentSkillKey = `${individualSkill}-${skillIndex}`}
+                      {@const currentSkillKey = getWorkerSlotKey(individualSkill, skillIndex)}
                       {@const selectedWorkerForThisSkill = selectedWorkers[currentSkillKey]}
                       <div>
                         <label 
@@ -194,7 +194,7 @@
                         >
                           <option value="">Choose a worker for {individualSkill}...</option>
                           {#each availableWorkers as worker}
-                            {@const currentSkillKey = `${individualSkill}-${skillIndex}`}
+                            {@const currentSkillKey = getWorkerSlotKey(individualSkill, skillIndex)}
                             {@const isAlreadySelected = (() => {
                               // Filter out null/undefined entries and current skill slot
                               const otherSelectedWorkers = Object.entries(selectedWorkers)
@@ -216,8 +216,8 @@
                             </option>
                           {/each}
                         </select>
-                        {#if selectedWorkers[`${individualSkill}-${skillIndex}`]}
-                          {@const selectedWorker = selectedWorkers[`${individualSkill}-${skillIndex}`]}
+                        {#if selectedWorkers[getWorkerSlotKey(individualSkill, skillIndex)]}
+                          {@const selectedWorker = selectedWorkers[getWorkerSlotKey(individualSkill, skillIndex)]}
                           {#if selectedWorker}
                             <div class="mt-1 text-xs theme-text-secondary">
                               Selected: {selectedWorker.emp_name} ({selectedWorker.skill_short})
@@ -225,9 +225,9 @@
                           {/if}
                         {/if}
                         <PlanWorkRowCustomTimes
-                          rowKey={`${individualSkill}-${skillIndex}`}
+                          rowKey={getWorkerSlotKey(individualSkill, skillIndex)}
                           {shiftInfo}
-                          override={rowTimeOverrides[`${individualSkill}-${skillIndex}`]}
+                          override={rowTimeOverrides[getWorkerSlotKey(individualSkill, skillIndex)]}
                           globalFromTime={fromTime}
                           globalToTime={toTime}
                           onChange={onRowCustomTimesChange}
@@ -238,7 +238,7 @@
                 </div>
               {:else}
                 <!-- Single skill -->
-                {@const workerKey = skillShort || skill.sc_name}
+                {@const workerKey = getWorkerSlotKey(skillShort || skill.sc_name || 'GEN', 0)}
                 {@const selectedWorkerForThisSkill = selectedWorkers[workerKey]}
                 <div>
                   <label 
@@ -260,8 +260,8 @@
                       </option>
                     {/each}
                   </select>
-                  {#if selectedWorkers[skillShort || skill.sc_name]}
-                    {@const selectedWorker = selectedWorkers[skillShort || skill.sc_name]}
+                  {#if selectedWorkers[getWorkerSlotKey(skillShort || skill.sc_name || 'GEN', 0)]}
+                    {@const selectedWorker = selectedWorkers[getWorkerSlotKey(skillShort || skill.sc_name || 'GEN', 0)]}
                     {#if selectedWorker}
                       <div class="mt-1 text-xs theme-text-secondary">
                         Selected: {selectedWorker.emp_name} ({selectedWorker.skill_short})
@@ -269,9 +269,9 @@
                     {/if}
                   {/if}
                   <PlanWorkRowCustomTimes
-                    rowKey={skillShort || skill.sc_name}
+                    rowKey={getWorkerSlotKey(skillShort || skill.sc_name || 'GEN', 0)}
                     {shiftInfo}
-                    override={rowTimeOverrides[skillShort || skill.sc_name]}
+                    override={rowTimeOverrides[getWorkerSlotKey(skillShort || skill.sc_name || 'GEN', 0)]}
                     globalFromTime={fromTime}
                     globalToTime={toTime}
                     onChange={onRowCustomTimesChange}
@@ -292,7 +292,7 @@
                 <h5 class="font-medium theme-text-primary mb-2">{skillShort || skill.sc_name}</h5>
                 <div class="space-y-3">
                   {#each individualSkills as individualSkill, skillIndex}
-                    {@const currentSkillKey = `${individualSkill}-${skillIndex}`}
+                    {@const currentSkillKey = getWorkerSlotKey(individualSkill, skillIndex)}
                     {@const selectedWorkerForThisSkill = selectedWorkers[currentSkillKey]}
                     <div>
                       <label 
@@ -309,7 +309,7 @@
                       >
                         <option value="">Choose a worker for {individualSkill}...</option>
                         {#each availableWorkers as worker}
-                          {@const currentSkillKey = `${individualSkill}-${skillIndex}`}
+                          {@const currentSkillKey = getWorkerSlotKey(individualSkill, skillIndex)}
                           {@const isAlreadySelected = (() => {
                               // Filter out null/undefined entries and current skill slot
                               const otherSelectedWorkers = Object.entries(selectedWorkers)
@@ -331,8 +331,8 @@
                           </option>
                         {/each}
                       </select>
-                      {#if selectedWorkers[`${individualSkill}-${skillIndex}`]}
-                        {@const selectedWorker = selectedWorkers[`${individualSkill}-${skillIndex}`]}
+                      {#if selectedWorkers[getWorkerSlotKey(individualSkill, skillIndex)]}
+                        {@const selectedWorker = selectedWorkers[getWorkerSlotKey(individualSkill, skillIndex)]}
                         {#if selectedWorker}
                           <div class="mt-1 text-xs theme-text-secondary">
                             Selected: {selectedWorker.emp_name} ({selectedWorker.skill_short})
@@ -340,9 +340,9 @@
                         {/if}
                       {/if}
                       <PlanWorkRowCustomTimes
-                        rowKey={`${individualSkill}-${skillIndex}`}
+                        rowKey={getWorkerSlotKey(individualSkill, skillIndex)}
                         {shiftInfo}
-                        override={rowTimeOverrides[`${individualSkill}-${skillIndex}`]}
+                        override={rowTimeOverrides[getWorkerSlotKey(individualSkill, skillIndex)]}
                         globalFromTime={fromTime}
                         globalToTime={toTime}
                         onChange={onRowCustomTimesChange}
@@ -352,7 +352,7 @@
                 </div>
               </div>
             {:else}
-              {@const workerKey = skillShort || skill.sc_name}
+              {@const workerKey = getWorkerSlotKey(skillShort || skill.sc_name || 'GEN', 0)}
               {@const selectedWorkerForThisSkill = selectedWorkers[workerKey]}
               <div>
                 <label 
@@ -374,8 +374,8 @@
                     </option>
                   {/each}
                 </select>
-                {#if selectedWorkers[skillShort || skill.sc_name]}
-                  {@const selectedWorker = selectedWorkers[skillShort || skill.sc_name]}
+                {#if selectedWorkers[getWorkerSlotKey(skillShort || skill.sc_name || 'GEN', 0)]}
+                  {@const selectedWorker = selectedWorkers[getWorkerSlotKey(skillShort || skill.sc_name || 'GEN', 0)]}
                   {#if selectedWorker}
                     <div class="mt-1 text-xs theme-text-secondary">
                       Selected: {selectedWorker.emp_name} ({selectedWorker.skill_short})
@@ -383,9 +383,9 @@
                   {/if}
                 {/if}
                 <PlanWorkRowCustomTimes
-                  rowKey={skillShort || skill.sc_name}
+                  rowKey={getWorkerSlotKey(skillShort || skill.sc_name || 'GEN', 0)}
                   {shiftInfo}
-                  override={rowTimeOverrides[skillShort || skill.sc_name]}
+                  override={rowTimeOverrides[getWorkerSlotKey(skillShort || skill.sc_name || 'GEN', 0)]}
                   globalFromTime={fromTime}
                   globalToTime={toTime}
                   onChange={onRowCustomTimesChange}
@@ -406,7 +406,7 @@
     <select
       id="worker-select"
       class="w-full px-3 py-2 border theme-border rounded-lg theme-bg-primary theme-text-primary focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-      on:change={(e) => onWorkerChange(e, 'general')}
+      on:change={(e) => onWorkerChange(e, getWorkerSlotKey('GEN', 0))}
     >
       <option value="">Choose a worker...</option>
       {#each availableWorkers as worker}
@@ -416,9 +416,9 @@
       {/each}
     </select>
     <PlanWorkRowCustomTimes
-      rowKey="general"
+      rowKey={getWorkerSlotKey('GEN', 0)}
       {shiftInfo}
-      override={rowTimeOverrides['general']}
+      override={rowTimeOverrides[getWorkerSlotKey('GEN', 0)]}
       globalFromTime={fromTime}
       globalToTime={toTime}
       onChange={onRowCustomTimesChange}

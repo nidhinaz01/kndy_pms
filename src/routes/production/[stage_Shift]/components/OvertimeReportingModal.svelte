@@ -19,21 +19,11 @@
     dispatch('confirm');
   }
 
-  function formatCurrency(amount: number): string {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: 'INR',
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2
-    }).format(amount);
-  }
-
   function minutesToHours(minutes: number): number {
     return minutes / 60;
   }
 
   $: totalOvertimeMinutes = overtimeData.reduce((sum, worker) => sum + worker.overtimeMinutes, 0);
-  $: totalOvertimeAmount = overtimeData.reduce((sum, worker) => sum + worker.overtimeAmount, 0);
 </script>
 
 {#if isOpen}
@@ -87,9 +77,6 @@
               <div class="theme-text-primary">
                 <span class="font-medium">Total OT Hours:</span> {formatTime(minutesToHours(totalOvertimeMinutes))}
               </div>
-              <div class="theme-text-primary">
-                <span class="font-medium">Total OT Amount:</span> {formatCurrency(totalOvertimeAmount)}
-              </div>
             </div>
           </div>
 
@@ -108,9 +95,6 @@
                   <div class="text-sm theme-text-secondary">Total OT</div>
                   <div class="text-lg font-semibold text-orange-600 dark:text-orange-400">
                     {formatTime(minutesToHours(worker.overtimeMinutes))}
-                  </div>
-                  <div class="text-sm font-medium text-orange-600 dark:text-orange-400">
-                    {formatCurrency(worker.overtimeAmount)}
                   </div>
                 </div>
               </div>
@@ -155,7 +139,6 @@
                         <th class="px-3 py-2 text-left text-xs font-medium theme-text-secondary uppercase">Time</th>
                         <th class="px-3 py-2 text-left text-xs font-medium theme-text-secondary uppercase">Hours Worked</th>
                         <th class="px-3 py-2 text-right text-xs font-medium theme-text-secondary uppercase">OT Hours</th>
-                        <th class="px-3 py-2 text-right text-xs font-medium theme-text-secondary uppercase">OT Amount</th>
                       </tr>
                     </thead>
                     <tbody class="theme-bg-primary divide-y divide-gray-200 dark:divide-gray-700">
@@ -172,9 +155,6 @@
                           <td class="px-3 py-2 text-sm text-right font-medium text-orange-600 dark:text-orange-400">
                             {formatTime(minutesToHours(work.overtimeMinutes))}
                           </td>
-                          <td class="px-3 py-2 text-sm text-right font-medium text-orange-600 dark:text-orange-400">
-                            {formatCurrency(work.overtimeAmount)}
-                          </td>
                         </tr>
                       {/each}
                     </tbody>
@@ -185,9 +165,6 @@
                         </td>
                         <td class="px-3 py-2 text-sm font-semibold text-orange-600 dark:text-orange-400 text-right">
                           {formatTime(minutesToHours(worker.overtimeMinutes))}
-                        </td>
-                        <td class="px-3 py-2 text-sm font-semibold text-orange-600 dark:text-orange-400 text-right">
-                          {formatCurrency(worker.overtimeAmount)}
                         </td>
                       </tr>
                     </tfoot>

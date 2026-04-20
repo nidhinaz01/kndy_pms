@@ -3,7 +3,7 @@
   import Button from '$lib/components/common/Button.svelte';
   import { X } from 'lucide-svelte';
   import { supabase } from '$lib/supabaseClient';
-  import { calculatePlannedHours, calculateBreakTimeInSlot, autoCalculateEndTime, getIndividualSkills, getSkillShort, generateTimeSlots, getEffectiveRowTimes, getCanonicalPlanWorkKey } from '$lib/utils/planWorkUtils';
+  import { calculatePlannedHours, calculateBreakTimeInSlot, autoCalculateEndTime, getIndividualSkills, getSkillShort, generateTimeSlots, getEffectiveRowTimes, getCanonicalPlanWorkKey, getWorkerSlotKey } from '$lib/utils/planWorkUtils';
   import { formatTime } from '$lib/utils/timeFormatUtils';
   import { checkTimeOverlap, checkTimeExcess, checkSkillMismatch } from '$lib/utils/planWorkValidation';
   import { loadWorkers, loadWorkContinuation, loadExistingPlans, loadShiftInfo, checkAlternativeSkillCombinations } from '$lib/services/planWorkService';
@@ -48,6 +48,28 @@
   let savedSelectedWorkers: { [skill: string]: SelectedWorker | null } = {}; // Fix 4: Save workers when going back
   let userHasSelectedFromTime = false; // Track if user has manually selected fromTime
 
+  function buildWorkerSlotMap(targetWork: any, mappingIndex: number): { [slotKey: string]: SelectedWorker | null } {
+    if (!targetWork?.skill_mappings || targetWork.skill_mappings.length === 0) {
+      return { [getWorkerSlotKey('GEN', 0)]: null };
+    }
+
+    let effectiveIndex = mappingIndex;
+    if (effectiveIndex < 0 && targetWork.skill_mappings.length === 1) {
+      effectiveIndex = 0;
+    }
+    if (effectiveIndex < 0 || effectiveIndex >= targetWork.skill_mappings.length) {
+      return {};
+    }
+
+    const selectedMapping = targetWork.skill_mappings[effectiveIndex];
+    const individualSkills = getIndividualSkills(selectedMapping);
+    const slots: { [slotKey: string]: SelectedWorker | null } = {};
+    individualSkills.forEach((skillShort: string, index: number) => {
+      slots[getWorkerSlotKey(skillShort, index)] = null;
+    });
+    return slots;
+  }
+
   // Watch for work changes
   // Use a key to track work changes and prevent unnecessary resets
   let previousWorkId: string | null = null;
@@ -78,7 +100,7 @@
       
       // Fix: Always clear ALL state first to prevent stale data from previous modal opens
       // Create a completely fresh object to ensure no references to old data
-      formData.selectedWorkers = {};
+      formData.selectedWorkers = buildWorkerSlotMap(work, -1);
       // Initialize dates from selectedDate if not already set
       if (!formData.fromDate) {
         formData.fromDate = selectedDate;
@@ -87,7 +109,7 @@
         formData.toDate = selectedDate;
       }
       // Force a reactive update by creating a new object
-      formData = { ...formData, selectedWorkers: {}, selectedTrainees: [], traineeDeviationReason: '', rowTimeOverrides: {} };
+      formData = { ...formData, selectedWorkers: buildWorkerSlotMap(work, -1), selectedTrainees: [], traineeDeviationReason: '', rowTimeOverrides: {} };
       filteredAvailableWorkers = [];
       savedSelectedWorkers = {};
       hasPrefilledWorkers = false;
@@ -145,6 +167,7 @@
             ...initialPlanWorkFormData,
             fromDate: savedFromDate,
             toDate: savedToDate,
+            selectedWorkers: buildWorkerSlotMap(work, -1),
             selectedTrainees: [],
             traineeDeviationReason: ''
           };
@@ -157,6 +180,7 @@
             toDate: savedToDate,
             fromTime: savedFromTime,
             toTime: savedToTime,
+            selectedWorkers: buildWorkerSlotMap(work, -1),
             selectedTrainees: [],
             traineeDeviationReason: ''
           };
@@ -172,6 +196,7 @@
         // Auto-select if only one skill mapping
         if (work?.skill_mappings && work.skill_mappings.length === 1) {
           formData.selectedSkillMappingIndex = 0;
+          formData.selectedWorkers = buildWorkerSlotMap(work, 0);
           previousSelectedSkillMappingIndex = 0;
         }
       }
@@ -373,8 +398,7 @@
       const individualSkills = getIndividualSkills(selectedMapping);
       
       // Map existing plans to the correct worker keys
-      // WorkerSelection uses keys like `${individualSkill}-${skillIndex}` for multiple skills
-      // or just `skillShort` for single skills
+      // WorkerSelection uses canonical keys `<skill>-<index>` for all rows.
       if (individualSkills.length > 1) {
         // Multiple skills - use format `${individualSkill}-${skillIndex}`
         // Track which indices have been used for each skill to handle duplicates
@@ -403,7 +427,7 @@
             if (unassignedIndex !== undefined) {
               // Use the skill name from individualSkills array
               const skillName = individualSkills[unassignedIndex];
-              const workerKey = `${skillName}-${unassignedIndex}`;
+              const workerKey = getWorkerSlotKey(skillName, unassignedIndex);
               selectedWorkers[workerKey] = {
                 emp_id: worker.emp_id || plan.worker_id,
                 emp_name: worker.emp_name || 'Unknown',
@@ -417,13 +441,13 @@
           }
         });
       } else {
-        // Single skill - use just the skill name as key
+        // Single skill still uses canonical `<skill>-0` key
         const skillShort = getSkillShort(selectedMapping);
         const firstPlan = mappingPlans[0];
         const worker = firstPlan?.hr_emp;
         
         if (worker) {
-          const workerKey = skillShort || selectedMapping.sc_name;
+          const workerKey = getWorkerSlotKey(skillShort || selectedMapping.sc_name || 'GEN', 0);
           selectedWorkers[workerKey] = {
             emp_id: worker.emp_id || firstPlan.worker_id,
             emp_name: worker.emp_name || 'Unknown',
@@ -432,13 +456,13 @@
         }
       }
     } else {
-      // Fallback: if no mapping selected, use sc_required as key
+      // Fallback: if no mapping selected, still store canonical slot keys
       mappingPlans.forEach((plan: any) => {
         const skillRequired = plan.sc_required || plan.skill_short;
         const worker = plan.hr_emp;
         
         if (skillRequired && worker) {
-          selectedWorkers[skillRequired] = {
+          selectedWorkers[getWorkerSlotKey(skillRequired, 0)] = {
             emp_id: worker.emp_id || plan.worker_id,
             emp_name: worker.emp_name || 'Unknown',
             skill_short: worker.skill_short || skillRequired
@@ -505,7 +529,7 @@
         const overrides: Record<string, RowTimeOverride> = {};
         for (const [key, sw] of Object.entries(selectedWorkers)) {
           if (!sw || !(sw as SelectedWorker).emp_id) continue;
-          const skillShort = key === 'general' ? 'GEN' : key.includes('-') ? key.split('-')[0] : key;
+          const skillShort = key.includes('-') ? key.split('-')[0] : key;
           const plan = mappingPlans.find((p: any) => {
             const wid = p.worker_id || p.hr_emp?.emp_id;
             const sc = p.sc_required || p.hr_emp?.skill_short;
@@ -554,7 +578,7 @@
   // Clear workers when switching skill mappings
   $: if (formData.selectedSkillMappingIndex !== previousSelectedSkillMappingIndex && previousSelectedSkillMappingIndex >= 0) {
     console.log('Clearing workers due to skill mapping change');
-    formData.selectedWorkers = {};
+    formData.selectedWorkers = buildWorkerSlotMap(work, formData.selectedSkillMappingIndex);
     formData.rowTimeOverrides = {};
     previousSelectedSkillMappingIndex = formData.selectedSkillMappingIndex;
   } else if (formData.selectedSkillMappingIndex >= 0) {
@@ -826,10 +850,14 @@
   function handleWorkerChange(event: Event, skillKey: string) {
     const target = event.target as HTMLSelectElement;
     const workerId = target.value;
+    const validSlotKeys = new Set([
+      ...Object.keys(buildWorkerSlotMap(work, formData.selectedSkillMappingIndex)),
+      skillKey
+    ]);
     
-    // Clean up null/undefined entries from selectedWorkers
+    // Clean up null/undefined entries and any stale keys from previous sessions.
     Object.keys(formData.selectedWorkers).forEach(key => {
-      if (!formData.selectedWorkers[key]) {
+      if (!formData.selectedWorkers[key] || !validSlotKeys.has(key)) {
         delete formData.selectedWorkers[key];
       }
     });
@@ -865,7 +893,7 @@
 
   function handleSkillMappingChange(index: number) {
     formData.selectedSkillMappingIndex = index;
-    formData.selectedWorkers = {};
+    formData.selectedWorkers = buildWorkerSlotMap(work, index);
     formData.rowTimeOverrides = {};
   }
 
@@ -974,19 +1002,24 @@
     // This prevents checking conflicts for workers from a previous work
     const currentWorkSkillKeys = new Set<string>();
     if (work?.skill_mappings && Array.isArray(work.skill_mappings) && work.skill_mappings.length > 0) {
-      work.skill_mappings.forEach((mapping: any, index: number) => {
-        const skillShort = mapping.sc_name || mapping.skill_short || mapping.sc_required;
-        if (skillShort) {
-          // Use the same key format as used in WorkerSelection component
-          const skillKey = `${index}_${skillShort}`;
-          currentWorkSkillKeys.add(skillKey);
-          // Also add just the skill short as a key (for fallback)
-          currentWorkSkillKeys.add(skillShort);
-        }
-      });
-    } else if (work?.is_added_work) {
-      // For non-standard works, use 'GEN' as the key
-      currentWorkSkillKeys.add('GEN');
+      let selectedMapping: any = null;
+      if (
+        formData.selectedSkillMappingIndex >= 0 &&
+        formData.selectedSkillMappingIndex < work.skill_mappings.length
+      ) {
+        selectedMapping = work.skill_mappings[formData.selectedSkillMappingIndex];
+      } else if (work.skill_mappings.length === 1) {
+        selectedMapping = work.skill_mappings[0];
+      }
+      if (selectedMapping) {
+        const individualSkills = getIndividualSkills(selectedMapping);
+        individualSkills.forEach((skillShort: string, index: number) => {
+          currentWorkSkillKeys.add(getWorkerSlotKey(skillShort, index));
+        });
+      }
+    } else {
+      // No skill mapping path still uses canonical key.
+      currentWorkSkillKeys.add(getWorkerSlotKey('GEN', 0));
     }
     
     // Only check conflicts for workers that are explicitly selected (not null/undefined)
@@ -995,10 +1028,7 @@
     Object.entries(currentSelectedWorkers).forEach(([key, worker]) => {
       if (worker && worker.emp_id && typeof worker === 'object') {
         // Verify this worker is selected for a skill that belongs to the current work
-        const isCurrentWorkSkill = currentWorkSkillKeys.has(key) || 
-                                   currentWorkSkillKeys.has(key.split('_')[1]) || // Check skill part after index
-                                   (currentWorkSkillKeys.size === 0 && key === 'GEN') ||
-                                   key === 'general'; // WorkerSelection fallback key for non–skill-mapped work
+        const isCurrentWorkSkill = currentWorkSkillKeys.has(key);
         
         if (isCurrentWorkSkill) {
           // Create a fresh copy of the worker object to avoid any reference issues

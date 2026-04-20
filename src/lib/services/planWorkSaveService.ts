@@ -1,31 +1,8 @@
 import { supabase } from '$lib/supabaseClient';
 import { createWorkPlanning } from '$lib/api/production';
-import { getIndividualSkills, getEffectiveRowTimes } from '$lib/utils/planWorkUtils';
+import { getIndividualSkills, getEffectiveRowTimes, getWorkerSlotKey } from '$lib/utils/planWorkUtils';
 import { getCurrentUsername, getCurrentTimestamp } from '$lib/utils/userUtils';
 import type { PlanWorkFormData, WorkContinuation, SelectedWorker } from '$lib/types/planWork';
-
-/**
- * Works without skill_mappings store the chosen worker under key `general` (WorkerSelection).
- * Never use Object.values()[0] — leftover keys from another slot can reorder and save the wrong emp_id.
- */
-function resolveWorkerForNoSkillMappings(formData: PlanWorkFormData): SelectedWorker | null {
-  const sw = formData.selectedWorkers;
-  const general = sw['general'];
-  if (general && (general as SelectedWorker).emp_id) {
-    return general as SelectedWorker;
-  }
-
-  const entries = Object.entries(sw).filter(
-    ([, v]) => v != null && typeof v === 'object' && String((v as SelectedWorker).emp_id || '').length > 0
-  ) as [string, SelectedWorker][];
-
-  if (entries.length === 0) return null;
-  if (entries.length === 1) return entries[0][1];
-
-  throw new Error(
-    'Multiple worker slots are set for this work. Close the Plan Work modal, reopen it, and select one worker again.'
-  );
-}
 
 export async function saveWorkPlanning(
   work: any,
@@ -83,8 +60,8 @@ export async function saveWorkPlanning(
     const wsmId = (selectedSkillMapping as any)?.wsm_id || null;
     
     individualSkills.forEach((skillShort, index) => {
-      const workerKey = `${skillShort}-${index}`;
-      const worker = formData.selectedWorkers[workerKey] || formData.selectedWorkers[skillShort];
+      const workerKey = getWorkerSlotKey(skillShort, index);
+      const worker = formData.selectedWorkers[workerKey];
       
       if (worker) {
         const workerId = (worker as any).emp_id;
@@ -138,12 +115,12 @@ export async function saveWorkPlanning(
       }
     });
   } else {
-    const worker = resolveWorkerForNoSkillMappings(formData);
+    const worker = formData.selectedWorkers[getWorkerSlotKey('GEN', 0)] || null;
     if (worker) {
       const workerId = (worker as any).emp_id;
       const matchKey = `GEN-${workerId}`;
       const existingPlan = existingPlansMap.get(matchKey);
-      const eff = getEffectiveRowTimes('general', formData);
+      const eff = getEffectiveRowTimes(getWorkerSlotKey('GEN', 0), formData);
       
       const planData = {
         stage_code: stageCode,
@@ -185,6 +162,24 @@ export async function saveWorkPlanning(
           createWorkPlanning(planData, currentUser)
         );
       }
+    }
+  }
+
+  if (requiredSkills.length > 0) {
+    const selectedSkillMapping = work.skill_mappings[formData.selectedSkillMappingIndex >= 0 ? formData.selectedSkillMappingIndex : 0];
+    const individualSkills = getIndividualSkills(selectedSkillMapping);
+    const missingSlots = individualSkills.flatMap((skillShort, index) => {
+      const slotKey = getWorkerSlotKey(skillShort, index);
+      const slotWorker = formData.selectedWorkers[slotKey];
+      return !slotWorker || !slotWorker.emp_id ? [slotKey] : [];
+    });
+    if (missingSlots.length > 0) {
+      throw new Error(`Missing worker assignment for slot(s): ${missingSlots.join(', ')}`);
+    }
+  } else {
+    const generalWorker = formData.selectedWorkers[getWorkerSlotKey('GEN', 0)];
+    if (!generalWorker || !generalWorker.emp_id) {
+      throw new Error(`Missing worker assignment for slot ${getWorkerSlotKey('GEN', 0)}`);
     }
   }
 

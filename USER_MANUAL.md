@@ -27,7 +27,7 @@
 
 ## Introduction
 
-The Production Management System is a comprehensive web-based application designed to manage production workflows, employee data, work orders, planning, reporting, and operational reports (including month-to-date production status, lost time, deviation, C-Off, overtime, and HR attendance pivot reports) for manufacturing operations. This manual provides detailed instructions for using each module and feature of the system.
+The Production Management System is a comprehensive web-based application designed to manage production workflows, employee data, work orders, planning, reporting, and operational reports (including month-to-date production status, lost time, deviation, C-Off, overtime, non-standard overtime, and HR attendance pivot reports) for manufacturing operations. This manual provides detailed instructions for using each module and feature of the system.
 
 ### System Requirements
 
@@ -3627,9 +3627,10 @@ The **Reports** area provides read-only operational reports. Your administrator 
 - **Deviation Report** — planning and reporting deviations overlapping a date range  
 - **C-Off Report** (`/reports/hr/c-off-report`) — planning and reporting manpower rows with C-Off, where the attendance window overlaps the range  
 - **Overtime Report** (`/reports/hr/ot-report`) — work reporting rows with overtime minutes &gt; 0 and a worker name, where the report window overlaps the range  
+- **Non-Standard Overtime Report** (`/reports/hr/non-std-ot-report`) — overtime rows where work code does **not** start with `P`, `M`, or `C`, with worker name and overlapping report window  
 - **Attendance Report** (`/reports/hr/attendance-report`) — **reporting** manpower in a **pivot** table: one row per shift / stage / employee / skill, with a **letter per calendar day** (**P** = present, **A(I)** = absent informed, **A(U)** = absent uninformed) for days covered by the reporting window  
 
-**Shared date rules** (Lost Time, Deviation, C-Off Report, Overtime Report, **Attendance Report**): **From** and **To** dates must both be set; **from** ≤ **to**; **to** cannot be after today; the range cannot exceed **93 days** (about three months). Defaults are often the first day of the current month through today. **Daily Production Status** uses a single **As of date** (month-to-date from the 1st of that month) instead.
+**Shared date rules** (Lost Time, Deviation, C-Off Report, Overtime Report, Non-Standard Overtime Report, **Attendance Report**): **From** and **To** dates must both be set; **from** ≤ **to**; **to** cannot be after today; the range cannot exceed **93 days** (about three months). Defaults are often the first day of the current month through today. **Daily Production Status** uses a single **As of date** (month-to-date from the 1st of that month) instead.
 
 ### Daily Production Status
 
@@ -3774,6 +3775,32 @@ Lists **work reporting** detail whose **report from/to window overlaps** the sel
 **Areas Affected**:
 - None (read-only)
 
+<span id="non-standard-overtime-report"></span>
+
+### Non-Standard Overtime Report
+
+**Path**: `/reports/hr/non-std-ot-report`
+
+**Description**:  
+A focused overtime report for **non-standard work**. It includes work reporting rows whose report window overlaps your date range, have **overtime minutes &gt; 0**, have a **worker name**, and whose **work code does not start with `P`, `M`, or `C`**.
+
+**Features**:
+- Same **From** / **To** date validation as other range reports (max ~93 days, **to** ≤ today).
+- Includes OT time and amount with core work context (shift, stage, work order, work code, work name/details, worker, from/to date/time).
+- **Search table** filter and **Export Excel** after generation.
+
+**How to Use**:
+
+1. Open **Reports > Non-Standard Overtime Report** (or `/reports/hr/non-std-ot-report`).
+2. Set **From** and **To** dates.
+3. Click **Generate Report**; optionally use search and **Export Excel**.
+
+**Prerequisites**:
+- Menu access; reporting rows in range with OT and worker name; work code not starting with P/M/C.
+
+**Areas Affected**:
+- None (read-only)
+
 <span id="attendance-report"></span>
 
 ### Attendance Report
@@ -3810,7 +3837,7 @@ Many modules support exporting data to Excel or PDF:
 
 - **Excel Export**: Click "Export to Excel" button to download data as Excel file
 - **PDF Export**: Click "Export to PDF" button to generate PDF document
-- **Reports**: **Daily Production Status**, **Lost Time Report**, **Deviation Report**, **C-Off Report**, **Overtime Report**, and **Attendance Report** each offer **Export Excel** after you generate the on-screen report (where rows exist)
+- **Reports**: **Daily Production Status**, **Lost Time Report**, **Deviation Report**, **C-Off Report**, **Overtime Report**, **Non-Standard Overtime Report**, and **Attendance Report** each offer **Export Excel** after you generate the on-screen report (where rows exist)
 
 ### Search and Filter
 
@@ -3986,6 +4013,11 @@ This section provides quick reference for the most common tasks. For detailed in
 2. From / To dates (same rules)
 3. Generate Report → Export Excel if needed
 
+**Non-Standard Overtime Report**:
+1. Reports > Non-Standard Overtime Report (`/reports/hr/non-std-ot-report`)
+2. From / To dates (max ~3 months, to ≤ today)
+3. Generate Report → optional search → Export Excel if needed
+
 **Attendance Report**:
 1. Reports > Attendance Report (`/reports/hr/attendance-report`)
 2. From / To dates (max ~3 months, to ≤ today)
@@ -4019,6 +4051,7 @@ This section provides quick reference for the most common tasks. For detailed in
 | Deviation Report | Reports > Deviation Report | `/reports/production/deviation-report` |
 | C-Off Report | Reports > C-Off Report | `/reports/hr/c-off-report` |
 | Overtime Report | Reports > Overtime Report | `/reports/hr/ot-report` |
+| Non-Standard Overtime Report | Reports > Non-Standard Overtime Report | `/reports/hr/non-std-ot-report` |
 | Attendance Report | Reports > Attendance Report | `/reports/hr/attendance-report` |
 
 ### Status Reference
@@ -4332,6 +4365,9 @@ A: **Reports > C-Off Report** lists planning and reporting manpower rows whose a
 
 **Q: What is the Overtime Report?**  
 A: **Reports > Overtime Report** lists work reporting lines with **OT minutes &gt; 0** and a **worker name**, where the report window overlaps your date range. See [Overtime Report](#overtime-report).
+
+**Q: What is the Non-Standard Overtime Report?**  
+A: **Reports > Non-Standard Overtime Report** applies the same OT logic as Overtime Report, but only includes rows where **work code does not start with P/M/C**. Useful for isolating non-standard work OT. See [Non-Standard Overtime Report](#non-standard-overtime-report).
 
 **Q: What is the Attendance Report (HR)?**  
 A: **Reports > Attendance Report** builds a **date-range pivot** over **reporting** manpower: each row is shift / stage / employee / skill; each date column shows **P**, **A(I)**, or **A(U)** for that day. Same **From** / **To** limits as other ~93-day HR reports. See [Attendance Report](#attendance-report).
@@ -4751,4 +4787,15 @@ The project includes **SQL maintenance scripts** in the source tree (for **DBAs*
 **Document Version**: 1.1  
 **Last Updated**: 19 April 2026  
 **System Version**: Production Management System v1.0
+
+
+
+
+
+
+
+
+
+
+
 

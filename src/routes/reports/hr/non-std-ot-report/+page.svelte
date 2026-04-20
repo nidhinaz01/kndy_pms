@@ -11,8 +11,8 @@
     validateReportDateRange,
     formatDdMmmYyyy
   } from '$lib/utils/reportDateRange';
-  import { loadOtReport, type OtReportRow } from './services/otReportService';
-  import { exportOtReportExcel } from './utils/exportOtReportExcel';
+  import { loadNonStdOtReport, type NonStdOtReportRow } from './services/nonStdOtReportService';
+  import { exportNonStdOtReportExcel } from './utils/exportNonStdOtReportExcel';
   import { reportRowMatchesSearch } from '$lib/utils/reportTableSearch';
 
   let menus: any[] = [];
@@ -20,7 +20,7 @@
 
   let fromDate = firstDayOfMonthIso();
   let toDate = todayIsoLocal();
-  let rows: OtReportRow[] = [];
+  let rows: NonStdOtReportRow[] = [];
   let loading = false;
   let errorMessage = '';
   let lastRunSucceeded = false;
@@ -52,7 +52,7 @@
     }
     loading = true;
     try {
-      rows = await loadOtReport(v.fromDate!, v.toDate!);
+      rows = await loadNonStdOtReport(v.fromDate!, v.toDate!);
       lastRunSucceeded = true;
     } catch (e) {
       console.error(e);
@@ -70,7 +70,7 @@
       return;
     }
     try {
-      exportOtReportExcel(rows, v.fromDate!, v.toDate!);
+      exportNonStdOtReportExcel(rows, v.fromDate!, v.toDate!);
     } catch (e) {
       console.error(e);
       alert('Export failed. Please try again.');
@@ -89,7 +89,7 @@
 </script>
 
 <svelte:head>
-  <title>PMS - Overtime Report</title>
+  <title>PMS - Non-Standard Overtime Report</title>
 </svelte:head>
 
 <div class="flex min-h-screen flex-col theme-bg-secondary transition-colors duration-200">
@@ -107,9 +107,9 @@
           </svg>
         </button>
         <div>
-          <h1 class="text-xl font-semibold theme-text-primary">Overtime Report</h1>
+          <h1 class="text-xl font-semibold theme-text-primary">Non-Standard Overtime Report</h1>
           <p class="text-sm theme-text-secondary">
-            Work reports with OT minutes (window overlaps range; max ~3 months)
+            OT rows where work code does not start with P/M/C (window overlaps range; max ~3 months)
           </p>
         </div>
       </div>
@@ -170,7 +170,8 @@
     {#if !rows.length && !loading && !errorMessage && !lastRunSucceeded}
       <p class="theme-text-secondary mb-4 text-sm">
         Choose dates and click <strong>Generate Report</strong>. Includes work reporting rows whose from/to dates overlap
-        the range and have <strong>overtime minutes &gt; 0</strong>. Only rows with a <strong>worker name</strong> are shown.
+        the range, have <strong>overtime minutes &gt; 0</strong>, have a <strong>worker name</strong>, and whose
+        <strong> work code does not start with P/M/C</strong>.
       </p>
     {/if}
 
@@ -197,7 +198,7 @@
         <div
           class="min-w-0 overflow-x-auto rounded-md border theme-border [-webkit-overflow-scrolling:touch]"
           role="region"
-          aria-label="Overtime report table"
+          aria-label="Non-standard overtime report table"
         >
           <table class="w-max min-w-full border-collapse text-xs">
             <thead>

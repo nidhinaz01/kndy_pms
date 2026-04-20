@@ -356,6 +356,21 @@ export async function checkWorkerConflicts(
       return { hasConflict: false, hasReportConflict: false, message: '' };
     }
 
+    const workerNameById = new Map<string, string>();
+    const { data: workerRows, error: workerRowsError } = await supabase
+      .from('hr_emp')
+      .select('emp_id, emp_name')
+      .in('emp_id', uniqueWorkerIds);
+    if (workerRowsError) {
+      console.warn('Error loading worker names for conflict messages:', workerRowsError);
+    } else {
+      (workerRows || []).forEach((row: any) => {
+        if (row.emp_id) {
+          workerNameById.set(row.emp_id, row.emp_name || 'Unknown Worker');
+        }
+      });
+    }
+
     // Format dates to YYYY-MM-DD for comparison
     const fromDateStr = typeof fromDate === 'string' ? fromDate.split('T')[0] : fromDate;
     
@@ -431,6 +446,7 @@ export async function checkWorkerConflicts(
     // If there are report conflicts, BLOCK (cannot proceed)
     if (workersWithReportConflicts.length > 0) {
       const conflictDetails = workersWithReportConflicts.map(({ workerId, reportConflicts }) => {
+        const workerName = workerNameById.get(workerId) || 'Unknown Worker';
         const conflictList = reportConflicts.map((conflict: any) => {
           const conflictFromTime = new Date(`${conflict.from_date}T${conflict.from_time}`).toLocaleString('en-GB', { 
             day: '2-digit', month: 'short', year: '2-digit', hour: '2-digit', minute: '2-digit' 
@@ -441,7 +457,7 @@ export async function checkWorkerConflicts(
           return `  • ${conflictFromTime} - ${conflictToTime} [Reported]`;
         }).join('\n');
         
-        return `Worker ${workerId}:\n${conflictList}`;
+        return `Worker ${workerName} (${workerId}):\n${conflictList}`;
       }).join('\n\n');
 
       const currentFromTime = fromDateTime.toLocaleString('en-GB', { 
@@ -459,6 +475,7 @@ export async function checkWorkerConflicts(
     // If there are only plan conflicts, WARN (can proceed with confirmation)
     if (workersWithPlanConflicts.length > 0) {
       const conflictDetails = workersWithPlanConflicts.map(({ workerId, planConflicts }) => {
+        const workerName = workerNameById.get(workerId) || 'Unknown Worker';
         const conflictList = planConflicts.map((conflict: any) => {
           const conflictFromTime = new Date(`${conflict.from_date}T${conflict.from_time}`).toLocaleString('en-GB', { 
             day: '2-digit', month: 'short', year: '2-digit', hour: '2-digit', minute: '2-digit' 
@@ -469,7 +486,7 @@ export async function checkWorkerConflicts(
           return `  • ${conflictFromTime} - ${conflictToTime} [Planned]`;
         }).join('\n');
         
-        return `Worker ${workerId}:\n${conflictList}`;
+        return `Worker ${workerName} (${workerId}):\n${conflictList}`;
       }).join('\n\n');
 
       const currentFromTime = fromDateTime.toLocaleString('en-GB', { 

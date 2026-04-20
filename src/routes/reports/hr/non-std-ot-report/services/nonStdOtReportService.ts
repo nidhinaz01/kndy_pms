@@ -1,6 +1,6 @@
 /**
- * Overtime report: work reporting rows with overtime in the selected window (max ~3 months).
- * Overlap: report from_date / to_date vs range; worker must have a name (same idea as Lost Time report).
+ * Non-standard overtime report:
+ * Same as OT report, but includes only work codes that do NOT start with P/M/C.
  */
 
 import { supabase } from '$lib/supabaseClient';
@@ -21,7 +21,7 @@ const PLANNING_EMBED = `
           std_work_type_details ( derived_sw_code, sw_code, type_description, std_work_details ( sw_name ) )
 `;
 
-export interface OtReportRow {
+export interface NonStdOtReportRow {
   woNo: string | null;
   pwoNo: string | null;
   customerName: string | null;
@@ -67,6 +67,13 @@ function workCodeFromPlan(p: any): string | null {
   return v ? String(v) : null;
 }
 
+function isNonStandardCode(code: string | null): boolean {
+  const normalized = (code || '').trim().toUpperCase();
+  if (!normalized) return false;
+  const first = normalized.charAt(0);
+  return first !== 'P' && first !== 'M' && first !== 'C';
+}
+
 function workNameDetailsFromPlan(p: any): string | null {
   const swt = p?.std_work_type_details;
   if (!swt) {
@@ -80,11 +87,11 @@ function workNameDetailsFromPlan(p: any): string | null {
   return swt.sw_code ? String(swt.sw_code) : workCodeFromPlan(p);
 }
 
-export async function loadOtReport(fromDate: string, toDate: string): Promise<OtReportRow[]> {
+export async function loadNonStdOtReport(fromDate: string, toDate: string): Promise<NonStdOtReportRow[]> {
   const fromD = fromDate.split('T')[0];
   const toD = toDate.split('T')[0];
   const raw: Array<{
-    row: OtReportRow;
+    row: NonStdOtReportRow;
     sortFromDate: string;
     sortFromTime: string;
     sortToDate: string;
@@ -139,6 +146,9 @@ export async function loadOtReport(fromDate: string, toDate: string): Promise<Ot
       if (!isoRangesOverlap(fromD, toD, row.from_date, row.to_date)) continue;
 
       const p = row.prdn_work_planning;
+      const workCode = workCodeFromPlan(p);
+      if (!isNonStandardCode(workCode)) continue;
+
       const wo = pickWo(p ? (Array.isArray(p.prdn_wo_details) ? p.prdn_wo_details[0] : p.prdn_wo_details) : null);
       const emp = pickEmp(Array.isArray(row.hr_emp) ? row.hr_emp[0] : row.hr_emp);
       const workerName = emp.workerName?.trim() || '';
@@ -157,7 +167,7 @@ export async function loadOtReport(fromDate: string, toDate: string): Promise<Ot
           woNo: wo.woNo,
           pwoNo: wo.pwoNo,
           customerName: wo.customerName,
-          workCode: workCodeFromPlan(p),
+          workCode,
           workNameDetails: workNameDetailsFromPlan(p),
           stageCode: p?.stage_code ?? null,
           shiftCode: p?.shift_code ?? null,

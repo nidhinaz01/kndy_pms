@@ -27,16 +27,101 @@ interface WorkReport {
   worker_id?: string | null;
 }
 
+interface ReportPdfOptions {
+  compact?: boolean;
+}
+
 function formatDateForSummary(dateStr: string): string {
   const date = new Date(dateStr);
   return date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' });
 }
 
-export function generateWorksReportPDF(
+function generateCompactWorksReportPDF(
   worksReportData: WorkReport[],
   stageCode: string,
   reportingDate: string
 ): jsPDF {
+  const doc = new jsPDF('l', 'mm', 'a4');
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const margin = 10;
+  const rowHeight = 7;
+  const maxY = pageHeight - margin;
+  let y = 16;
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(13);
+  doc.text('Works Report', pageWidth / 2, y, { align: 'center' });
+  y += 7;
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(10);
+  doc.text(`Stage: ${stageCode}`, margin, y);
+  doc.text(`Date: ${formatDateForSummary(reportingDate)}`, pageWidth - margin, y, { align: 'right' });
+  y += 8;
+
+  const headers = ['WO', 'Work Code', 'Worker', 'Hours', 'Total', 'Status'];
+  const widths = [28, 44, 58, 22, 24, 34];
+  const drawHeader = () => {
+    let x = margin;
+    doc.setFont('helvetica', 'bold');
+    doc.setFillColor(220, 220, 220);
+    doc.rect(margin, y, widths.reduce((a, b) => a + b, 0), rowHeight + 1, 'F');
+    headers.forEach((h, i) => {
+      doc.text(h, x + 2, y + 5);
+      x += widths[i];
+    });
+    y += rowHeight + 1;
+    doc.setFont('helvetica', 'normal');
+  };
+
+  drawHeader();
+
+  for (const report of worksReportData || []) {
+    if (y + rowHeight > maxY) {
+      doc.addPage();
+      y = 16;
+      drawHeader();
+    }
+    const plan = report.prdn_work_planning;
+    const wo = plan?.prdn_wo_details?.wo_no || 'N/A';
+    const code =
+      plan?.other_work_code ||
+      plan?.std_work_type_details?.derived_sw_code ||
+      plan?.std_work_type_details?.sw_code ||
+      'N/A';
+    const worker = plan?.hr_emp?.emp_name || report.worker_id || 'N/A';
+    const hours = formatTime(report.hours_worked_today || 0);
+    const total = formatTime((report.hours_worked_till_date || 0) + (report.hours_worked_today || 0));
+    const status =
+      report.completion_status === 'C'
+        ? 'Completed'
+        : report.completion_status === 'NC'
+          ? 'Not Completed'
+          : 'Unknown';
+
+    const values = [wo, code, worker, hours, total, status];
+    let x = margin;
+    values.forEach((v, i) => {
+      const clipped = doc.splitTextToSize(String(v), widths[i] - 3)[0] || '';
+      doc.text(clipped, x + 1.5, y + 5);
+      x += widths[i];
+    });
+    y += rowHeight;
+  }
+
+  return doc;
+}
+
+export function generateWorksReportPDF(
+  worksReportData: WorkReport[],
+  stageCode: string,
+  reportingDate: string,
+  options: ReportPdfOptions = {}
+): jsPDF {
+  if (options.compact) {
+    return generateCompactWorksReportPDF(worksReportData, stageCode, reportingDate);
+  }
   // Use A3 landscape for wider format
   const doc = new jsPDF('l', 'mm', 'a3');
   const pageWidth = doc.internal.pageSize.getWidth();

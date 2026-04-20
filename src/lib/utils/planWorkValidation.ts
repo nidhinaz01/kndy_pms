@@ -102,7 +102,11 @@ export function checkTimeOverlap(
 
     if (overlappingPlans.length > 0) {
       const workerNames = overlappingPlans
-        .map(plan => plan.worker_id || 'Unknown')
+        .map((plan) => {
+          const workerId = plan.worker_id || plan.hr_emp?.emp_id || 'Unknown';
+          const workerName = plan.hr_emp?.emp_name || 'Unknown Worker';
+          return `${workerName} (${workerId})`;
+        })
         .filter(Boolean)
         .join(', ');
       

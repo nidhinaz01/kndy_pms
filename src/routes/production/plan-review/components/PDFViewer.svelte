@@ -3,6 +3,7 @@
 
   export let pdfBlob: Blob | null = null;
   export let isLoading: boolean = false;
+  export let errorMessage: string = '';
   /** Suggested filename for Download link (mobile); sanitized by caller */
   export let downloadFileName: string = 'document.pdf';
 
@@ -43,6 +44,13 @@
       <div class="text-center">
         <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
         <p class="theme-text-secondary">Generating PDF...</p>
+      </div>
+    </div>
+  {:else if errorMessage}
+    <div class="flex items-center justify-center h-full px-6" style="min-height: min(560px, 65vh);">
+      <div class="text-center max-w-md">
+        <p class="text-red-600 dark:text-red-400 font-semibold mb-2">PDF generation failed</p>
+        <p class="theme-text-secondary text-sm">{errorMessage}</p>
       </div>
     </div>
   {:else if pdfUrl}
