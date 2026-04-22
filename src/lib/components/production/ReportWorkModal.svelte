@@ -322,7 +322,8 @@
       formData.fromTime,
       formData.toDate,
       formData.toTime,
-      plannedWork?.reporting_id // Exclude current report if editing
+      plannedWork?.reporting_id, // Exclude current report if editing
+      plannedWork?.stage_code
     );
     
     console.log('🔍 ReportWorkModal.handleSave: Conflict result:', conflictResult);

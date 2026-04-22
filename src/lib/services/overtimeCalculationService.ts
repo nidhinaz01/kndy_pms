@@ -127,6 +127,7 @@ function intersectionWallMinutes(startA: number, endA: number, startB: number, e
 type ReportingManpowerRow = {
   emp_id: string;
   attendance_status?: string | null;
+  ot_hours?: number | string | null;
   reporting_from_date?: string | null;
   reporting_to_date?: string | null;
   from_time?: string | null;
@@ -137,6 +138,43 @@ type ReportingManpowerRow = {
   c_off_to_date?: string | null;
   c_off_to_time?: string | null;
 };
+
+function distributeDeclaredOtMinutes(
+  reports: any[],
+  declaredOtMinutes: number
+): Array<{ report: any; overtimeMinutes: number }> {
+  if (!reports?.length || declaredOtMinutes <= 0) return [];
+
+  const workedMinutesByReport = reports.map((report) => {
+    if (report.hours_worked_today != null && report.hours_worked_today !== '') {
+      const h = Number(report.hours_worked_today);
+      return Number.isFinite(h) && h > 0 ? Math.round(h * 60) : 0;
+    }
+    const from = timeToMinutes(String(report.from_time || ''));
+    let to = timeToMinutes(String(report.to_time || ''));
+    if (to < from) to += 24 * 60;
+    return Math.max(0, to - from);
+  });
+
+  const weightedTotal = workedMinutesByReport.reduce((sum, m) => sum + m, 0);
+  const weights = weightedTotal > 0 ? workedMinutesByReport : reports.map(() => 1);
+  const normalizer = weights.reduce((sum, w) => sum + w, 0);
+
+  let allocated = 0;
+  return reports.map((report, idx) => {
+    const isLast = idx === reports.length - 1;
+    let minutes = 0;
+    if (isLast) {
+      minutes = Math.max(0, declaredOtMinutes - allocated);
+    } else {
+      minutes = Math.round((declaredOtMinutes * weights[idx]) / normalizer);
+      const remaining = declaredOtMinutes - allocated;
+      minutes = Math.max(0, Math.min(minutes, remaining));
+    }
+    allocated += minutes;
+    return { report, overtimeMinutes: minutes };
+  });
+}
 
 /**
  * Calculate overtime for workers in a stage on a given date.
@@ -290,7 +328,7 @@ export async function calculateOvertime(
       const { data: mpRows, error: mpErr } = await supabase
         .from('prdn_reporting_manpower')
         .select(
-          'emp_id, attendance_status, reporting_from_date, from_time, reporting_to_date, to_time, c_off_value, c_off_from_date, c_off_from_time, c_off_to_date, c_off_to_time'
+          'emp_id, attendance_status, ot_hours, reporting_from_date, from_time, reporting_to_date, to_time, c_off_value, c_off_from_date, c_off_from_time, c_off_to_date, c_off_to_time'
         )
         .eq('stage_code', stageCode)
         .eq('shift_code', shiftCode)
@@ -326,6 +364,9 @@ export async function calculateOvertime(
       const sortedReports = [...workerReports].sort((a, b) => {
         return timeToMinutes(a.from_time) - timeToMinutes(b.from_time);
       });
+      const mp = manpowerByEmp.get(workerId);
+      const declaredOtHours = mp?.ot_hours != null && mp.ot_hours !== '' ? Number(mp.ot_hours) : 0;
+      const declaredOtMinutes = Number.isFinite(declaredOtHours) && declaredOtHours > 0 ? Math.round(declaredOtHours * 60) : 0;
 
       let totalWorkedMinutes = 0;
       sortedReports.forEach((report: any) => {
@@ -361,7 +402,6 @@ export async function calculateOvertime(
       let otAccrualWindowMinutes: number | undefined;
       let availableWorkMinutesDisplay = availableWorkMinutes;
 
-      const mp = manpowerByEmp.get(workerId);
       /** Present worker with a parsable attendance wall window — OT is derived from this, not legacy shift totals. */
       let reportingRulesApply = false;
       let reportingOtMinutesAtLeastOne = false;
@@ -469,7 +509,32 @@ export async function calculateOvertime(
         }
       }
 
-      if (!reportingOtMinutesAtLeastOne) {
+      if (declaredOtMinutes > 0) {
+        overtimeWorks = [];
+        const declaredDistribution = distributeDeclaredOtMinutes(sortedReports, declaredOtMinutes);
+        for (const item of declaredDistribution) {
+          if (item.overtimeMinutes <= 0) continue;
+          const report = item.report;
+          const workCode =
+            report.prdn_work_planning?.derived_sw_code ||
+            report.prdn_work_planning?.other_work_code ||
+            'N/A';
+          const workName =
+            report.prdn_work_planning?.std_work_type_details?.std_work_details?.sw_name || 'N/A';
+          overtimeWorks.push({
+            reportingId: report.id,
+            planningId: report.planning_id,
+            workCode,
+            workName,
+            fromTime: report.from_time,
+            toTime: report.to_time,
+            hoursWorkedToday: report.hours_worked_today || 0,
+            overtimeMinutes: item.overtimeMinutes,
+            overtimeAmount: 0
+          });
+        }
+        overtimeMinutes = overtimeWorks.reduce((s, w) => s + w.overtimeMinutes, 0);
+      } else if (!reportingOtMinutesAtLeastOne) {
         if (reportingRulesApply) {
           // Valid attendance on reporting manpower: OT only inside the wall OT window; do not fall back to shift-net legacy.
           continue;

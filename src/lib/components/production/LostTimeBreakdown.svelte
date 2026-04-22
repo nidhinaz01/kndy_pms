@@ -337,10 +337,6 @@
           />
         </div>
         
-        <div class="w-20 text-sm text-orange-900 dark:text-orange-100 font-medium">
-          ₹{item.cost.toFixed(2)}
-        </div>
-        
         <button
           type="button"
           on:click={() => removeBreakdownItem(item.id)}
@@ -359,27 +355,11 @@
   {/if}
 
   {#if breakdownItems.length > 0}
-    <div class="border-t border-orange-200 dark:border-orange-700 pt-3 space-y-3">
-      <!-- Per-worker totals -->
-      {#if workers.length > 0}
-        <div class="space-y-2">
-          <div class="text-sm font-medium text-orange-800 dark:text-orange-200">Per Worker Lost Time Amount:</div>
-          {#each workers as worker}
-            {@const workerTotal = breakdownItems.reduce((sum, item) => sum + (item.workerCosts?.[worker.emp_id] || 0), 0)}
-            <div class="flex justify-between text-sm text-orange-900 dark:text-orange-100 bg-orange-100 dark:bg-orange-900/30 px-3 py-2 rounded">
-              <span class="font-medium">{worker.emp_name}:</span>
-              <span class="font-semibold">₹{workerTotal.toFixed(2)}</span>
-            </div>
-          {/each}
-        </div>
-      {/if}
-      
-      <!-- Total -->
-      <div class="flex justify-between text-sm font-medium pt-2 border-t border-orange-200 dark:border-orange-700">
+    <div class="border-t border-orange-200 dark:border-orange-700 pt-3">
+      <div class="flex justify-between text-sm font-medium">
         <span class="text-orange-800 dark:text-orange-200 font-semibold">Total Allocated:</span>
         <span class="text-orange-900 dark:text-orange-100 font-semibold">
-          {breakdownItems.reduce((sum, item) => sum + item.minutes, 0)} minutes | 
-          ₹{breakdownItems.reduce((sum, item) => sum + item.cost, 0).toFixed(2)}
+          {breakdownItems.reduce((sum, item) => sum + item.minutes, 0)} minutes
         </span>
       </div>
     </div>

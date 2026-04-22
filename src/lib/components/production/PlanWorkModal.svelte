@@ -119,10 +119,10 @@
       
       console.log('🔍 After work change, formData.fromTime:', formData.fromTime, 'formData.fromDate:', formData.fromDate, 'userHasSelectedFromTime:', userHasSelectedFromTime);
       
-      // Debug: Verify selectedWorkers is empty
-      const workerCount = Object.keys(formData.selectedWorkers).length;
-      if (workerCount > 0) {
-        console.warn(`⚠️ PlanWorkModal: selectedWorkers still has ${workerCount} entries after clearing!`, formData.selectedWorkers);
+      // Debug: only warn if actual workers remain (slot placeholders are expected).
+      const selectedWorkerCount = Object.values(formData.selectedWorkers).filter(Boolean).length;
+      if (selectedWorkerCount > 0) {
+        console.warn(`⚠️ PlanWorkModal: selectedWorkers still has ${selectedWorkerCount} selected worker(s) after clearing!`, formData.selectedWorkers);
       } else {
         console.log('✅ PlanWorkModal: selectedWorkers cleared successfully');
       }
@@ -1086,7 +1086,8 @@
 
     const result = await checkWorkerConflicts(
       assignments,
-      excludePlanIds.length > 0 ? excludePlanIds : undefined
+      excludePlanIds.length > 0 ? excludePlanIds : undefined,
+      stageCode
     );
 
     if (result.hasConflict) {

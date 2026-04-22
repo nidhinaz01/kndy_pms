@@ -101,13 +101,6 @@
               <span class="text-orange-600 dark:text-orange-400">Reason will be assigned in next step</span>
             {/if}
           </div>
-          <div class="w-20 text-sm text-gray-900 dark:text-gray-100">
-            {#if (formData.currentStage ?? 0) >= 3}
-              ₹{chunk.cost.toFixed(2)}
-            {:else}
-              <span class="text-orange-600 dark:text-orange-400">TBD</span>
-            {/if}
-          </div>
           <button
             type="button"
             on:click={() => onRemoveChunk(chunk.id)}

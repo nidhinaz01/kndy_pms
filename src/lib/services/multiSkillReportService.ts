@@ -341,7 +341,8 @@ export async function checkWorkerConflicts(
   toDate: string,
   toTime: string,
   excludePlanningIds?: number[],
-  excludeReportIds?: number[]
+  excludeReportIds?: number[],
+  currentStageCode?: string
 ): Promise<{ hasConflict: boolean; hasReportConflict: boolean; message: string }> {
   if (!fromDate || !fromTime || !toDate || !toTime) {
     return { hasConflict: false, hasReportConflict: false, message: '' };
@@ -434,11 +435,39 @@ export async function checkWorkerConflicts(
         return (fromDateTime < planToDateTime && toDateTime > planFromDateTime);
       }) || [];
 
-      return { workerId, reportConflicts, planConflicts };
+      const reassignmentConflicts: any[] = [];
+      if (currentStageCode) {
+        const { data: stageReassignments, error: reassignmentsError } = await supabase
+          .from('prdn_planning_stage_reassignment')
+          .select('emp_id, from_stage_code, to_stage_code, from_time, to_time, planning_date, status')
+          .eq('emp_id', workerId)
+          .eq('planning_date', fromDateStr)
+          .in('status', ['draft', 'pending_approval', 'approved'])
+          .eq('is_deleted', false);
+
+        if (reassignmentsError) {
+          console.error('Error checking stage reassignments for multi-skill reporting:', reassignmentsError);
+        } else {
+          (stageReassignments || []).forEach((reassignment: any) => {
+            if (!reassignment.from_time || !reassignment.to_time) return;
+            const reassignFromDateTime = new Date(`${reassignment.planning_date}T${reassignment.from_time}`);
+            const reassignToDateTime = new Date(`${reassignment.planning_date}T${reassignment.to_time}`);
+            const overlaps = fromDateTime < reassignToDateTime && toDateTime > reassignFromDateTime;
+            if (!overlaps) return;
+            if (reassignment.to_stage_code === currentStageCode) return;
+            reassignmentConflicts.push(reassignment);
+          });
+        }
+      }
+
+      return { workerId, reportConflicts, planConflicts, reassignmentConflicts };
     });
 
     const conflictResults = await Promise.all(conflictPromises);
     const workersWithReportConflicts = conflictResults.filter(result => result.reportConflicts.length > 0);
+    const workersWithReassignmentConflicts = conflictResults.filter(
+      (result) => (result as any).reassignmentConflicts && (result as any).reassignmentConflicts.length > 0
+    );
     const workersWithPlanConflicts = conflictResults.filter(result => 
       result.planConflicts.length > 0 && result.reportConflicts.length === 0
     );
@@ -469,6 +498,32 @@ export async function checkWorkerConflicts(
 
       const message = `❌ REPORTING BLOCKED!\n\nWorkers have already been reported for overlapping time periods on the same date.\n\nCurrent Reporting: ${currentFromTime} - ${currentToTime}\n\nExisting Reports:\n\n${conflictDetails}\n\nA worker cannot be reported for overlapping time periods on the same date. Please adjust the reporting time.`;
 
+      return { hasConflict: true, hasReportConflict: true, message };
+    }
+
+    if (workersWithReassignmentConflicts.length > 0) {
+      const conflictDetails = workersWithReassignmentConflicts.map((result: any) => {
+        const workerName = workerNameById.get(result.workerId) || 'Unknown Worker';
+        const conflictList = (result.reassignmentConflicts || []).map((reassignment: any) => {
+          const conflictFromTime = new Date(`${reassignment.planning_date}T${reassignment.from_time}`).toLocaleString('en-GB', {
+            day: '2-digit', month: 'short', year: '2-digit', hour: '2-digit', minute: '2-digit'
+          });
+          const conflictToTime = new Date(`${reassignment.planning_date}T${reassignment.to_time}`).toLocaleString('en-GB', {
+            day: '2-digit', month: 'short', year: '2-digit', hour: '2-digit', minute: '2-digit'
+          });
+          return `  • Stage reassignment [${reassignment.from_stage_code} → ${reassignment.to_stage_code}]\n    ${conflictFromTime} - ${conflictToTime}`;
+        }).join('\n');
+        return `Worker ${workerName} (${result.workerId}):\n${conflictList}`;
+      }).join('\n\n');
+
+      const currentFromTime = fromDateTime.toLocaleString('en-GB', {
+        day: '2-digit', month: 'short', year: '2-digit', hour: '2-digit', minute: '2-digit'
+      });
+      const currentToTime = toDateTime.toLocaleString('en-GB', {
+        day: '2-digit', month: 'short', year: '2-digit', hour: '2-digit', minute: '2-digit'
+      });
+
+      const message = `❌ REPORTING BLOCKED!\n\nWorkers have overlapping stage reassignments away from current stage.\n\nCurrent Reporting: ${currentFromTime} - ${currentToTime}\n\nConflicts:\n\n${conflictDetails}\n\nCannot proceed. Please resolve reassignment timing before reporting work.`;
       return { hasConflict: true, hasReportConflict: true, message };
     }
 
@@ -515,7 +570,8 @@ export async function checkMultiSkillReportConflicts(
   selectedWorks: any[],
   formData: MultiSkillReportFormData,
   excludePlanningIds?: number[],
-  excludeReportIds?: number[]
+  excludeReportIds?: number[],
+  currentStageCode?: string
 ): Promise<{ hasConflict: boolean; hasReportConflict: boolean; message: string }> {
   const isTraineeRow = (w: any) => {
     const n = w.notes ?? w.prdn_work_planning?.notes;
@@ -562,7 +618,8 @@ export async function checkMultiSkillReportConflicts(
       inv.toDate,
       inv.toTime,
       excludePlanningIds,
-      excludeReportIds
+      excludeReportIds,
+      currentStageCode
     );
     if (result.hasReportConflict) {
       return result;

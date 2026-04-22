@@ -101,7 +101,7 @@
         <div>
           <h1 class="text-xl font-semibold theme-text-primary">C-Off Report</h1>
           <p class="text-sm theme-text-secondary">
-            Planning and reporting manpower with C-Off (overlaps date window; max ~3 months)
+            Reporting manpower with C-Off (overlaps date window; max ~3 months)
           </p>
         </div>
       </div>
@@ -161,7 +161,7 @@
 
     {#if !rows.length && !loading && !errorMessage && !lastRunSucceeded}
       <p class="theme-text-secondary mb-4 text-sm">
-        Choose dates and click <strong>Generate Report</strong>. Includes planning and reporting attendance whose
+        Choose dates and click <strong>Generate Report</strong>. Includes reporting attendance whose
         window overlaps the range and where <strong>C-Off value is &gt; 0</strong> or a <strong>C-Off from date</strong> is set.
       </p>
     {/if}
@@ -194,7 +194,6 @@
           <table class="w-max min-w-full border-collapse text-xs">
             <thead>
               <tr class="theme-text-secondary border-b theme-border text-left">
-                <th class="theme-bg-primary sticky left-0 z-10 px-2 py-2 font-medium">Source</th>
                 <th class="px-2 py-2 font-medium whitespace-nowrap">Shift</th>
                 <th class="px-2 py-2 font-medium whitespace-nowrap">Stage</th>
                 <th class="px-2 py-2 font-medium whitespace-nowrap">Employee</th>
@@ -202,7 +201,6 @@
                 <th class="px-2 py-2 font-medium whitespace-nowrap">Attendance</th>
                 <th class="px-2 py-2 font-medium whitespace-nowrap">Window</th>
                 <th class="px-2 py-2 font-medium whitespace-nowrap">Times</th>
-                <th class="px-2 py-2 font-medium whitespace-nowrap">Planned h</th>
                 <th class="px-2 py-2 font-medium whitespace-nowrap">Actual h</th>
                 <th class="px-2 py-2 font-medium whitespace-nowrap">C-Off (d)</th>
                 <th class="px-2 py-2 font-medium whitespace-nowrap">C-Off window</th>
@@ -212,7 +210,6 @@
             <tbody class="theme-text-primary">
               {#each filteredRows as r}
                 <tr class="theme-border border-b align-top">
-                  <td class="theme-bg-primary sticky left-0 z-10 px-2 py-2 font-medium whitespace-nowrap">{r.source}</td>
                   <td class="px-2 py-2 whitespace-nowrap font-mono">{r.shiftCode ?? '—'}</td>
                   <td class="px-2 py-2 whitespace-nowrap font-mono">{r.stageCode ?? '—'}</td>
                   <td class="px-2 py-2 whitespace-nowrap">{r.empName ?? '—'} <span class="theme-text-secondary">({r.empId ?? '—'})</span></td>
@@ -224,7 +221,6 @@
                   <td class="px-2 py-2 whitespace-nowrap tabular-nums">
                     {r.attendanceFromTime ?? '—'} – {r.attendanceToTime ?? '—'}
                   </td>
-                  <td class="px-2 py-2 whitespace-nowrap tabular-nums">{r.plannedHours ?? '—'}</td>
                   <td class="px-2 py-2 whitespace-nowrap tabular-nums">{r.actualHours ?? '—'}</td>
                   <td class="px-2 py-2 whitespace-nowrap tabular-nums">{r.cOffValue ?? '—'}</td>
                   <td class="px-2 py-2 whitespace-nowrap text-[11px]">

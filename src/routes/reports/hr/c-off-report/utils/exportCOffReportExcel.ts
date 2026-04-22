@@ -18,7 +18,6 @@ export function exportCOffReportExcel(rows: COffReportRow[], fromDate: string, t
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(meta), 'Summary');
 
   const data = rows.map((r) => ({
-    Source: r.source,
     'Employee ID': r.empId ?? '',
     'Employee name': r.empName ?? '',
     Skill: r.skillShort ?? '',
@@ -30,7 +29,6 @@ export function exportCOffReportExcel(rows: COffReportRow[], fromDate: string, t
     'Attendance window to': formatDdMmmYyyy(r.windowTo) || r.windowTo || '',
     'Attendance from time': r.attendanceFromTime ?? '',
     'Attendance to time': r.attendanceToTime ?? '',
-    'Planned hours': r.plannedHours ?? '',
     'Actual hours': r.actualHours ?? '',
     'C-Off value (days)': r.cOffValue ?? '',
     'C-Off from date': formatDdMmmYyyy(r.cOffFromDate) || r.cOffFromDate || '',
@@ -45,7 +43,7 @@ export function exportCOffReportExcel(rows: COffReportRow[], fromDate: string, t
 
   XLSX.utils.book_append_sheet(
     wb,
-    XLSX.utils.json_to_sheet(data.length ? data : [{ Source: '—', 'Employee name': 'No rows in range' }]),
+    XLSX.utils.json_to_sheet(data.length ? data : [{ 'Employee name': 'No rows in range' }]),
     'C-Off'
   );
 

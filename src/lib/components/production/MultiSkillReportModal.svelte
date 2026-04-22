@@ -440,7 +440,8 @@
       selectedWorks,
       formData,
       planningIds,
-      reportingIds.length > 0 ? reportingIds : undefined
+      reportingIds.length > 0 ? reportingIds : undefined,
+      stageCode
     );
     
     if (conflictResult.hasConflict) {

@@ -19,7 +19,8 @@ export interface WorkerAssignmentInterval {
 
 export async function checkWorkerConflicts(
   assignments: WorkerAssignmentInterval[],
-  excludePlanIds?: number[]
+  excludePlanIds?: number[],
+  currentStageCode?: string
 ): Promise<{ hasConflict: boolean; conflictDetails: string }> {
   try {
     const valid = (assignments || []).filter(
@@ -61,6 +62,10 @@ export async function checkWorkerConflicts(
 
       const reassignmentConflicts = (stageReassignments || []).filter((reassignment: any) => {
         if (!reassignment.from_time || !reassignment.to_time) return false;
+        if (currentStageCode && reassignment.to_stage_code === currentStageCode) {
+          // Reassignment into current stage means worker is available here during this window.
+          return false;
+        }
         const reassignFromDateTime = new Date(`${reassignment.planning_date}T${reassignment.from_time}`);
         const reassignToDateTime = new Date(`${reassignment.planning_date}T${reassignment.to_time}`);
         return fromDateTime < reassignToDateTime && toDateTime > reassignFromDateTime;

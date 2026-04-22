@@ -21,7 +21,7 @@
 
     <!-- Current Chunk Info -->
     <div class="bg-white dark:bg-gray-800 rounded-lg p-4 mb-4 border border-gray-200 dark:border-gray-600">
-      <div class="grid grid-cols-3 gap-4 text-sm">
+      <div class="grid grid-cols-2 gap-4 text-sm">
         <div>
           <span class="text-gray-600 dark:text-gray-400">Minutes:</span>
           <span class="text-gray-900 dark:text-gray-100 font-medium ml-2">{currentChunk?.minutes || 0}</span>
@@ -29,10 +29,6 @@
         <div>
           <span class="text-gray-600 dark:text-gray-400">Current Reason:</span>
           <span class="text-gray-900 dark:text-gray-100 font-medium ml-2">{currentChunk?.reasonName || 'None'}</span>
-        </div>
-        <div>
-          <span class="text-gray-600 dark:text-gray-400">Cost:</span>
-          <span class="text-gray-900 dark:text-gray-100 font-medium ml-2">₹{currentChunk?.cost?.toFixed(2) || '0.00'}</span>
         </div>
       </div>
     </div>
