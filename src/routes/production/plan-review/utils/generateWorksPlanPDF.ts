@@ -1,6 +1,7 @@
 import jsPDF from 'jspdf';
 import { formatTime, calculateBreakTimeInRange } from '../../[stage_Shift]/utils/timeUtils';
 import { groupPlannedWorks } from '../../[stage_Shift]/utils/planTabUtils';
+import { getWorkDisplayCode } from '$lib/utils/workDisplayUtils';
 
 interface PlannedWork {
   id: number;
@@ -79,10 +80,7 @@ function generateCompactWorksPlanPDF(
     }
     const wo = work.prdn_wo_details?.wo_no || 'N/A';
     const code =
-      work.other_work_code ||
-      work.std_work_type_details?.derived_sw_code ||
-      work.std_work_type_details?.sw_code ||
-      'N/A';
+      getWorkDisplayCode(work) || 'N/A';
     const worker = work.hr_emp?.emp_name || 'N/A';
     const from = work.from_time || '-';
     const to = work.to_time || '-';

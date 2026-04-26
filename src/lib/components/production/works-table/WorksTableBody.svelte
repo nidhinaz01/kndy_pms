@@ -2,6 +2,7 @@
   import WorksTableRow from './WorksTableRow.svelte';
   import SortableHeader from '$lib/components/common/SortableHeader.svelte';
   import { getWorkId } from '$lib/utils/worksTableUtils';
+  import { getWorkDisplayCode } from '$lib/utils/workDisplayUtils';
   import type { WorkPlanningStatus, WorkStatus } from '$lib/types/worksTable';
   import type { SortConfig } from '$lib/utils/tableSorting';
 
@@ -85,9 +86,7 @@
     </tr>
   {:else}
     {#each filteredData as work}
-      {@const derivedSwCode = work.std_work_type_details?.derived_sw_code || work.sw_code}
-      {@const otherWorkCode = work.is_added_work ? (work.sw_code || null) : null}
-      {@const workCode = derivedSwCode || otherWorkCode || 'Unknown'}
+      {@const workCode = getWorkDisplayCode(work) || 'Unknown'}
       {@const woDetailsId = work.wo_details_id}
       {@const workKey = `${workCode}_${woDetailsId}_${stageCode}`}
       {@const status = workStatus[workKey] || 'To be planned'}

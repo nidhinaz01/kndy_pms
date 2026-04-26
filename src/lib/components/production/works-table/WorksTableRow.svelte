@@ -1,6 +1,7 @@
 <script lang="ts">
   import Button from '$lib/components/common/Button.svelte';
   import { formatTime, getWorkId } from '$lib/utils/worksTableUtils';
+  import { getWorkDisplayCode, getWorkDisplayName } from '$lib/utils/workDisplayUtils';
   import type { WorkPlanningStatus, WorkStatus } from '$lib/types/worksTable';
 
   // Format minutes to "x Hr y Min" format
@@ -28,7 +29,7 @@
 
   // Debug: Log work data for specific works
   $: {
-    const workCode = work?.std_work_type_details?.derived_sw_code || work?.sw_code;
+    const workCode = getWorkDisplayCode(work);
     if ((workCode === 'M0180A' || workCode === 'M0176A') && !work?.std_vehicle_work_flow?.estimated_duration_minutes) {
       console.log(`🔍 Debug work ${workCode}:`, {
         hasVehicleFlow: !!work?.std_vehicle_work_flow,
@@ -61,11 +62,11 @@
     {work.mstr_wo_type?.wo_type_name || 'N/A'}
   </td>
   <td class="px-6 py-4 whitespace-nowrap text-sm font-medium {isSelected ? 'text-gray-900 dark:text-gray-100' : 'theme-text-primary'}">
-    {work.std_work_type_details?.derived_sw_code || work.sw_code || 'N/A'}
+    {getWorkDisplayCode(work) || 'N/A'}
   </td>
   <td class="px-6 py-4 text-sm {isSelected ? 'text-gray-900 dark:text-gray-100' : 'theme-text-primary'} max-w-xs">
     <div class="break-words">
-      {work.sw_name}{work.std_work_type_details?.type_description ? ' - ' + work.std_work_type_details.type_description : ''}
+      {getWorkDisplayName(work) || 'N/A'}
     </div>
   </td>
   <td class="px-6 py-4 whitespace-nowrap text-sm">

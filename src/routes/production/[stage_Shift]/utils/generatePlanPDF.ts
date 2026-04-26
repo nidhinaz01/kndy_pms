@@ -1,6 +1,7 @@
 import jsPDF from 'jspdf';
 import { formatTime, calculateBreakTimeInRange } from './timeUtils';
 import { groupPlannedWorks } from './planTabUtils';
+import { getWorkDisplayCode, getWorkDisplayName } from '$lib/utils/workDisplayUtils';
 
 interface PlannedWork {
   id: number;
@@ -120,12 +121,8 @@ export function generatePlanPDF(
           drawHeader();
         }
 
-        const workCode = work.other_work_code || work.std_work_type_details?.derived_sw_code || work.std_work_type_details?.sw_code || 'N/A';
-        const workName = work.other_work_code 
-          ? (work.workAdditionData?.other_work_desc || work.other_work_code)
-          : (work.std_work_type_details?.std_work_details?.sw_name || '');
-        const typeDescription = work.std_work_type_details?.type_description || '';
-        const fullWorkName = workName + (typeDescription ? (workName ? ' - ' : '') + typeDescription : '');
+        const workCode = getWorkDisplayCode(work) || 'N/A';
+        const fullWorkName = getWorkDisplayName(work) || 'N/A';
 
         // Calculate planned hours
         let plannedHours = work.planned_hours || 0;

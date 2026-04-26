@@ -1,6 +1,7 @@
 import jsPDF from 'jspdf';
 import { formatTime } from '../../[stage_Shift]/utils/timeUtils';
 import { groupReportWorks } from '../../[stage_Shift]/utils/planTabUtils';
+import { getWorkDisplayCode } from '$lib/utils/workDisplayUtils';
 
 interface WorkReport {
   id: number;
@@ -86,10 +87,7 @@ function generateCompactWorksReportPDF(
     const plan = report.prdn_work_planning;
     const wo = plan?.prdn_wo_details?.wo_no || 'N/A';
     const code =
-      plan?.other_work_code ||
-      plan?.std_work_type_details?.derived_sw_code ||
-      plan?.std_work_type_details?.sw_code ||
-      'N/A';
+      getWorkDisplayCode(plan) || 'N/A';
     const worker = plan?.hr_emp?.emp_name || report.worker_id || 'N/A';
     const hours = formatTime(report.hours_worked_today || 0);
     const total = formatTime((report.hours_worked_till_date || 0) + (report.hours_worked_today || 0));

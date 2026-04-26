@@ -4,6 +4,7 @@
   import { X, AlertTriangle } from 'lucide-svelte';
   import { supabase } from '$lib/supabaseClient';
   import { removeWorkFromProduction } from '$lib/api/production';
+  import { getWorkDisplayCode, getWorkDisplayName } from '$lib/utils/workDisplayUtils';
 
   export let isOpen: boolean = false;
   export let work: any = null;
@@ -60,9 +61,9 @@
       }
       
       // Determine if this is a non-standard work
-      const isNonStandardWork = work.is_added_work || !work.std_work_type_details?.derived_sw_code;
+      const isNonStandardWork = Boolean(work.other_work_code || work.is_added_work || !work.std_work_type_details?.derived_sw_code);
       const derivedSwCode = isNonStandardWork ? null : (work.std_work_type_details?.derived_sw_code || null);
-      const otherWorkCode = isNonStandardWork ? work.sw_code : null;
+      const otherWorkCode = isNonStandardWork ? (work.other_work_code || work.sw_code || null) : null;
       
       const result = await removeWorkFromProduction(
         derivedSwCode,
@@ -147,13 +148,13 @@
                 <div class="flex justify-between">
                   <span class="theme-text-secondary">Work Code:</span>
                   <span class="theme-text-primary font-medium">
-                    {work?.std_work_type_details?.derived_sw_code || work?.sw_code || 'N/A'}
+                    {getWorkDisplayCode(work) || 'N/A'}
                   </span>
                 </div>
                 <div class="flex justify-between">
                   <span class="theme-text-secondary">Work Name:</span>
                   <span class="theme-text-primary font-medium">
-                    {work?.sw_name || work?.std_work_type_details?.std_work_details?.sw_name || 'N/A'}
+                    {getWorkDisplayName(work) || 'N/A'}
                   </span>
                 </div>
                 <div class="flex justify-between">

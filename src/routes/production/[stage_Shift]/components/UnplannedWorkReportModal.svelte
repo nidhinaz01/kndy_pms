@@ -20,6 +20,7 @@
   import type { LostTimeReason } from '$lib/api/lostTimeReasons';
   import { supabase } from '$lib/supabaseClient';
   import { attendanceIsPresent } from '$lib/utils/manpowerAttendanceStatus';
+  import { getWorkDisplayCode } from '$lib/utils/workDisplayUtils';
   import WorkDetailsDisplay from '$lib/components/production/multi-skill-report/WorkDetailsDisplay.svelte';
   import EmployeeAssignment from '$lib/components/production/multi-skill-report/EmployeeAssignment.svelte';
   import SharedTimeSelection from '$lib/components/production/multi-skill-report/SharedTimeSelection.svelte';
@@ -82,8 +83,7 @@
   // Check if this is a non-standard work
   $: isNonStandardWork = selectedWork && (
     selectedWork.other_work_code ? true : 
-    (selectedWork.std_work_type_details?.derived_sw_code?.startsWith('OW') || 
-     selectedWork.std_work_type_details?.sw_code?.startsWith('OW') || false)
+    (getWorkDisplayCode(selectedWork)?.startsWith('OW') || false)
   );
 
   // Auto-calculate toTime from fromTime + standard duration + breaks (aligned with Plan Work modal).
@@ -462,8 +462,7 @@
 
       const nonStd = !!(
         selectedWork.other_work_code ||
-        selectedWork.std_work_type_details?.derived_sw_code?.startsWith('OW') ||
-        selectedWork.std_work_type_details?.sw_code?.startsWith('OW')
+        getWorkDisplayCode(selectedWork)?.startsWith('OW')
       );
 
       // Initialize form data (standard works: toTime filled by auto-calc once standard time + breaks load)

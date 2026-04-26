@@ -1399,7 +1399,7 @@ Full detail and examples for teams and developers: see **`PRODUCTION_STAGE_REASS
 
 **Features**:
 - View all draft reports
-- Edit draft reports
+- Edit draft reports (when no reporting submission exists, or the latest submission is **Rejected** / **Reverted**)
 - Delete draft reports
 - Submit all reports
 
@@ -1609,20 +1609,22 @@ Review submitted reporting for a shift/date: works report viewing plus a **Manpo
 **Features**:
 - Tabs typically include works/report viewing and **Manpower Report**
 - On **Manpower Report**, rows with **Absent (Uninformed)** may be **highlighted** like Plan Review so reviewers spot uninformed absences quickly
+- For **approved** submissions, authorized reviewers can use **Revert to Draft** (with mandatory reason) to reopen report data for correction/resubmission
 - Print or download report documents where available
 
 **How to Use**:
 1. Navigate to Production > Report Review
 2. Select the submission or filters as shown on screen
 3. Open the **Manpower Report** tab when you need attendance-level detail
-4. Use navigation controls to browse different reports or submissions
+4. If an approved submission must be corrected, click **Revert to Draft**, enter a required reason, and confirm
+5. Use navigation controls to browse different reports or submissions
 
 **Prerequisites**:
 - Production reports must be submitted
 - PDF generation must be successful
 
 **Areas Affected**:
-- None (read-only view)
+- Revert action (when used) reopens related reporting rows to draft and clears their submission linkage
 
 ---
 
@@ -4073,6 +4075,12 @@ This section provides quick reference for the most common tasks. For detailed in
 - **Approved**: Plan approved, ready for execution
 - **Rejected**: Plan rejected, can be edited and resubmitted
 
+**Reporting Submission Statuses**:
+- **Pending approval**: Report submission sent for review
+- **Approved**: Report submission finalized/approved
+- **Rejected**: Report submission rejected; engineer can edit draft data and resubmit
+- **Reverted**: Previously approved report was explicitly reverted to draft (with reason) to allow corrections and re-submission
+
 ### Field Reference
 
 **Common Required Fields**:
@@ -4224,6 +4232,9 @@ A: Go to **Draft Report** tab. If overtime is calculated, the **Report OT** butt
 
 **Q: How do I submit the daily report?**  
 A: Go to **Draft Report** tab, ensure all work is reported (and overtime if needed), then click **Submit Report** and confirm. See [Step 7.5: Submit Final Report](#step-75-submit-final-report).
+
+**Q: Can an approved report be reopened for correction?**  
+A: Yes—through **Production > Report Review**. Select the approved submission, click **Revert to Draft**, enter the mandatory reason, and confirm. The submission status becomes **Reverted**, and associated reporting rows are reopened as draft so the engineer can correct and resubmit.
 
 **Q: How do I report unplanned work (work that wasn’t in the plan)?**  
 A: In **Draft Report** tab, click **Report Unplanned Work**, select the unplanned work, then click **Report** and fill in the same details as for planned work. See the Production section on reporting unplanned work.

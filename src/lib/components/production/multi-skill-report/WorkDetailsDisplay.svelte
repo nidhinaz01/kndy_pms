@@ -1,5 +1,6 @@
 <script lang="ts">
   import { formatMinutes } from '$lib/utils/multiSkillReportUtils';
+  import { getWorkDisplayCode, getWorkDisplayName } from '$lib/utils/workDisplayUtils';
 
   export let selectedWorks: any[] = [];
   export let standardTimeMinutes: number = 0;
@@ -23,22 +24,13 @@
     <div>
       <span class="theme-text-secondary">Work Code:</span> 
       <span class="theme-text-primary">
-        {selectedWorks[0]?.other_work_code || selectedWorks[0]?.std_work_type_details?.derived_sw_code || selectedWorks[0]?.derived_sw_code || selectedWorks[0]?.std_work_type_details?.sw_code || 'N/A'}
+        {getWorkDisplayCode(selectedWorks[0]) || 'N/A'}
       </span>
     </div>
     <div>
       <span class="theme-text-secondary">Work Name:</span> 
       <span class="theme-text-primary">
-        {#if selectedWorks[0]?.other_work_code}
-          {@const workName = selectedWorks[0]?.workAdditionData?.other_work_desc || selectedWorks[0]?.other_work_code || 'N/A'}
-          {workName}
-        {:else}
-          {@const workName = selectedWorks[0]?.sw_name || 
-                            selectedWorks[0]?.std_work_type_details?.std_work_details?.sw_name || ''}
-          {@const typeDescription = selectedWorks[0]?.std_work_type_details?.type_description || ''}
-          {@const fullWorkName = workName + (typeDescription ? (workName ? ' - ' : '') + typeDescription : '')}
-          {fullWorkName || 'N/A'}
-        {/if}
+        {getWorkDisplayName(selectedWorks[0]) || 'N/A'}
       </span>
     </div>
     <div>

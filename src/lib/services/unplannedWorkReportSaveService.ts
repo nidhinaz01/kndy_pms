@@ -5,6 +5,7 @@ import { getEffectiveRowTimes } from '$lib/utils/planWorkUtils';
 import { netHoursWorkedForReportingRow } from '$lib/utils/multiSkillReportUtils';
 import { multiSkillHasAtLeastOneAssignedWorker } from '$lib/utils/multiSkillReportValidation';
 import { calculatePieceRateForPlanning } from './pieceRateCalculationService';
+import { getWorkDisplayCode } from '$lib/utils/workDisplayUtils';
 
 /**
  * Save unplanned work reports
@@ -109,8 +110,7 @@ export async function saveUnplannedWorkReports(
     const isNonStandardWork = selectedWork.other_work_code
       ? true
       : !!(
-          selectedWork.std_work_type_details?.derived_sw_code?.startsWith('OW') ||
-          selectedWork.std_work_type_details?.sw_code?.startsWith('OW') ||
+          getWorkDisplayCode(selectedWork)?.startsWith('OW') ||
           false
         );
     const derivedSwCode = isNonStandardWork

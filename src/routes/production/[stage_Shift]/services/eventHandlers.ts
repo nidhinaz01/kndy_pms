@@ -15,6 +15,7 @@ import {
   attendanceIsPresent,
   type ManpowerAttendanceStatus
 } from '$lib/utils/manpowerAttendanceStatus';
+import { getWorkDisplayCode } from '$lib/utils/workDisplayUtils';
 
 /**
  * Update work status when skill competencies are deleted
@@ -560,7 +561,7 @@ export async function handleMultiReport(context: EventHandlerContext) {
   }
   const selectedWorks = context.plannedWorksWithStatus.filter(work => context.selectedRows.has(work.id));
   const workCodes = [...new Set(selectedWorks.map(work => 
-    work.std_work_type_details?.derived_sw_code || work.std_work_type_details?.sw_code
+    getWorkDisplayCode(work)
   ))];
   if (workCodes.length > 1) {
     alert('Please select only skill competencies from the same work');

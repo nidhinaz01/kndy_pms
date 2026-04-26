@@ -2,6 +2,7 @@
   import { createEventDispatcher } from 'svelte';
   import Button from '$lib/components/common/Button.svelte';
   import { X } from 'lucide-svelte';
+  import { getWorkDisplayCode, getWorkDisplayName } from '$lib/utils/workDisplayUtils';
 
   export let isOpen: boolean = false;
   export let works: any[] = [];
@@ -49,11 +50,11 @@
   $: displayWorks = storedWorks.length > 0 ? storedWorks : works;
   
   $: workCode = displayWorks.length > 0 
-    ? (displayWorks[0]?.std_work_type_details?.derived_sw_code || displayWorks[0]?.std_work_type_details?.sw_code || displayWorks[0]?.other_work_code || 'N/A')
+    ? (getWorkDisplayCode(displayWorks[0]) || 'N/A')
     : 'N/A';
   
   $: workName = displayWorks.length > 0
-    ? (displayWorks[0]?.std_work_type_details?.std_work_details?.sw_name || displayWorks[0]?.std_work_type_details?.type_description || displayWorks[0]?.workAdditionData?.other_work_desc || 'N/A')
+    ? (getWorkDisplayName(displayWorks[0]) || 'N/A')
     : 'N/A';
   
   $: workersCount = displayWorks.length;

@@ -4,6 +4,7 @@
   import Button from '$lib/components/common/Button.svelte';
   import { X } from 'lucide-svelte';
   import type { ProductionWork } from '$lib/api/production';
+  import { getWorkDisplayCode, getWorkDisplayName } from '$lib/utils/workDisplayUtils';
 
   export let isOpen: boolean = false;
   export let stageCode: string = '';
@@ -27,8 +28,8 @@
     }
 
     return unplannedWorks.filter((work: ProductionWork) => {
-      const workCode = (work.std_work_type_details?.derived_sw_code || work.sw_code || '').toLowerCase();
-      const workName = (work.sw_name || work.std_work_type_details?.std_work_details?.sw_name || '').toLowerCase();
+      const workCode = (getWorkDisplayCode(work) || '').toLowerCase();
+      const workName = (getWorkDisplayName(work) || '').toLowerCase();
       const woNo = (work.wo_no || work.prdn_wo_details?.wo_no || '').toLowerCase();
       const pwoNo = (work.pwo_no || work.prdn_wo_details?.pwo_no || '').toLowerCase();
 
@@ -92,7 +93,7 @@
       // Map work key -> planning records for that work
       const workToPlanningsMap = new Map<string, any[]>();
       allPlannedWorks.forEach((planned: any) => {
-        const workCode = planned.derived_sw_code || planned.other_work_code;
+        const workCode = getWorkDisplayCode(planned);
         const woDetailsId = planned.wo_details_id;
         if (workCode && woDetailsId) {
           const workKey = `${workCode}_${woDetailsId}`;
@@ -108,7 +109,7 @@
       // 2. Works with planning records that HAVE reporting records (In progress)
       // Exclude works with planning but NO reporting (Draft Plan, Planned)
       let candidateUnplannedWorks = allWorks.filter((work: ProductionWork) => {
-        const workCode = work.std_work_type_details?.derived_sw_code || work.sw_code;
+        const workCode = getWorkDisplayCode(work);
         const woDetailsId = work.wo_details_id;
         if (!workCode || !woDetailsId) return false;
         
@@ -132,11 +133,7 @@
       // De-duplicate rows early: same (workCode, wo_details_id) should appear once.
       const seen = new Set<string>();
       candidateUnplannedWorks = candidateUnplannedWorks.filter((work: ProductionWork) => {
-        const hasDerivedSwCode = !!work.std_work_type_details?.derived_sw_code;
-        const isNonStandardWork = (work as any).is_added_work === true || !hasDerivedSwCode;
-        const derivedSwCode = hasDerivedSwCode ? work.std_work_type_details?.derived_sw_code || null : null;
-        const otherWorkCode = isNonStandardWork ? (work.sw_code || null) : null;
-        const workCode = (derivedSwCode || otherWorkCode || 'Unknown') as string;
+        const workCode = (getWorkDisplayCode(work) || 'Unknown') as string;
         const woDetailsId = work.wo_details_id;
 
         if (!woDetailsId) return false;
@@ -150,11 +147,10 @@
       // Important: do this via a lightweight query on `prdn_work_status` to avoid freezing
       // (the previous approach called `checkWorkStatus()` which can be very heavy).
       const derivedSwCodes = candidateUnplannedWorks
-        .map((w: any) => w.std_work_type_details?.derived_sw_code)
+        .map((w: any) => w.std_work_type_details?.derived_sw_code || null)
         .filter((v: any) => !!v) as string[];
       const otherWorkCodes = candidateUnplannedWorks
-        .filter((w: any) => (w.is_added_work === true) || !w.std_work_type_details?.derived_sw_code)
-        .map((w: any) => w.sw_code)
+        .map((w: any) => w.other_work_code || null)
         .filter((v: any) => !!v) as string[];
       const woDetailsIds = [...new Set(candidateUnplannedWorks.map((w: any) => w.wo_details_id).filter(Boolean))] as number[];
 
@@ -183,11 +179,7 @@
       }
 
       unplannedWorks = candidateUnplannedWorks.filter((work: ProductionWork) => {
-        const hasDerivedSwCode = !!work.std_work_type_details?.derived_sw_code;
-        const isNonStandardWork = (work as any).is_added_work === true || !hasDerivedSwCode;
-        const derivedSwCode = hasDerivedSwCode ? work.std_work_type_details?.derived_sw_code || null : null;
-        const otherWorkCode = isNonStandardWork ? (work.sw_code || null) : null;
-        const workCode = (derivedSwCode || otherWorkCode || 'Unknown') as string;
+        const workCode = (getWorkDisplayCode(work) || 'Unknown') as string;
         const woDetailsId = work.wo_details_id;
         if (!woDetailsId) return false;
         const key = `${workCode.toUpperCase()}_${woDetailsId}`;
@@ -206,6 +198,13 @@
 
   function handleWorkSelect(work: ProductionWork) {
     selectedWork = work;
+  }
+
+  function getWorkRowKey(work: ProductionWork | null): string | null {
+    if (!work || !work.wo_details_id) return null;
+    const workCode = getWorkDisplayCode(work) || null;
+    if (!workCode) return null;
+    return `${workCode}_${work.wo_details_id}`;
   }
 
   function handleReport() {
@@ -304,11 +303,11 @@
           {:else}
             <div class="space-y-2 max-h-[60vh] overflow-y-auto">
               {#each filteredUnplannedWorks as work}
-              {@const workCode = work.std_work_type_details?.derived_sw_code || work.sw_code}
-              {@const workName = work.sw_name || work.std_work_type_details?.std_work_details?.sw_name || 'N/A'}
+              {@const workCode = getWorkDisplayCode(work) || 'N/A'}
+              {@const workName = getWorkDisplayName(work) || 'N/A'}
               {@const woNo = work.wo_no || work.prdn_wo_details?.wo_no || 'N/A'}
               {@const pwoNo = work.pwo_no || work.prdn_wo_details?.pwo_no || 'N/A'}
-              {@const isSelected = selectedWork?.sw_id === work.sw_id && selectedWork?.wo_details_id === work.wo_details_id}
+              {@const isSelected = getWorkRowKey(selectedWork) === getWorkRowKey(work)}
               
               <button
                 type="button"

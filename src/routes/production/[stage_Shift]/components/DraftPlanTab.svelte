@@ -186,10 +186,11 @@
   $: isPendingApproval = planningSubmissionStatus?.status === 'pending_approval';
   $: isApproved = planningSubmissionStatus?.status === 'approved';
   $: isRejected = planningSubmissionStatus?.status === 'rejected';
+  $: isReverted = planningSubmissionStatus?.status === 'reverted';
   $: isResubmitted = isPendingApproval && hasRejectedSubmission; // Resubmitted if pending and there's a previous rejected
-  $: canSubmit = !hasSubmission || isRejected; // Can submit if no submission or if rejected
+  $: canSubmit = !hasSubmission || isRejected || isReverted; // Can submit if no submission, rejected, or reverted
   $: shouldDisableSubmit = isLoading || totalPlans === 0 || isPendingApproval || isApproved;
-  $: canEdit = !hasSubmission || isRejected; // Can edit if no submission or if rejected
+  $: canEdit = !hasSubmission || isRejected || isReverted; // Can edit if no submission, rejected, or reverted
 
   $: submissionStatusDisplay = (() => {
     if (!planningSubmissionStatus) {
@@ -207,12 +208,40 @@
       return { text: `Approved${versionText}`, color: 'bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-400' };
     } else if (status === 'rejected') {
       return { text: `Rejected${versionText}`, color: 'bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-400' };
+    } else if (status === 'reverted') {
+      return { text: `Reverted${versionText}`, color: 'bg-purple-100 text-purple-800 dark:bg-purple-900/20 dark:text-purple-400' };
     }
     return null;
   })();
 
   function handleShowHistory() {
     showHistoryModal = true;
+  }
+
+  function rowStatusDisplay(status: string | undefined): { text: string; color: string } {
+    const value = (status || '').toLowerCase();
+    if (value === 'approved') {
+      return {
+        text: 'Approved',
+        color: 'bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-400'
+      };
+    }
+    if (value === 'pending_approval') {
+      return {
+        text: 'Submitted',
+        color: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-400'
+      };
+    }
+    if (value === 'rejected') {
+      return {
+        text: 'Rejected',
+        color: 'bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-400'
+      };
+    }
+    return {
+      text: 'Draft',
+      color: 'bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-400'
+    };
   }
 </script>
 
@@ -282,7 +311,7 @@
           <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd" />
         </svg>
         <p class="text-sm theme-text-primary">
-          <strong>Read-only mode:</strong> This plan has been {isPendingApproval ? 'submitted for review' : isApproved ? 'approved' : ''}. You can view the plan but cannot make changes. {isRejected ? 'The plan was rejected - you can now make changes.' : ''}
+          <strong>Read-only mode:</strong> This plan has been {isPendingApproval ? 'submitted for review' : isApproved ? 'approved' : ''}. You can view the plan but cannot make changes. {isRejected || isReverted ? 'The plan was reopened for edits - refresh if actions are still locked.' : ''}
         </p>
       </div>
     </div>
@@ -449,7 +478,9 @@
                 {/if}
               </td>
               <td class="px-6 py-4 whitespace-nowrap text-sm">
-                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-400">Draft</span>
+                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium {rowStatusDisplay(typedGroup.items?.[0]?.status).color}">
+                  {rowStatusDisplay(typedGroup.items?.[0]?.status).text}
+                </span>
               </td>
               <td class="px-6 py-4 text-sm theme-text-primary">
                 <div class="space-y-1">

@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { WorkContinuation } from '$lib/types/planWork';
   import { formatTime, getSkillShort } from '$lib/utils/planWorkUtils';
+  import { getWorkDisplayCode, getWorkDisplayName } from '$lib/utils/workDisplayUtils';
 
   export let work: any = null;
   export let workContinuation: WorkContinuation;
@@ -25,13 +26,13 @@
     <div>
       <span class="theme-text-secondary">Code:</span> 
       <span class="theme-text-primary">
-        {work?.std_work_type_details?.derived_sw_code || work?.sw_code}
+        {getWorkDisplayCode(work) || 'N/A'}
       </span>
     </div>
     <div>
       <span class="theme-text-secondary">Name:</span> 
       <span class="theme-text-primary">
-        {work?.sw_name}{work?.std_work_type_details?.type_description ? ' - ' + work.std_work_type_details.type_description : ''}
+        {getWorkDisplayName(work) || 'N/A'}
       </span>
     </div>
     <div>

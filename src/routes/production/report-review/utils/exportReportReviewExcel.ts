@@ -2,6 +2,7 @@ import * as XLSX from 'xlsx';
 import { groupReportWorks } from '../../[stage_Shift]/utils/planTabUtils';
 import { formatTime } from '../../[stage_Shift]/utils/timeUtils';
 import { formatManpowerAttendanceLong } from '$lib/utils/manpowerAttendanceStatus';
+import { getWorkDisplayCode, getWorkDisplayName } from '$lib/utils/workDisplayUtils';
 
 function numCell(v: unknown): string {
   const n = Number(v);
@@ -59,22 +60,13 @@ function worksRowsForExcel(worksReportData: any[]): Record<string, unknown>[] {
 
       const workCode =
         index === 0
-          ? planning?.other_work_code ||
-            planning?.std_work_type_details?.derived_sw_code ||
-            planning?.std_work_type_details?.sw_code ||
-            'N/A'
+          ? getWorkDisplayCode(planning) || 'N/A'
           : '';
 
-      let workName = '';
-      if (index === 0) {
-        if (planning?.other_work_code) {
-          workName = report.workAdditionData?.other_work_desc || planning.other_work_code || 'N/A';
-        } else {
-          const swName = planning?.std_work_type_details?.std_work_details?.sw_name || '';
-          const typeDesc = planning?.std_work_type_details?.type_description || '';
-          workName = swName + (typeDesc ? (swName ? ' - ' : '') + typeDesc : '') || 'N/A';
-        }
-      }
+      const workName =
+        index === 0
+          ? getWorkDisplayName({ ...report, ...planning, prdn_work_planning: planning }) || 'N/A'
+          : '';
 
       const standardTime =
         index === 0

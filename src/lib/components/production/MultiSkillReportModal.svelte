@@ -13,6 +13,7 @@
   import type { LostTimeReason } from '$lib/api/lostTimeReasons';
   import { supabase } from '$lib/supabaseClient';
   import { attendanceIsPresent } from '$lib/utils/manpowerAttendanceStatus';
+  import { getWorkDisplayCode } from '$lib/utils/workDisplayUtils';
   import WorkDetailsDisplay from './multi-skill-report/WorkDetailsDisplay.svelte';
   import EmployeeAssignment from './multi-skill-report/EmployeeAssignment.svelte';
   import SharedTimeSelection from './multi-skill-report/SharedTimeSelection.svelte';
@@ -89,8 +90,7 @@
   $: firstSkillOrWork = skillPlanningWorks[0] || selectedWorks[0];
   $: isNonStandardWork = !!firstSkillOrWork && (
     firstSkillOrWork?.other_work_code ? true : 
-    (firstSkillOrWork?.std_work_type_details?.derived_sw_code?.startsWith('OW') || 
-     firstSkillOrWork?.std_work_type_details?.sw_code?.startsWith('OW') || false)
+    (getWorkDisplayCode(firstSkillOrWork)?.startsWith('OW') || false)
   );
 
   // Reactive calculation of actual time (only for standard works)

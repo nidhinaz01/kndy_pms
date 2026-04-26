@@ -6,6 +6,7 @@
   import { groupPlannedWorks, areAllSkillsReported, hasReportedSkillsSelected } from '../utils/planTabUtils';
   import { filterGroupedWorksBySearch } from '../utils/productionTabSearchUtils';
   import { sortTableData, handleSortClick, type SortConfig } from '$lib/utils/tableSorting';
+  import { getWorkDisplayCode } from '$lib/utils/workDisplayUtils';
 
   export let plannedWorksData: any[] = [];
   export let plannedWorksWithStatus: any[] = [];
@@ -14,6 +15,7 @@
   export let selectedDate: string = '';
   export let selectedRows: Set<string> = new Set();
   export let shiftBreakTimes: Array<{ start_time: string; end_time: string }> = [];
+  export let replanBusyKey: string | null = null;
   
   // Keep expandedGroups for compatibility but it's no longer used
   export let expandedGroups: string[] = [];
@@ -99,6 +101,10 @@
     dispatch('addTrainees', { group });
   }
 
+  function handleReplan(group: any) {
+    dispatch('replanWork', { group });
+  }
+
   function toggleRowSelection(rowId: string) {
     dispatch('toggleRowSelection', rowId);
   }
@@ -113,7 +119,7 @@
 
   $: selectedWorks = plannedWorksWithStatus.filter(work => selectedRows.has(work.id));
   $: workCodes = [...new Set(selectedWorks.map(work => 
-    work.std_work_type_details?.derived_sw_code || work.std_work_type_details?.sw_code
+    getWorkDisplayCode(work)
   ))];
   $: workCode = workCodes.length === 1 ? workCodes[0] : null;
   $: allReported = workCode ? areAllSkillsReported(workCode, plannedWorksWithStatus) : false;
@@ -234,6 +240,8 @@
             {@const someSelected = typedGroup.items.some((item: any) => selectedRows.has(item.id))}
             {@const isCancelled = typedGroup.items.some((item: any) => item.status === 'cancelled' || item.isCancelled)}
             {@const hasReported = typedGroup.items.some((item: any) => item.workLifecycleStatus && item.workLifecycleStatus !== 'Planned' && item.workLifecycleStatus !== undefined)}
+            {@const groupKey = `${typedGroup.workCode || 'unknown'}_${typedGroup.woDetailsId || typedGroup.items?.[0]?.wo_details_id || 'unknown'}`}
+            {@const isReplanBusy = replanBusyKey === groupKey}
             <!-- Single Row per Work -->
             <tr class="hover:theme-bg-secondary transition-colors">
               <td class="px-6 py-4 whitespace-nowrap text-sm font-medium theme-text-primary">
@@ -386,7 +394,7 @@
                       <Button 
                         variant="primary" 
                         size="sm" 
-                        disabled={isCancelled || hasReported}
+                        disabled={isCancelled || hasReported || isReplanBusy}
                         on:click={() => handleReportWork(typedGroup)}
                       >
                         Report
@@ -394,10 +402,18 @@
                   <Button 
                     variant="danger" 
                     size="sm" 
-                    disabled={isCancelled || hasReported}
+                    disabled={isCancelled || hasReported || isReplanBusy}
                     on:click={() => handleCancelWork(typedGroup)}
                   >
                     Cancel
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    disabled={isCancelled || hasReported || isReplanBusy}
+                    on:click={() => handleReplan(typedGroup)}
+                  >
+                    {isReplanBusy ? 'Replanning...' : 'Replan'}
                   </Button>
                     </div>
                   </td>

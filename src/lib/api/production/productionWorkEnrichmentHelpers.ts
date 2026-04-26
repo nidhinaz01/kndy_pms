@@ -1,4 +1,5 @@
 import type { ProductionWork } from './productionTypes';
+import { getWorkDisplayCode } from '$lib/utils/workDisplayUtils';
 
 export function createLookupMaps(
   workTypesData: any[],
@@ -211,7 +212,13 @@ export function enrichWorksWithData(
         allEnrichedWorks.push({
           sw_id: 0,
           sw_code: otherWorkCode,
+          other_work_code: otherWorkCode,
+          other_work_desc: addedWork.other_work_desc || '',
           sw_name: addedWork.other_work_desc || '',
+          workAdditionData: {
+            other_work_code: otherWorkCode,
+            other_work_desc: addedWork.other_work_desc || ''
+          },
           plant_stage: stage,
           sw_type: 'Non-Standard',
           sw_seq_no: 0,
@@ -252,7 +259,7 @@ export function enrichWorksWithTimeData(
   reportingDataMap: Map<string, any[]>
 ): ProductionWork[] {
   return allEnrichedWorks.map((work) => {
-    const workCode = work.std_work_type_details?.derived_sw_code || work.sw_code;
+    const workCode = getWorkDisplayCode(work);
     if (!workCode) return work;
 
     const key = `${workCode}_${work.wo_details_id}`;

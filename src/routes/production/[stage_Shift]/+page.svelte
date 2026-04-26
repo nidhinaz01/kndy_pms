@@ -3,6 +3,7 @@
   import { page } from '$app/stores';
   import Sidebar from '$lib/components/navigation/Sidebar.svelte';
   import FloatingThemeToggle from '$lib/components/common/FloatingThemeToggle.svelte';
+  import Button from '$lib/components/common/Button.svelte';
   import PlanWorkModal from '$lib/components/production/PlanWorkModal.svelte';
   import ReportWorkModal from '$lib/components/production/ReportWorkModal.svelte';
   import MultiSkillReportModal from '$lib/components/production/MultiSkillReportModal.svelte';
@@ -29,6 +30,7 @@
   import CancelWorkModal from './components/CancelWorkModal.svelte';
   import AddTraineesModal from './components/AddTraineesModal.svelte';
   import { browser } from '$app/environment';
+  import { supabase } from '$lib/supabaseClient';
   
   // Lazy load ReportUnplannedWorkModal to avoid SSR issues
   let ReportUnplannedWorkModal: any = null;
@@ -143,6 +145,17 @@
   let showReportUnplannedWorkModal = false;
   let showUnplannedWorkReportModal = false;
   let selectedWorkForUnplannedReporting: any = null;
+  let showReplanModal = false;
+  let replanTargetDate = '';
+  let replanReason = '';
+  let replanSourceGroup: any = null;
+  let replanBusyKey: string | null = null;
+  let activeReplanSession: {
+    sourcePlanningIds: number[];
+    reason: string;
+    targetDate: string;
+    sourceKey: string;
+  } | null = null;
 
   /** Full-screen blocking overlay during bulk manpower attendance save + reload. */
   let bulkAttendanceOverlay: eventHandlers.BulkAttendanceOverlayState = null;
@@ -152,6 +165,7 @@
     showPlanModal && selectedWorkForPlanning
       ? getCanonicalPlanWorkKey(selectedWorkForPlanning)
       : 'idle';
+  $: planModalSelectedDate = activeReplanSession?.targetDate || selectedDate;
 
   // Load the component when modal needs to be shown (after variable declaration)
   $: if (browser && showReportUnplannedWorkModal && !ReportUnplannedWorkModal) {
@@ -342,6 +356,137 @@
   // Sidebar handler
   function handleSidebarToggle() {
     showSidebar = !showSidebar;
+  }
+
+  function getPlanGroupKey(group: any): string {
+    return `${group?.workCode || 'unknown'}_${group?.woDetailsId || group?.items?.[0]?.wo_details_id || 'unknown'}`;
+  }
+
+  async function validateReplanTargetDate(targetDate: string): Promise<{ allowed: boolean; reason?: string }> {
+    const normalizedDate = targetDate.split('T')[0];
+    const { data, error } = await supabase
+      .from('prdn_planning_submissions')
+      .select('status, version, planning_date')
+      .eq('stage_code', stageCode)
+      .eq('shift_code', shiftCode)
+      .eq('planning_date', normalizedDate)
+      .eq('is_deleted', false)
+      .order('version', { ascending: false })
+      .limit(1);
+
+    if (error) {
+      console.error('Error validating replan target date:', error);
+      return { allowed: false, reason: 'Unable to validate selected date. Please try again.' };
+    }
+
+    const latest = (data || [])[0];
+    if (!latest) return { allowed: true };
+    if (latest.status === 'pending_approval' || latest.status === 'approved') {
+      return {
+        allowed: false,
+        reason: `Cannot replan to ${normalizedDate}. Submission is currently ${latest.status}.`
+      };
+    }
+    return { allowed: true };
+  }
+
+  function buildReplanWorkPayload(group: any, reason: string) {
+    const firstItem = group.items?.[0];
+    const skillMappings = Array.from(
+      new Map(
+        (group.items || [])
+          .map((item: any) => [item?.std_work_skill_mapping?.wsm_id || item?.wsm_id, item?.std_work_skill_mapping || item?.skillMapping])
+          .filter(([wsmId, mapping]: any[]) => Boolean(wsmId) && Boolean(mapping))
+      ).values()
+    );
+
+    return {
+      ...firstItem,
+      wo_details_id: firstItem?.wo_details_id,
+      prdn_wo_details_id: firstItem?.wo_details_id,
+      std_work_type_details: firstItem?.std_work_type_details,
+      std_vehicle_work_flow: firstItem?.vehicleWorkFlow || firstItem?.std_vehicle_work_flow,
+      skill_mappings: skillMappings,
+      replanReason: reason,
+      replanSourcePlanningIds: (group.items || []).map((item: any) => item.id).filter(Boolean)
+    };
+  }
+
+  async function handleOpenReplanModal(event: CustomEvent) {
+    const group = event.detail?.group;
+    if (!group?.items?.length) return;
+
+    const isApprovedOnly = group.items.every((item: any) => item.status === 'approved' && !item.isCancelled);
+    const hasReported = group.items.some((item: any) => item.workLifecycleStatus && item.workLifecycleStatus !== 'Planned');
+    if (!isApprovedOnly || hasReported) {
+      alert('Replan is only allowed for approved and unreported plans.');
+      return;
+    }
+
+    replanSourceGroup = group;
+    replanTargetDate = selectedDate;
+    replanReason = '';
+    showReplanModal = true;
+  }
+
+  function closeReplanModal() {
+    showReplanModal = false;
+    replanSourceGroup = null;
+    replanReason = '';
+    replanTargetDate = selectedDate;
+  }
+
+  async function handleConfirmReplan() {
+    if (!replanSourceGroup) return;
+    if (!replanTargetDate) {
+      alert('Please select a target date.');
+      return;
+    }
+    if (!replanReason.trim()) {
+      alert('Please provide a replan reason.');
+      return;
+    }
+
+    const gate = await validateReplanTargetDate(replanTargetDate);
+    if (!gate.allowed) {
+      alert(gate.reason || 'Target date is not allowed for replan.');
+      return;
+    }
+
+    const sourceKey = getPlanGroupKey(replanSourceGroup);
+    replanBusyKey = sourceKey;
+    activeReplanSession = {
+      sourcePlanningIds: (replanSourceGroup.items || []).map((item: any) => item.id).filter(Boolean),
+      reason: replanReason.trim(),
+      targetDate: replanTargetDate.split('T')[0],
+      sourceKey
+    };
+    selectedWorkForPlanning = buildReplanWorkPayload(replanSourceGroup, replanReason.trim());
+    showPlanModal = true;
+    showReplanModal = false;
+  }
+
+  async function handlePlanModalSave() {
+    if (activeReplanSession) {
+      const gate = await validateReplanTargetDate(activeReplanSession.targetDate);
+      if (!gate.allowed) {
+        alert(gate.reason || 'Target date is not allowed for replan.');
+        activeReplanSession = null;
+        replanBusyKey = null;
+        await Promise.all([dataLoading.loadPlannedWorksData(dataLoadingContext), dataLoading.loadDraftPlanData(dataLoadingContext)]);
+        return;
+      }
+      alert(`Replan completed successfully. New draft was created for ${activeReplanSession.targetDate}.`);
+      activeReplanSession = null;
+      replanBusyKey = null;
+    }
+    await eventHandlers.handlePlanSave(eventHandlerContext);
+  }
+
+  function handlePlanModalCloseForCurrentSession() {
+    activeReplanSession = null;
+    replanBusyKey = null;
+    eventHandlers.handlePlanModalClose(eventHandlerContext);
   }
 
   // Track previous pathname to detect actual navigation
@@ -543,6 +688,7 @@
         {stageCode}
         {selectedDate}
         {selectedRows}
+        {replanBusyKey}
         {expandedGroups}
         {shiftBreakTimes}
         on:refresh={() => dataLoading.loadPlannedWorksData(dataLoadingContext)}
@@ -551,6 +697,7 @@
         on:multiReport={() => eventHandlers.handleMultiReport(eventHandlerContext)}
         on:reportWork={(e) => eventHandlers.handleReportWork(eventHandlerContext, e)}
         on:cancelWork={(e) => eventHandlers.handleCancelWork(eventHandlerContext, e)}
+        on:replanWork={handleOpenReplanModal}
         on:addTrainees={(e) => eventHandlers.handleAddTrainees(eventHandlerContext, e)}
         on:toggleGroup={(e) => eventHandlers.toggleGroup(eventHandlerContext, e.detail)}
         on:toggleRowSelection={(e) => eventHandlers.toggleRowSelection(eventHandlerContext, e.detail)}
@@ -622,11 +769,11 @@
     <PlanWorkModal
       isOpen={showPlanModal}
       work={selectedWorkForPlanning}
-      {selectedDate}
+      selectedDate={planModalSelectedDate}
       {stageCode}
       {shiftCode}
-      on:close={() => eventHandlers.handlePlanModalClose(eventHandlerContext)}
-      on:save={() => eventHandlers.handlePlanSave(eventHandlerContext)}
+      on:close={handlePlanModalCloseForCurrentSession}
+      on:save={handlePlanModalSave}
     />
   {/key}
 
@@ -654,6 +801,48 @@
     on:close={() => eventHandlers.handleCancelWorkModalClose(eventHandlerContext)}
     on:confirm={(e) => eventHandlers.handleCancelWorkConfirm(eventHandlerContext, e)}
   />
+
+  {#if showReplanModal}
+    <button
+      type="button"
+      class="fixed inset-0 z-[9999] w-full h-full border-none bg-black bg-opacity-50 p-0"
+      aria-label="Close replan modal"
+      on:click={closeReplanModal}
+    ></button>
+    <div class="fixed inset-0 z-[10000] flex items-center justify-center p-4">
+      <div class="w-full max-w-lg rounded-lg border-2 border-gray-300 theme-bg-primary shadow-xl dark:border-gray-600">
+        <div class="border-b px-6 py-4 theme-border">
+          <h3 class="text-lg font-semibold theme-text-primary">Replan Work</h3>
+          <p class="mt-1 text-sm theme-text-secondary">Select target date and reason to move this approved plan into a new draft.</p>
+        </div>
+        <div class="space-y-4 px-6 py-4">
+          <div>
+            <label class="mb-2 block text-sm font-medium theme-text-primary" for="replan-date">Target Date</label>
+            <input
+              id="replan-date"
+              type="date"
+              bind:value={replanTargetDate}
+              class="w-full rounded-md border theme-border theme-bg-primary px-3 py-2 theme-text-primary"
+            />
+          </div>
+          <div>
+            <label class="mb-2 block text-sm font-medium theme-text-primary" for="replan-reason">Reason</label>
+            <textarea
+              id="replan-reason"
+              rows="3"
+              bind:value={replanReason}
+              placeholder="Enter reason for replanning..."
+              class="w-full rounded-md border theme-border theme-bg-primary px-3 py-2 theme-text-primary"
+            ></textarea>
+          </div>
+        </div>
+        <div class="flex justify-end gap-2 border-t px-6 py-4 theme-border">
+          <Button variant="secondary" size="sm" on:click={closeReplanModal}>Cancel</Button>
+          <Button variant="primary" size="sm" on:click={handleConfirmReplan}>Continue</Button>
+        </div>
+      </div>
+    </div>
+  {/if}
 
   <ViewWorkHistoryModal 
     isOpen={showViewWorkHistoryModal}

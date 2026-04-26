@@ -1,3 +1,5 @@
+import { getWorkDisplayCode, getWorkDisplayName } from '$lib/utils/workDisplayUtils';
+
 /**
  * Shared search utilities for production tabs
  * Provides consistent search functionality across Plan, Draft Plan, Report, and Draft Report tabs
@@ -21,19 +23,12 @@ export function filterPlannedWorksBySearch(
     const planning = item.prdn_work_planning || item;
     
     // Work code
-    const workCode = planning?.other_work_code || 
-                     planning?.std_work_type_details?.derived_sw_code || 
-                     planning?.std_work_type_details?.sw_code || '';
-    
-    // Work name
-    let workName = '';
-    if (planning?.other_work_code) {
-      workName = planning?.workAdditionData?.other_work_desc || planning?.other_work_code || '';
-    } else {
-      workName = planning?.std_work_type_details?.std_work_details?.sw_name || '';
-    }
-    const typeDescription = planning?.std_work_type_details?.type_description || '';
-    const fullWorkName = workName + (typeDescription ? (workName ? ' - ' : '') + typeDescription : '');
+    const workCode = getWorkDisplayCode(planning) || '';
+    const fullWorkName = getWorkDisplayName({
+      ...item,
+      ...planning,
+      prdn_work_planning: planning
+    }) || '';
     
     // WO and PWO numbers
     const woNo = planning?.prdn_wo_details?.wo_no || item.prdn_wo_details?.wo_no || '';

@@ -3,6 +3,35 @@ import { createWorkPlanning } from '$lib/api/production';
 import { getIndividualSkills, getEffectiveRowTimes, getWorkerSlotKey } from '$lib/utils/planWorkUtils';
 import { getCurrentUsername, getCurrentTimestamp } from '$lib/utils/userUtils';
 import type { PlanWorkFormData, WorkContinuation, SelectedWorker } from '$lib/types/planWork';
+import { cancelWorkPlans } from '$lib/services/workCancellationService';
+
+async function validatePlanningSubmissionGate(
+  stageCode: string,
+  shiftCode: string,
+  planningDate: string
+): Promise<{ allowed: boolean; reason?: string }> {
+  const normalizedDate = planningDate.split('T')[0];
+  const { data, error } = await supabase
+    .from('prdn_planning_submissions')
+    .select('status, version')
+    .eq('stage_code', stageCode)
+    .eq('shift_code', shiftCode)
+    .eq('planning_date', normalizedDate)
+    .eq('is_deleted', false)
+    .order('version', { ascending: false })
+    .limit(1);
+
+  if (error) {
+    return { allowed: false, reason: 'Unable to validate planning submission status.' };
+  }
+
+  const latest = (data || [])[0];
+  if (!latest) return { allowed: true };
+  if (latest.status === 'pending_approval' || latest.status === 'approved') {
+    return { allowed: false, reason: `Planning is blocked because the submission is ${latest.status}.` };
+  }
+  return { allowed: true };
+}
 
 export async function saveWorkPlanning(
   work: any,
@@ -28,6 +57,29 @@ export async function saveWorkPlanning(
 
   const currentUser = getCurrentUsername();
   const now = getCurrentTimestamp();
+  const replanSourcePlanningIds = Array.isArray(work?.replanSourcePlanningIds)
+    ? work.replanSourcePlanningIds.map((id: any) => Number(id)).filter((id: number) => Number.isFinite(id))
+    : [];
+  const replanReason = typeof work?.replanReason === 'string' ? work.replanReason.trim() : '';
+  const hasReplanContext = replanSourcePlanningIds.length > 0 && replanReason.length > 0;
+
+  const submissionGate = await validatePlanningSubmissionGate(stageCode, shiftCode, fromDate);
+  if (!submissionGate.allowed) {
+    throw new Error(submissionGate.reason || 'Planning is blocked for the selected date.');
+  }
+  if (planningToDate && planningToDate !== fromDate) {
+    const toDateGate = await validatePlanningSubmissionGate(stageCode, shiftCode, planningToDate);
+    if (!toDateGate.allowed) {
+      throw new Error(toDateGate.reason || 'Planning is blocked for the selected end date.');
+    }
+  }
+
+  if (hasReplanContext) {
+    const cancelResult = await cancelWorkPlans(replanSourcePlanningIds, replanReason);
+    if (!cancelResult.success) {
+      throw new Error(cancelResult.error || 'Failed to cancel source plan for replan.');
+    }
+  }
   
   // Check if this is edit mode (has existing draft plans to replace)
   const isEditMode = work?.existingDraftPlans && Array.isArray(work.existingDraftPlans) && work.existingDraftPlans.length > 0;
@@ -85,7 +137,7 @@ export async function saveWorkPlanning(
           time_worked_till_date: workContinuation.timeWorkedTillDate,
           remaining_time: Math.max(0, workContinuation.remainingTime - eff.plannedHours),
           status: 'draft' as const,
-          notes: `Planned for ${skillShort} skill`,
+          notes: hasReplanContext ? replanReason : `Planned for ${skillShort} skill`,
           wsm_id: isNonStandardWork ? null : wsmId
         };
         
@@ -138,7 +190,7 @@ export async function saveWorkPlanning(
         time_worked_till_date: workContinuation.timeWorkedTillDate,
         remaining_time: Math.max(0, workContinuation.remainingTime - eff.plannedHours),
         status: 'draft' as const,
-        notes: 'General work planning'
+        notes: hasReplanContext ? replanReason : 'General work planning'
       };
       
       if (existingPlan && existingPlan.id) {
@@ -287,7 +339,7 @@ export async function saveWorkPlanning(
         time_worked_till_date: workContinuation.timeWorkedTillDate,
         remaining_time: Math.max(0, workContinuation.remainingTime - eff.plannedHours),
         status: 'draft' as const,
-        notes: `Trainee: ${trainee.emp_name}`,
+        notes: hasReplanContext ? replanReason : `Trainee: ${trainee.emp_name}`,
         wsm_id: null // Trainees don't have skill mappings
       };
       

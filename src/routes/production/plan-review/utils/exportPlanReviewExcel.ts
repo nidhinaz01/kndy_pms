@@ -2,6 +2,7 @@ import * as XLSX from 'xlsx';
 import { groupPlannedWorks } from '../../[stage_Shift]/utils/planTabUtils';
 import { formatTime, calculateBreakTimeInRange } from '../../[stage_Shift]/utils/timeUtils';
 import { formatManpowerAttendanceLong } from '$lib/utils/manpowerAttendanceStatus';
+import { getWorkDisplayCode, getWorkDisplayName } from '$lib/utils/workDisplayUtils';
 
 function timeToMinutes(timeStr: string): number {
   const [hours, minutes] = timeStr.split(':').map(Number);
@@ -75,16 +76,8 @@ function worksRowsForExcel(
 
   Object.values(groupedPlannedWorks).forEach((group: any) => {
     group.items.forEach((work: any, index: number) => {
-      const workCode =
-        work.other_work_code ||
-        work.std_work_type_details?.derived_sw_code ||
-        work.std_work_type_details?.sw_code ||
-        'N/A';
-      const workName = work.other_work_code
-        ? work.workAdditionData?.other_work_desc || work.other_work_code
-        : work.std_work_type_details?.std_work_details?.sw_name || '';
-      const typeDescription = work.std_work_type_details?.type_description || '';
-      const fullWorkName = workName + (typeDescription ? (workName ? ' - ' : '') + typeDescription : '');
+      const workCode = getWorkDisplayCode(work) || 'N/A';
+      const fullWorkName = getWorkDisplayName(work) || 'N/A';
 
       let plannedHours = work.planned_hours || 0;
       if (plannedHours === 0 && work.from_time && work.to_time) {

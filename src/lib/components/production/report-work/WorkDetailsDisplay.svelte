@@ -1,5 +1,6 @@
 <script lang="ts">
   import { formatTime, formatMinutes } from '$lib/utils/reportWorkUtils';
+  import { getWorkDisplayCode, getWorkDisplayName } from '$lib/utils/workDisplayUtils';
 
   export let plannedWork: any = null;
   export let standardTimeMinutes: number = 0;
@@ -24,21 +25,13 @@
     <div>
       <span class="theme-text-secondary">Work Code:</span> 
       <span class="theme-text-primary">
-        {plannedWork?.other_work_code || plannedWork?.std_work_type_details?.derived_sw_code || plannedWork?.derived_sw_code || plannedWork?.std_work_type_details?.sw_code || 'N/A'}
+        {getWorkDisplayCode(plannedWork) || 'N/A'}
       </span>
     </div>
     <div>
       <span class="theme-text-secondary">Work Name:</span> 
       <span class="theme-text-primary">
-        {#if plannedWork?.other_work_code}
-          {@const workName = plannedWork?.workAdditionData?.other_work_desc || plannedWork?.other_work_code || 'N/A'}
-          {workName}
-        {:else}
-          {@const workName = plannedWork?.std_work_type_details?.std_work_details?.sw_name || ''}
-          {@const typeDescription = plannedWork?.std_work_type_details?.type_description || ''}
-          {@const fullWorkName = workName + (typeDescription ? (workName ? ' - ' : '') + typeDescription : '')}
-          {fullWorkName || 'N/A'}
-        {/if}
+        {getWorkDisplayName(plannedWork) || 'N/A'}
       </span>
     </div>
     <div>

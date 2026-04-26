@@ -5,6 +5,7 @@
   import { supabase } from '$lib/supabaseClient';
   import { formatDateTimeLocal } from '$lib/utils/formatDate';
   import { formatTime } from '$lib/utils/timeFormatUtils';
+  import { getWorkDisplayCode, getWorkDisplayName } from '$lib/utils/workDisplayUtils';
   
   // Use shared utility
   const formatDateTime = formatDateTimeLocal;
@@ -22,7 +23,7 @@
 
   // Watch for work changes: clear previous data immediately, then load for current work
   $: if (work && isOpen) {
-    if (work.wo_details_id != null && (work.std_work_type_details?.derived_sw_code || work.sw_code || work.other_work_code)) {
+    if (work.wo_details_id != null && getWorkDisplayCode(work)) {
       workHistory = [];
       totalTimeTaken = 0;
       skillBreakdown = {};
@@ -36,7 +37,7 @@
     if (!work) return;
 
     const woDetailsId = work.wo_details_id;
-    const workCode = work.std_work_type_details?.derived_sw_code || work.sw_code || work.other_work_code || '';
+    const workCode = getWorkDisplayCode(work) || '';
     if (woDetailsId == null || !workCode) {
       workHistory = [];
       totalTimeTaken = 0;
@@ -63,7 +64,7 @@
 
       const planningIds = (planningRows || []).map((p: { id: number }) => p.id);
       if (planningIds.length === 0) {
-        if (work && work.wo_details_id === woDetailsId && (work.std_work_type_details?.derived_sw_code || work.sw_code || work.other_work_code) === workCode) {
+        if (work && work.wo_details_id === woDetailsId && getWorkDisplayCode(work) === workCode) {
           workHistory = [];
           totalTimeTaken = 0;
           skillBreakdown = {};
@@ -104,7 +105,7 @@
       }
 
       // Race guard: only apply result if this is still the work the modal is showing
-      const currentCode = work?.std_work_type_details?.derived_sw_code || work?.sw_code || work?.other_work_code || '';
+      const currentCode = getWorkDisplayCode(work) || '';
       if (!work || work.wo_details_id !== woDetailsId || currentCode !== workCode) {
         return;
       }
@@ -194,13 +195,13 @@
         <div class="flex items-center justify-between p-6 border-b theme-border">
           <div>
             <h2 class="text-2xl font-semibold theme-text-primary">
-              Work History - {work?.std_work_type_details?.derived_sw_code || work?.sw_code || work?.other_work_code || 'Unknown'}
+              Work History - {getWorkDisplayCode(work) || 'Unknown'}
               {#if work?.wo_no || work?.prdn_wo_details?.wo_no}
                 <span class="text-lg font-normal theme-text-secondary">(WO: {work?.wo_no || work?.prdn_wo_details?.wo_no})</span>
               {/if}
             </h2>
             <p class="text-sm theme-text-secondary mt-1">
-              {work?.sw_name || work?.std_work_type_details?.std_work_details?.sw_name || 'Work details'}
+              {getWorkDisplayName(work) || 'Work details'}
             </p>
           </div>
           <button

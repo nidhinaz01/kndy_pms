@@ -1,5 +1,6 @@
 import type { WorksTableFilters, WorkStatus } from '$lib/types/worksTable';
 import { formatTimeFromMinutes } from './timeFormatUtils';
+import { getWorkDisplayCode, getWorkDisplayName } from './workDisplayUtils';
 
 export function parseTimeToHours(timeStr: string | number): number {
   if (typeof timeStr === 'number') return timeStr;
@@ -28,7 +29,7 @@ export function getSkillLevelColor(skill: string): string {
 }
 
 export function getWorkId(work: any): string {
-  const derivedSwCode = work.std_work_type_details?.derived_sw_code || work.sw_code;
+  const derivedSwCode = getWorkDisplayCode(work);
   const woDetailsId = work.wo_details_id;
   return `${derivedSwCode}_${woDetailsId}`;
 }
@@ -42,8 +43,8 @@ export function getWorkStatusRowParts(work: any): {
   otherWorkCode: string | null;
   woDetailsId: number | undefined;
 } {
-  const derivedSwCode = work.std_work_type_details?.derived_sw_code || work.sw_code;
-  const otherWorkCode = work.is_added_work ? (work.sw_code || null) : null;
+  const derivedSwCode = work.std_work_type_details?.derived_sw_code || null;
+  const otherWorkCode = work.other_work_code || (work.is_added_work ? (work.sw_code || null) : null);
   const workCode = derivedSwCode || otherWorkCode || 'Unknown';
   const woDetailsId = work.wo_details_id;
   return { workCode, derivedSwCode, otherWorkCode, woDetailsId };
@@ -65,9 +66,8 @@ export function applyFilters(
 
   if (filters.searchTerm) {
     filtered = filtered.filter(work => 
-      (work.std_work_type_details?.derived_sw_code || work.sw_code)?.toLowerCase().includes(filters.searchTerm.toLowerCase()) ||
-      work.sw_name?.toLowerCase().includes(filters.searchTerm.toLowerCase()) ||
-      work.std_work_type_details?.type_description?.toLowerCase().includes(filters.searchTerm.toLowerCase()) ||
+      getWorkDisplayCode(work)?.toLowerCase().includes(filters.searchTerm.toLowerCase()) ||
+      getWorkDisplayName(work)?.toLowerCase().includes(filters.searchTerm.toLowerCase()) ||
       work.mstr_wo_type?.wo_type_name?.toLowerCase().includes(filters.searchTerm.toLowerCase()) ||
       (work.wo_no || '').toLowerCase().includes(filters.searchTerm.toLowerCase()) ||
       (work.pwo_no || '').toLowerCase().includes(filters.searchTerm.toLowerCase())
@@ -94,15 +94,14 @@ export function applyFilters(
 
   if (filters.workCodeFilter) {
     filtered = filtered.filter(work => {
-      const code = (work.std_work_type_details?.derived_sw_code || work.sw_code || '').toLowerCase();
+      const code = (getWorkDisplayCode(work) || '').toLowerCase();
       return code.includes(filters.workCodeFilter.toLowerCase());
     });
   }
 
   if (filters.workNameFilter) {
     filtered = filtered.filter(work => 
-      (work.sw_name || '').toLowerCase().includes(filters.workNameFilter.toLowerCase()) ||
-      (work.std_work_type_details?.type_description || '').toLowerCase().includes(filters.workNameFilter.toLowerCase())
+      (getWorkDisplayName(work) || '').toLowerCase().includes(filters.workNameFilter.toLowerCase())
     );
   }
 
@@ -178,10 +177,8 @@ function uniqueSortedField(
 export function buildWorksFilterDatalists(works: any[]): WorksFilterDatalists {
   const workNames = new Set<string>();
   for (const w of works || []) {
-    const n1 = w.sw_name;
-    const n2 = w.std_work_type_details?.type_description;
-    if (n1 != null && String(n1).trim() !== '') workNames.add(String(n1).trim());
-    if (n2 != null && String(n2).trim() !== '') workNames.add(String(n2).trim());
+    const name = getWorkDisplayName(w);
+    if (name != null && String(name).trim() !== '') workNames.add(String(name).trim());
   }
 
   const skillNames = new Set<string>();
@@ -198,7 +195,7 @@ export function buildWorksFilterDatalists(works: any[]): WorksFilterDatalists {
     woNo: uniqueSortedField(works, (w) => w.wo_no),
     pwoNo: uniqueSortedField(works, (w) => w.pwo_no),
     vehicleModel: uniqueSortedField(works, (w) => w.mstr_wo_type?.wo_type_name),
-    workCode: uniqueSortedField(works, (w) => w.std_work_type_details?.derived_sw_code || w.sw_code),
+    workCode: uniqueSortedField(works, (w) => getWorkDisplayCode(w)),
     workName: [...workNames].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' })),
     requiredSkills: [...skillNames].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
   };

@@ -32,12 +32,11 @@
   ];
 
   // Submissions data
-  let pendingSubmissions: any[] = [];
-  let approvedSubmissions: any[] = [];
+  let submissions: any[] = [];
+  let submissionSearch = '';
   let selectedSubmission: any = null;
   let isLoading = false;
   let isSubmissionsLoading = false;
-  let isApprovedSubmissionsLoading = false;
   
   // PDF viewing
   let pdfBlob: Blob | null = null;
@@ -165,6 +164,90 @@
   let showApprovalModal = false;
   let approvalAction: 'approve' | 'reject' = 'approve';
   let rejectionReason = '';
+  let showRevertModal = false;
+  let revertReason = '';
+
+  function statusLabel(status: string): string {
+    if (status === 'pending_approval') return 'Pending';
+    if (status === 'approved') return 'Approved';
+    if (status === 'rejected') return 'Rejected';
+    if (status === 'reverted') return 'Reverted';
+    return status || 'Unknown';
+  }
+
+  function statusBadgeClass(status: string): string {
+    if (status === 'approved') {
+      return 'bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-300';
+    }
+    if (status === 'pending_approval') {
+      return 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/25 dark:text-yellow-300';
+    }
+    if (status === 'rejected') {
+      return 'bg-red-100 text-red-800 dark:bg-red-900/25 dark:text-red-300';
+    }
+    if (status === 'reverted') {
+      return 'bg-purple-100 text-purple-800 dark:bg-purple-900/25 dark:text-purple-300';
+    }
+    return 'theme-bg-secondary theme-text-secondary';
+  }
+
+  function submissionRowClass(submission: any): string {
+    const status = submission?.status;
+    const isSelected = selectedSubmission?.id === submission?.id;
+    if (status === 'approved') {
+      return isSelected
+        ? 'bg-green-100 dark:bg-green-900/35 border-green-500'
+        : 'bg-green-50 dark:bg-green-900/15 border-green-200 dark:border-green-900/40 hover:bg-green-100 dark:hover:bg-green-900/25';
+    }
+    if (status === 'pending_approval') {
+      return isSelected
+        ? 'bg-yellow-100 dark:bg-yellow-900/35 border-yellow-500'
+        : 'bg-yellow-50 dark:bg-yellow-900/15 border-yellow-200 dark:border-yellow-900/40 hover:bg-yellow-100 dark:hover:bg-yellow-900/25';
+    }
+    if (status === 'rejected') {
+      return isSelected
+        ? 'bg-red-100 dark:bg-red-900/35 border-red-500'
+        : 'bg-red-50 dark:bg-red-900/15 border-red-200 dark:border-red-900/40 hover:bg-red-100 dark:hover:bg-red-900/25';
+    }
+    if (status === 'reverted') {
+      return isSelected
+        ? 'bg-purple-100 dark:bg-purple-900/35 border-purple-500'
+        : 'bg-purple-50 dark:bg-purple-900/15 border-purple-200 dark:border-purple-900/40 hover:bg-purple-100 dark:hover:bg-purple-900/25';
+    }
+    return isSelected
+      ? 'bg-blue-50 dark:bg-blue-900/20 border-blue-300'
+      : 'theme-bg-secondary hover:theme-bg-secondary';
+  }
+
+  $: filteredSubmissions = [...(submissions || [])]
+    .filter((submission) => {
+      const q = submissionSearch.trim().toLowerCase();
+      if (!q) return true;
+      const searchable = [
+        submission?.stage_code || '',
+        submission?.shift_code || '',
+        submission?.reporting_date || '',
+        submission?.submitted_by || '',
+        submission?.reviewed_by || '',
+        statusLabel(submission?.status)
+      ]
+        .join(' ')
+        .toLowerCase();
+      return searchable.includes(q);
+    })
+    .sort((a, b) => {
+      const stageCmp = String(a?.stage_code || '').localeCompare(String(b?.stage_code || ''), undefined, {
+        sensitivity: 'base'
+      });
+      if (stageCmp !== 0) return stageCmp;
+      const shiftCmp = String(a?.shift_code || '').localeCompare(String(b?.shift_code || ''), undefined, {
+        sensitivity: 'base'
+      });
+      if (shiftCmp !== 0) return shiftCmp;
+      const dateCmp = String(b?.reporting_date || '').localeCompare(String(a?.reporting_date || ''));
+      if (dateCmp !== 0) return dateCmp;
+      return Number(b?.version || 0) - Number(a?.version || 0);
+    });
 
   /** Pending/approved submission card title in sidebar, e.g. P1S1 - GEN */
   function submissionStageShiftLabel(submission: { stage_code?: string; shift_code?: string } | null | undefined): string {
@@ -203,8 +286,7 @@
     if (username) {
       menus = await fetchUserMenus(username);
     }
-    await loadPendingSubmissions();
-    await loadApprovedSubmissions();
+    await loadSubmissions();
   });
   
   // Reload submissions when date changes
@@ -215,17 +297,15 @@
       worksReportData = [];
       manpowerReportData = [];
     }
-    loadPendingSubmissions();
-    loadApprovedSubmissions();
+    loadSubmissions();
   }
 
-  async function loadPendingSubmissions() {
+  async function loadSubmissions() {
     isSubmissionsLoading = true;
     try {
       let query = supabase
         .from('prdn_reporting_submissions')
         .select('*, version')
-        .eq('status', 'pending_approval')
         .eq('is_deleted', false);
       
       // Filter by date if selected
@@ -233,55 +313,25 @@
         query = query.eq('reporting_date', selectedDate);
       }
       
-      // Filter by stage if selected
-      if (selectedStage) {
-        query = query.eq('stage_code', selectedStage);
-      }
-      
-      const { data, error } = await query.order('version', { ascending: false }).order('submitted_dt', { ascending: false });
+      const { data, error } = await query
+        .in('status', ['pending_approval', 'approved', 'rejected', 'reverted'])
+        .order('stage_code', { ascending: true })
+        .order('shift_code', { ascending: true })
+        .order('reporting_date', { ascending: false })
+        .order('version', { ascending: false })
+        .order('submitted_dt', { ascending: false });
 
       if (error) {
-        console.error('Error loading pending submissions:', error);
+        console.error('Error loading submissions:', error);
         throw error;
       }
       
-      pendingSubmissions = data || [];
+      submissions = data || [];
     } catch (error) {
-      console.error('Error loading pending submissions:', error);
-      pendingSubmissions = [];
+      console.error('Error loading submissions:', error);
+      submissions = [];
     } finally {
       isSubmissionsLoading = false;
-    }
-  }
-  
-  async function loadApprovedSubmissions() {
-    isApprovedSubmissionsLoading = true;
-    try {
-      let query = supabase
-        .from('prdn_reporting_submissions')
-        .select('*, version')
-        .eq('status', 'approved')
-        .eq('is_deleted', false);
-      
-      // Filter by date if selected
-      if (selectedDate) {
-        query = query.eq('reporting_date', selectedDate);
-      }
-      
-      // Filter by stage if selected
-      if (selectedStage) {
-        query = query.eq('stage_code', selectedStage);
-      }
-      
-      const { data, error } = await query.order('version', { ascending: false }).order('reviewed_dt', { ascending: false });
-
-      if (error) throw error;
-      approvedSubmissions = data || [];
-    } catch (error) {
-      console.error('Error loading approved submissions:', error);
-      approvedSubmissions = [];
-    } finally {
-      isApprovedSubmissionsLoading = false;
     }
   }
 
@@ -291,12 +341,6 @@
     await loadSubmissionDetails();
   }
   
-  async function handleApprovedSubmissionSelect(submission: any) {
-    selectedSubmission = submission;
-    selectedStage = submission.stage_code;
-    await loadSubmissionDetails();
-  }
-
   async function loadSubmissionDetails() {
     if (!selectedSubmission) return;
 
@@ -904,7 +948,7 @@
       showApprovalModal = false;
       rejectionReason = '';
       selectedSubmission = null;
-      await loadPendingSubmissions();
+      await loadSubmissions();
     } catch (error) {
       console.error('Error processing approval:', error);
       alert('Error processing approval: ' + ((error as Error).message || 'Unknown error'));
@@ -916,6 +960,51 @@
   function handleApprovalCancel() {
     showApprovalModal = false;
     rejectionReason = '';
+  }
+
+  function handleOpenRevertModal() {
+    showRevertModal = true;
+  }
+
+  function handleRevertCancel() {
+    showRevertModal = false;
+    revertReason = '';
+  }
+
+  async function handleRevertConfirm() {
+    if (!selectedSubmission || selectedSubmission.status !== 'approved') return;
+    if (!revertReason.trim()) {
+      alert('Please provide a reason for reverting to draft');
+      return;
+    }
+
+    isLoading = true;
+    try {
+      const currentUser = getCurrentUsername();
+      const { data, error } = await supabase.rpc('revert_reporting_submission_to_draft', {
+        p_submission_id: selectedSubmission.id,
+        p_reverted_by: currentUser,
+        p_revert_reason: revertReason.trim()
+      });
+
+      if (error) throw error;
+      if (data && data.success === false) {
+        throw new Error(data.error || 'Unable to revert reporting submission');
+      }
+
+      alert('Approved report reverted to draft successfully.');
+      showRevertModal = false;
+      revertReason = '';
+      selectedSubmission = null;
+      worksReportData = [];
+      manpowerReportData = [];
+      await loadSubmissions();
+    } catch (error) {
+      console.error('Error reverting approved report:', error);
+      alert('Error reverting approved report: ' + ((error as Error).message || 'Unknown error'));
+    } finally {
+      isLoading = false;
+    }
   }
 
   async function handleTabChange(tabId: string) {
@@ -991,85 +1080,54 @@
 
   <!-- Main Content -->
   <div class="flex flex-1 p-4 gap-6">
-    <!-- Left Sidebar - Split into Pending and Approved Submissions (stacked vertically) -->
+    <!-- Left Sidebar - Unified Submissions -->
     <div class="w-1/3 flex flex-col gap-4">
-      <!-- Pending Submissions Section (Above) -->
       <div class="flex-1 theme-bg-primary rounded-lg shadow border theme-border p-4 flex flex-col">
         <div class="mb-4">
-          <h3 class="text-lg font-semibold theme-text-primary mb-2">Pending Submissions</h3>
-          <select
-            bind:value={selectedStage}
-            on:change={() => { loadPendingSubmissions(); loadApprovedSubmissions(); }}
+          <h3 class="text-lg font-semibold theme-text-primary mb-2">Submissions</h3>
+          <input
+            type="text"
+            bind:value={submissionSearch}
+            placeholder="Quick search: stage, shift, date, status..."
             class="w-full px-3 py-2 theme-bg-primary theme-border theme-text-primary rounded-lg text-sm"
-          >
-            <option value="">All Stages</option>
-            {#each availableStages as stage}
-              <option value={stage}>{stage}</option>
-            {/each}
-          </select>
+          />
         </div>
 
         {#if isSubmissionsLoading}
           <div class="flex items-center justify-center py-8 flex-1">
             <div class="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-500"></div>
           </div>
-        {:else if pendingSubmissions.length === 0}
+        {:else if filteredSubmissions.length === 0}
           <div class="text-center py-8 flex-1">
-            <p class="theme-text-secondary">No pending submissions</p>
+            <p class="theme-text-secondary">
+              {submissionSearch.trim() ? 'No matching submissions' : 'No submissions'}
+            </p>
           </div>
         {:else}
           <div class="space-y-2 overflow-y-auto flex-1">
-            {#each pendingSubmissions.filter(s => !selectedStage || s.stage_code === selectedStage) as submission}
+            {#each filteredSubmissions as submission}
               <button
                 on:click={() => handleSubmissionSelect(submission)}
-                class="w-full text-left p-3 rounded-lg border theme-border transition-colors {selectedSubmission?.id === submission.id && selectedSubmission?.status === 'pending_approval' ? 'bg-blue-50 dark:bg-blue-900/20 border-blue-300' : 'theme-bg-secondary hover:theme-bg-secondary'}"
+                class="w-full text-left p-3 rounded-lg border theme-border transition-colors {submissionRowClass(submission)}"
               >
-                <div class="font-medium theme-text-primary">
-                  {submissionStageShiftLabel(submission)}
-                  {#if submission.version && submission.version > 1}
-                    <span class="text-xs font-normal theme-text-secondary"> (v{submission.version})</span>
-                  {/if}
+                <div class="flex items-start justify-between gap-2">
+                  <div class="font-medium theme-text-primary">
+                    {submissionStageShiftLabel(submission)}
+                    {#if submission.version && submission.version > 1}
+                      <span class="text-xs font-normal theme-text-secondary"> (v{submission.version})</span>
+                    {/if}
+                  </div>
+                  <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold {statusBadgeClass(submission.status)}">
+                    {statusLabel(submission.status)}
+                  </span>
                 </div>
-                <div class="text-sm theme-text-secondary">{submission.reporting_date}</div>
+                <div class="text-sm theme-text-secondary mt-1">{submission.reporting_date}</div>
                 <div class="text-xs theme-text-secondary mt-1">
-                  By: {submission.submitted_by} | {formatDateTimeLocal(submission.submitted_dt)}
-                </div>
-              </button>
-            {/each}
-          </div>
-        {/if}
-      </div>
-      
-      <!-- Approved Submissions Section (Below) -->
-      <div class="flex-1 theme-bg-primary rounded-lg shadow border theme-border p-4 flex flex-col">
-        <div class="mb-4">
-          <h3 class="text-lg font-semibold theme-text-primary mb-2">Approved Submissions</h3>
-        </div>
-
-        {#if isApprovedSubmissionsLoading}
-          <div class="flex items-center justify-center py-8 flex-1">
-            <div class="animate-spin rounded-full h-6 w-6 border-b-2 border-green-500"></div>
-          </div>
-        {:else if approvedSubmissions.length === 0}
-          <div class="text-center py-8 flex-1">
-            <p class="theme-text-secondary">No approved submissions</p>
-          </div>
-        {:else}
-          <div class="space-y-2 overflow-y-auto flex-1">
-            {#each approvedSubmissions.filter(s => !selectedStage || s.stage_code === selectedStage) as submission}
-              <button
-                on:click={() => handleApprovedSubmissionSelect(submission)}
-                class="w-full text-left p-3 rounded-lg border theme-border transition-colors {selectedSubmission?.id === submission.id && selectedSubmission?.status === 'approved' ? 'bg-green-50 dark:bg-green-900/20 border-green-300' : 'theme-bg-secondary hover:theme-bg-secondary'}"
-              >
-                <div class="font-medium theme-text-primary">
-                  {submissionStageShiftLabel(submission)}
-                  {#if submission.version && submission.version > 1}
-                    <span class="text-xs font-normal theme-text-secondary"> (v{submission.version})</span>
+                  {#if submission.status === 'approved'}
+                    Reviewed: {submission.reviewed_by || '—'} | {submission.reviewed_dt ? formatDateTimeLocal(submission.reviewed_dt) : '—'}
+                  {:else}
+                    By: {submission.submitted_by} | {formatDateTimeLocal(submission.submitted_dt)}
                   {/if}
-                </div>
-                <div class="text-sm theme-text-secondary">{submission.reporting_date}</div>
-                <div class="text-xs theme-text-secondary mt-1">
-                  Reviewed: {submission.reviewed_by} | {formatDateTimeLocal(submission.reviewed_dt)}
                 </div>
               </button>
             {/each}
@@ -1089,7 +1147,11 @@
         <div class="mb-4 flex items-center justify-between">
           <div>
             <h2 class="text-xl font-semibold theme-text-primary">
-              Review: {selectedSubmission.stage_code} - {selectedSubmission.reporting_date}
+              {selectedSubmission.status === 'approved'
+                ? 'Approved Report'
+                : selectedSubmission.status === 'reverted'
+                ? 'Reverted Report'
+                : 'Review'}: {selectedSubmission.stage_code} - {selectedSubmission.reporting_date}
               {#if selectedSubmission.version && selectedSubmission.version > 1}
                 <span class="text-sm font-normal theme-text-secondary">(v{selectedSubmission.version})</span>
               {/if}
@@ -1107,6 +1169,10 @@
               </Button>
               <Button variant="primary" size="sm" on:click={handleApprove} disabled={isLoading}>
                 Approve
+              </Button>
+            {:else if selectedSubmission.status === 'approved'}
+              <Button variant="secondary" size="sm" on:click={handleOpenRevertModal} disabled={isLoading}>
+                Revert to Draft
               </Button>
             {/if}
             {#if activeTab === 'works-report' && pdfBlob}
@@ -1523,6 +1589,42 @@
           disabled={isLoading || (approvalAction === 'reject' && !rejectionReason.trim())}
         >
           {isLoading ? 'Processing...' : (approvalAction === 'approve' ? 'Approve' : 'Reject')}
+        </Button>
+      </div>
+    </div>
+  </div>
+{/if}
+
+<!-- Revert Modal -->
+{#if showRevertModal}
+  <div class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
+    <div class="theme-bg-primary rounded-lg shadow-xl border theme-border p-6 max-w-md w-full mx-4">
+      <h3 class="text-lg font-semibold theme-text-primary mb-4">Revert Approved Report</h3>
+
+      <div class="mb-4">
+        <label for="report-review-revert-reason" class="block text-sm font-medium theme-text-primary mb-2">
+          Reason for Revert <span class="text-red-500">*</span>
+        </label>
+        <textarea
+          id="report-review-revert-reason"
+          bind:value={revertReason}
+          rows="4"
+          placeholder="Enter reason for reverting this approved report..."
+          class="w-full px-3 py-2 theme-bg-primary theme-border theme-text-primary rounded-lg"
+        ></textarea>
+      </div>
+
+      <div class="flex justify-end gap-2">
+        <Button variant="secondary" size="sm" on:click={handleRevertCancel} disabled={isLoading}>
+          Cancel
+        </Button>
+        <Button
+          variant="danger"
+          size="sm"
+          on:click={handleRevertConfirm}
+          disabled={isLoading || !revertReason.trim()}
+        >
+          {isLoading ? 'Processing...' : 'Revert to Draft'}
         </Button>
       </div>
     </div>

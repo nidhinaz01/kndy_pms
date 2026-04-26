@@ -12,6 +12,7 @@
   import type { ReportWorkFormData, ReportWorkState, LostTimeChunk } from '$lib/types/reportWork';
   import { initialReportWorkFormData, initialReportWorkState } from '$lib/types/reportWork';
   import type { LostTimeReason } from '$lib/api/lostTimeReasons';
+  import { getWorkDisplayCode } from '$lib/utils/workDisplayUtils';
   import WorkDetailsDisplay from './report-work/WorkDetailsDisplay.svelte';
   import WorkerTimeSelection from './report-work/WorkerTimeSelection.svelte';
   import LostTimeSplitting from './report-work/LostTimeSplitting.svelte';
@@ -65,8 +66,7 @@
 
   // Check if this is a non-standard work (code starts with OW or has other_work_code)
   $: isNonStandardWork = plannedWork?.other_work_code ? true : 
-    (plannedWork?.std_work_type_details?.derived_sw_code?.startsWith('OW') || 
-     plannedWork?.std_work_type_details?.sw_code?.startsWith('OW') || false);
+    (getWorkDisplayCode(plannedWork)?.startsWith('OW') || false);
 
   // Watch for time changes to calculate lost time (only for standard works)
   $: {

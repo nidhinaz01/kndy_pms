@@ -124,7 +124,7 @@ export async function getDraftWorkPlans(
         .eq('stage_code', stageCode)
         .eq('shift_code', shiftCode)
         .eq('from_date', planningDate)
-        .in('status', ['draft', 'pending_approval', 'approved'])
+        .in('status', ['draft', 'pending_approval', 'approved', 'rejected'])
         .eq('is_active', true)
         .eq('is_deleted', false)
         .order('from_time', { ascending: true })

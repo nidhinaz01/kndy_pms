@@ -296,7 +296,8 @@
   $: isPendingApproval = reportingSubmissionStatus?.status === 'pending_approval';
   $: isApproved = reportingSubmissionStatus?.status === 'approved';
   $: isRejected = reportingSubmissionStatus?.status === 'rejected';
-  $: canEdit = !hasSubmission || isRejected; // Can edit if no submission or if rejected
+  $: isReverted = reportingSubmissionStatus?.status === 'reverted';
+  $: canEdit = !hasSubmission || isRejected || isReverted; // Can edit if no submission, rejected, or reverted
   $: shouldDisableSubmit =
     isLoading ||
     totalReports === 0 ||
@@ -336,6 +337,8 @@
       return { text: `Approved${versionText}`, color: 'bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-400' };
     } else if (status === 'rejected') {
       return { text: `Rejected${versionText}`, color: 'bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-400' };
+    } else if (status === 'reverted') {
+      return { text: `Reverted${versionText}`, color: 'bg-purple-100 text-purple-800 dark:bg-purple-900/20 dark:text-purple-300' };
     }
     return null;
   })();
@@ -446,7 +449,7 @@
         variant="secondary" 
         size="sm" 
         on:click={handleReportUnplannedWork}
-        disabled={isLoading || isPendingApproval || isApproved}
+          disabled={isLoading || isPendingApproval || isApproved}
       >
         Report Unplanned Work
       </Button>
@@ -454,7 +457,7 @@
         variant="warning" 
         size="sm" 
         on:click={handleReportOT}
-        disabled={isLoading || isCalculatingOT || !hasOvertime || !allEmployeeReportingComplete || otReported || isPendingApproval || isApproved}
+          disabled={isLoading || isCalculatingOT || !hasOvertime || !allEmployeeReportingComplete || otReported || isPendingApproval || isApproved}
         title={reportOtDisabledReason || ''}
       >
         {isCalculatingOT ? 'Calculating...' : 'Report OT'}

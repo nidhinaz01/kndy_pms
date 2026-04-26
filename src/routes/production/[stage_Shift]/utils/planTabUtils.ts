@@ -1,3 +1,5 @@
+import { getWorkDisplayCode, getWorkDisplayName } from '$lib/utils/workDisplayUtils';
+
 /**
  * Get skill order from skillMapping for sorting
  */
@@ -64,31 +66,14 @@ export function groupPlannedWorks(plannedWorks: any[]): Record<string, any> {
     if (!work) return groups;
     
     // Check work code from multiple sources (handle cases where joins might fail)
-    const workCode = work.other_work_code || 
-                     work.derived_sw_code ||  // Direct field on planning record
-                     work.std_work_type_details?.derived_sw_code || 
-                     work.std_work_type_details?.sw_code || 
-                     'unknown';
+    const workCode = getWorkDisplayCode(work) || 'unknown';
     
         // Log if work code is 'unknown' (for any work, not just P0141A)
         if (workCode === 'unknown') {
           console.warn(`⚠️ groupPlannedWorks: Record ID ${work.id} has workCode 'unknown' - derived_sw_code: ${work.derived_sw_code}, std_work_type_details: ${!!work.std_work_type_details}`);
         }
     
-    let workName = '';
-    if (work.other_work_code) {
-      // Check for workAdditionData on the work item itself (after enrichment)
-      if (work.workAdditionData?.other_work_desc) {
-        workName = work.workAdditionData.other_work_desc;
-      } else {
-        workName = work.other_work_code;
-      }
-    } else {
-      workName = work.std_work_type_details?.std_work_details?.sw_name || '';
-    }
-    
-    const typeDescription = work.std_work_type_details?.type_description || '';
-    const fullWorkName = workName + (typeDescription ? (workName ? ' - ' : '') + typeDescription : '');
+    const fullWorkName = getWorkDisplayName(work) || '';
     
     // Get work order details - handle multiple work orders with same work code
     const woDetailsId = work.wo_details_id || work.prdn_wo_details?.id;
@@ -232,28 +217,17 @@ export function groupPlannedWorks(plannedWorks: any[]): Record<string, any> {
 export function groupReportWorks(reportData: any[]): Record<string, any> {
   const groups = (reportData || []).reduce((groups, report) => {
     const planning = report.prdn_work_planning;
-    const workCode = planning?.other_work_code || 
-                     planning?.std_work_type_details?.derived_sw_code || 
-                     planning?.std_work_type_details?.sw_code || 'unknown';
+    const workCode = getWorkDisplayCode(planning) || 'unknown';
     
     // Include wo_details_id (work order identity) in grouping key to match Plan grouping.
     const woDetailsId = planning?.wo_details_id || planning?.prdn_wo_details?.id || null;
     const groupKey = `${workCode}_${woDetailsId || 'unknown'}`;
     
-    let workName = '';
-    if (planning?.other_work_code) {
-      if (report.workAdditionData?.other_work_desc) {
-        workName = report.workAdditionData.other_work_desc;
-      } else if (planning.workAdditionData?.other_work_desc) {
-        workName = planning.workAdditionData.other_work_desc;
-      } else {
-        workName = planning.other_work_code;
-      }
-    } else {
-      workName = planning?.std_work_type_details?.std_work_details?.sw_name || '';
-    }
-    const typeDescription = planning?.std_work_type_details?.type_description || '';
-    const fullWorkName = workName + (typeDescription ? (workName ? ' - ' : '') + typeDescription : '');
+    const fullWorkName = getWorkDisplayName({
+      ...report,
+      ...planning,
+      prdn_work_planning: planning
+    }) || '';
     
     if (!groups[groupKey]) {
       groups[groupKey] = {
@@ -361,7 +335,7 @@ export function groupReportWorks(reportData: any[]): Record<string, any> {
  */
 export function areAllSkillsReported(workCode: string, plannedWorks: any[]): boolean {
   const allWorksForThisCode = plannedWorks.filter(work => {
-    const code = work.std_work_type_details?.derived_sw_code || work.std_work_type_details?.sw_code;
+    const code = getWorkDisplayCode(work);
     return code === workCode;
   });
 
