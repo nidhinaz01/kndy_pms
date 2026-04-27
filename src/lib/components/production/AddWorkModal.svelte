@@ -37,6 +37,7 @@
 
   let isLoading = false;
   let loadingData = false;
+  let showAddingOverlay = false;
   
   // Work type is always non-standard for production team
   let selectedWorkType: 'non-standard' = 'non-standard';
@@ -90,6 +91,13 @@
       resetForm();
       dispatch('close');
     }
+  }
+
+  function forceClose() {
+    showAddingOverlay = false;
+    isLoading = false;
+    resetForm();
+    dispatch('close');
   }
 
   // Removed handleWorkTypeSelect - always non-standard now
@@ -156,6 +164,7 @@
     }
 
     isLoading = true;
+    showAddingOverlay = true;
     try {
       const { getCurrentUsername } = await import('$lib/utils/userUtils');
       const currentUser = getCurrentUsername();
@@ -181,13 +190,15 @@
           workType: 'non-standard',
           woDetailsId: selectedWorkOrderId 
         });
-        handleClose();
+        forceClose();
       } else {
         alert('Error adding work: ' + (result.error || 'Unknown error'));
+        showAddingOverlay = false;
       }
     } catch (error) {
       console.error('Error adding work:', error);
       alert('Error adding work. Please try again.');
+      showAddingOverlay = false;
     } finally {
       isLoading = false;
     }
@@ -492,5 +503,16 @@
       </div>
     </div>
   </div>
+
+  {#if showAddingOverlay}
+    <div class="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4">
+      <div class="theme-bg-primary rounded-lg border theme-border shadow-xl px-6 py-5 min-w-[280px]">
+        <div class="flex items-center gap-3">
+          <Loader class="w-5 h-5 animate-spin text-blue-600" />
+          <p class="theme-text-primary font-medium">Adding non-standard work...</p>
+        </div>
+      </div>
+    </div>
+  {/if}
 {/if}
 

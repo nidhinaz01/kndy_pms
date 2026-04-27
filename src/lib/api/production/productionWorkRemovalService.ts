@@ -19,9 +19,7 @@ export async function removeWorkFromProduction(
       return { success: false, error: 'Work order details ID is required' };
     }
 
-    const isNonStandardWork = !derivedSwCode && otherWorkCode;
-    
-    const { data: removalData, error: removalError } = await supabase
+    const { error: removalError } = await supabase
       .from('prdn_work_removals')
       .insert({
         derived_sw_code: derivedSwCode,
@@ -40,40 +38,8 @@ export async function removeWorkFromProduction(
       return { success: false, error: removalError.message };
     }
 
-    let planningQuery = supabase
-      .from('prdn_work_planning')
-      .select('id')
-      .eq('stage_code', stageCode)
-      .eq('wo_details_id', woDetailsId)
-      .eq('is_deleted', false);
-
-    if (derivedSwCode) {
-      planningQuery = planningQuery.eq('derived_sw_code', derivedSwCode).is('other_work_code', null);
-    } else if (otherWorkCode) {
-      planningQuery = planningQuery.eq('other_work_code', otherWorkCode).is('derived_sw_code', null);
-    }
-
-    const { data: planningRecords, error: planningCheckError } = await planningQuery;
-
-    let newStatus = 'To be Planned';
-    
-    if (!planningCheckError && planningRecords && planningRecords.length > 0) {
-      const planningIds = planningRecords.map(p => p.id);
-      
-      const { data: reportData, error: reportCheckError } = await supabase
-        .from('prdn_work_reporting')
-        .select('completion_status')
-        .in('planning_id', planningIds)
-        .eq('is_deleted', false);
-
-      if (!reportCheckError && reportData && reportData.length > 0) {
-        const hasNonCompleted = reportData.some(report => report.completion_status === 'NC');
-        if (hasNonCompleted) {
-          newStatus = 'In Progress';
-          console.log(`📊 Work ${derivedSwCode || otherWorkCode} was reported as Non Completed - setting status to In Progress`);
-        }
-      }
-    }
+    /** Terminal operational status: hidden from Works / Report Unplanned lists (see enrichWorksWithData). */
+    const newStatus = 'Removed';
 
     let planningUpdateQuery = supabase
       .from('prdn_work_planning')

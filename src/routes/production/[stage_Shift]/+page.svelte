@@ -9,6 +9,7 @@
   import MultiSkillReportModal from '$lib/components/production/MultiSkillReportModal.svelte';
   import ViewWorkHistoryModal from '$lib/components/production/ViewWorkHistoryModal.svelte';
   import RemoveWorkModal from '$lib/components/production/RemoveWorkModal.svelte';
+  import BulkRemoveWorksModal from '$lib/components/production/BulkRemoveWorksModal.svelte';
   import AddWorkModal from '$lib/components/production/AddWorkModal.svelte';
   import { fetchUserMenus } from '$lib/services/menuService';
   import type { ProductionEmployee, ProductionWork } from '$lib/api/production';
@@ -127,6 +128,8 @@
   let selectedWorkForHistory: any = null;
   let showRemoveWorkModal = false;
   let selectedWorkForRemoval: any = null;
+  let showBulkRemoveWorksModal = false;
+  let worksForBulkRemoval: any[] = [];
   let showAddWorkModal = false;
   let availableWorkOrdersForAdd: Array<{id: number, wo_no: string | null, pwo_no: string | null, wo_model: string}> = [];
   let showEntryModal = false;
@@ -223,6 +226,8 @@
     setSelectedWorkForHistory: (v) => selectedWorkForHistory = v,
     setShowRemoveWorkModal: (v) => showRemoveWorkModal = v,
     setSelectedWorkForRemoval: (v) => selectedWorkForRemoval = v,
+    setShowBulkRemoveWorksModal: (v) => showBulkRemoveWorksModal = v,
+    setWorksForBulkRemoval: (v) => (worksForBulkRemoval = v),
     setShowPlanModal: (v) => showPlanModal = v,
     setSelectedWorkForPlanning: (v) => selectedWorkForPlanning = v,
     setShowReportModal: (v) => showReportModal = v,
@@ -857,6 +862,14 @@
     {stageCode}
     on:close={() => eventHandlers.handleRemoveWorkClose(eventHandlerContext)}
     on:removed={() => eventHandlers.handleWorkRemoved(eventHandlerContext)}
+  />
+
+  <BulkRemoveWorksModal
+    isOpen={showBulkRemoveWorksModal}
+    works={worksForBulkRemoval}
+    {stageCode}
+    on:close={() => eventHandlers.handleBulkRemoveWorksModalClose(eventHandlerContext)}
+    on:completed={() => eventHandlers.handleBulkRemoveWorksCompleted(eventHandlerContext)}
   />
 
   <AddWorkModal 

@@ -74,6 +74,8 @@ export interface EventHandlerContext {
   setSelectedWorkForHistory: (value: any) => void;
   setShowRemoveWorkModal: (value: boolean) => void;
   setSelectedWorkForRemoval: (value: any) => void;
+  setShowBulkRemoveWorksModal: (value: boolean) => void;
+  setWorksForBulkRemoval: (value: any[]) => void;
   setShowPlanModal: (value: boolean) => void;
   setSelectedWorkForPlanning: (value: any) => void;
   setShowReportModal: (value: boolean) => void;
@@ -216,12 +218,24 @@ export async function handleWorkRemoved(context: EventHandlerContext) {
 }
 
 /**
- * Handle remove selected works
+ * Handle remove selected works — opens bulk remove modal (eligible rows only; table pre-filters).
  */
-export async function handleRemoveSelected(context: EventHandlerContext, event: CustomEvent) {
+export function handleRemoveSelected(context: EventHandlerContext, event: CustomEvent) {
   const { works } = event.detail;
   if (!works || works.length === 0) return;
+  context.setWorksForBulkRemoval(works.map((w: any) => ({ ...w })));
+  context.setShowBulkRemoveWorksModal(true);
+}
+
+export function handleBulkRemoveWorksModalClose(context: EventHandlerContext) {
+  context.setShowBulkRemoveWorksModal(false);
+  context.setWorksForBulkRemoval([]);
+}
+
+export async function handleBulkRemoveWorksCompleted(context: EventHandlerContext) {
   await context.loadWorksData();
+  context.setShowBulkRemoveWorksModal(false);
+  context.setWorksForBulkRemoval([]);
 }
 
 /**

@@ -21,6 +21,7 @@
   import { supabase } from '$lib/supabaseClient';
   import { attendanceIsPresent } from '$lib/utils/manpowerAttendanceStatus';
   import { getWorkDisplayCode } from '$lib/utils/workDisplayUtils';
+  import { fetchSkillShorts } from '$lib/api/employee-api/employeeDropdownService';
   import WorkDetailsDisplay from '$lib/components/production/multi-skill-report/WorkDetailsDisplay.svelte';
   import EmployeeAssignment from '$lib/components/production/multi-skill-report/EmployeeAssignment.svelte';
   import SharedTimeSelection from '$lib/components/production/multi-skill-report/SharedTimeSelection.svelte';
@@ -70,6 +71,82 @@
   let selectedSkillMappingIndex: number = -1;
   // Available skill mappings from the work
   let availableSkillMappings: any[] = [];
+
+  /** sys_data_elements (Skill Short); used for NS unplanned equal worker slots */
+  let skillShortOptions: string[] = [];
+  let nsPendingSkillShort = '';
+  let nsRowSeq = 0;
+
+  function createNsVirtualWorkRow(
+    sw: any,
+    repDate: string,
+    stCode: string,
+    skillShort: string,
+    rowId: string
+  ) {
+    const owCode =
+      sw.other_work_code ||
+      (getWorkDisplayCode(sw)?.startsWith('OW') ? getWorkDisplayCode(sw) : null) ||
+      sw.sw_code ||
+      '';
+    return {
+      id: rowId,
+      wsm_id: null,
+      sc_required: skillShort,
+      sc_name: skillShort,
+      wo_details_id: sw.wo_details_id || sw.prdn_wo_details_id,
+      derived_sw_code: null,
+      other_work_code: owCode,
+      other_work_desc: sw.other_work_desc ?? sw.workAdditionData?.other_work_desc ?? '',
+      workAdditionData: sw.workAdditionData,
+      sw_name: sw.sw_name,
+      wo_no: sw.wo_no || sw.prdn_wo_details?.wo_no,
+      pwo_no: sw.pwo_no || sw.prdn_wo_details?.pwo_no,
+      stage_code: sw.stage_code || stCode,
+      from_date: repDate || '',
+      from_time: '08:00',
+      to_date: repDate || '',
+      to_time: '17:00'
+    };
+  }
+
+  function addNsWorkerRow() {
+    if (!selectedWork) return;
+    const skill = (nsPendingSkillShort || '').trim();
+    if (!skill) {
+      alert('Select a skill competency before adding a worker row.');
+      return;
+    }
+    const newId = `virtual_ns_${nsRowSeq++}`;
+    const row = createNsVirtualWorkRow(selectedWork, reportingDate, stageCode, skill, newId);
+    virtualWorks = [...virtualWorks, row];
+    formData.skillEmployees[newId] = '';
+    formData.deviations[newId] = {
+      hasDeviation: false,
+      reason: '',
+      deviationType: 'no_worker'
+    };
+    formData = { ...formData };
+  }
+
+  function removeNsWorkerRow(workId: string) {
+    if (!isNonStandardWork) return;
+    if (virtualWorks.length <= 1) {
+      alert('At least one worker row is required.');
+      return;
+    }
+    virtualWorks = virtualWorks.filter((w) => w.id !== workId);
+    const se = { ...formData.skillEmployees };
+    delete se[workId];
+    formData.skillEmployees = se;
+    const dev = { ...formData.deviations };
+    delete dev[workId];
+    formData.deviations = dev;
+    const ro = { ...formData.rowTimeOverrides };
+    delete ro[workId];
+    formData.rowTimeOverrides = ro;
+    formData = { ...formData };
+  }
 
   // Watch for selectedWork changes
   $: if (selectedWork && isOpen) {
@@ -369,6 +446,9 @@
     isLoading = true;
     workersLoaded = false; // Reset flag when initializing
     isLoadingWorkers = false; // Reset loading flag
+    skillShortOptions = [];
+    nsPendingSkillShort = '';
+    nsRowSeq = 0;
     try {
       console.log('🔍 Initializing form for work:', selectedWork);
       console.log('🔍 Work skill_mappings:', selectedWork.skill_mappings);
@@ -428,9 +508,33 @@
       
       // Store available skill mappings
       availableSkillMappings = skillMappings;
-      
-      // If multiple skill mappings, require user to select one first
-      if (skillMappings.length > 1) {
+
+      const useNonStandardVirtual = !!(
+        selectedWork.other_work_code ||
+        getWorkDisplayCode(selectedWork)?.startsWith('OW')
+      );
+
+      // Non-standard works must not use std skill mappings (often placeholder wsm_id 0 / invalid FK).
+      // Align with planWorkSaveService: planning rows use wsm_id null for other work.
+      if (useNonStandardVirtual) {
+        availableSkillMappings = [];
+        selectedSkillMappingIndex = -1;
+        try {
+          const fetched = await fetchSkillShorts();
+          skillShortOptions = fetched.length > 0 ? fetched : ['T'];
+        } catch (e) {
+          console.warn('fetchSkillShorts failed, falling back to T:', e);
+          skillShortOptions = ['T'];
+        }
+        nsPendingSkillShort = skillShortOptions[0] || 'T';
+        nsRowSeq = 0;
+        const firstSkill = nsPendingSkillShort;
+        const firstId = `virtual_ns_${nsRowSeq++}`;
+        virtualWorks = [
+          createNsVirtualWorkRow(selectedWork, reportingDate || '', stageCode, firstSkill, firstId)
+        ];
+        console.log('📋 Non-standard unplanned work: equal worker slots, wsm_id null');
+      } else if (skillMappings.length > 1) {
         console.log('📋 Multiple skill mappings found, user must select one');
         selectedSkillMappingIndex = -1; // Reset to require selection
         virtualWorks = []; // Don't create virtual works yet
@@ -452,6 +556,12 @@
           wo_details_id: selectedWork.wo_details_id || selectedWork.prdn_wo_details_id,
           derived_sw_code: null,
           other_work_code: selectedWork.other_work_code || selectedWork.sw_code,
+          other_work_desc:
+            selectedWork.other_work_desc ?? selectedWork.workAdditionData?.other_work_desc ?? '',
+          workAdditionData: selectedWork.workAdditionData,
+          sw_name: selectedWork.sw_name,
+          wo_no: selectedWork.wo_no || selectedWork.prdn_wo_details?.wo_no,
+          pwo_no: selectedWork.pwo_no || selectedWork.prdn_wo_details?.pwo_no,
           stage_code: selectedWork.stage_code || stageCode,
           from_date: reportingDate || '',
           from_time: '08:00',
@@ -532,6 +642,9 @@
         pwo_no: selectedWork.pwo_no || selectedWork.prdn_wo_details?.pwo_no,
         derived_sw_code: selectedWork.derived_sw_code || selectedWork.std_work_type_details?.derived_sw_code,
         other_work_code: selectedWork.other_work_code,
+        other_work_desc:
+          selectedWork.other_work_desc ?? selectedWork.workAdditionData?.other_work_desc ?? '',
+        workAdditionData: selectedWork.workAdditionData,
         stage_code: selectedWork.stage_code || stageCode,
         // Include work name and std_work_type_details for WorkDetailsDisplay
         sw_name: selectedWork.sw_name,
@@ -906,6 +1019,9 @@
     isLoadingSalary = false;
     formData.selectedTrainees = [];
     formData.traineeDeviationReason = '';
+    skillShortOptions = [];
+    nsPendingSkillShort = '';
+    nsRowSeq = 0;
   }
 
   function handleEmployeeChange(workId: string, employeeId: string) {
@@ -1115,11 +1231,40 @@
               <p class="text-sm theme-text-secondary">
                 Assign workers to each skill. Optionally set custom from/to times per row when they differ from the range above.
               </p>
+              {#if isNonStandardWork && skillShortOptions.length > 0}
+                <div
+                  class="p-4 rounded-lg border theme-border bg-blue-50/50 dark:bg-blue-950/20 flex flex-wrap gap-3 items-end"
+                >
+                  <div class="min-w-[220px] flex-1">
+                    <label
+                      for="ns-skill-next-row"
+                      class="block text-sm font-medium theme-text-primary mb-1"
+                    >
+                      Skill competency for new row
+                    </label>
+                    <select
+                      id="ns-skill-next-row"
+                      bind:value={nsPendingSkillShort}
+                      class="w-full px-3 py-2 border theme-border rounded-lg theme-bg-primary theme-text-primary focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    >
+                      {#each skillShortOptions as sc}
+                        <option value={sc}>{sc}</option>
+                      {/each}
+                    </select>
+                  </div>
+                  <Button variant="secondary" size="sm" on:click={addNsWorkerRow} disabled={isLoading}>
+                    Add Worker
+                  </Button>
+                </div>
+              {/if}
               <EmployeeAssignment
                 selectedWorks={virtualWorks}
                 {availableWorkers}
                 {formData}
                 shiftInfo={shiftInfo as ShiftInfo | null}
+                enableRemoveWorkerRow={isNonStandardWork}
+                minWorkerRows={1}
+                onRemoveWorkerRow={removeNsWorkerRow}
                 onEmployeeChange={handleEmployeeChange}
                 onDeviationChange={handleDeviationChange}
                 onTraineeAdd={handleTraineeAdd}

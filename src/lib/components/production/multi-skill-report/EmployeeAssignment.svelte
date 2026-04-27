@@ -14,6 +14,10 @@
   export let onTraineeRemove: (index: number) => void = () => {};
   export let onTraineeReasonChange: (reason: string) => void = () => {};
   export let onRowTimeOverride: (rowKey: string, next: RowTimeOverride | null) => void = () => {};
+  /** Report Unplanned Work — non-standard equal slots: allow removing extra worker rows (min rows enforced in parent). */
+  export let enableRemoveWorkerRow: boolean = false;
+  export let minWorkerRows: number = 1;
+  export let onRemoveWorkerRow: (workId: string) => void = () => {};
   
   // Filter trainees from available workers
   $: availableTrainees = availableWorkers.filter(w => w.skill_short === 'T');
@@ -147,8 +151,17 @@
       {@const workId = work.id}
       {@const hasDeviation = formData.deviations[workId]?.hasDeviation || false}
       {@const deviationReason = formData.deviations[workId]?.reason || ''}
-      <div class="p-3 border theme-border rounded-lg theme-bg-primary space-y-3">
-        <div class="flex items-center space-x-4">
+      <div class="relative p-3 border theme-border rounded-lg theme-bg-primary space-y-3">
+        {#if enableRemoveWorkerRow && selectedWorks.length > minWorkerRows}
+          <button
+            type="button"
+            class="absolute top-2 right-2 text-sm font-medium text-red-600 dark:text-red-400 hover:underline"
+            on:click={() => onRemoveWorkerRow(workId)}
+          >
+            Remove row
+          </button>
+        {/if}
+        <div class="flex items-center space-x-4 pr-16">
           <div class="flex-1">
             <div class="text-sm font-medium theme-text-primary">
               {work.sc_required || work.std_work_skill_mapping?.sc_name || 'N/A'}

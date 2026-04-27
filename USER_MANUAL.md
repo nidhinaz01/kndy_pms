@@ -492,6 +492,11 @@ Let's go through each step in detail:
    - The work will have status "To be Planned"
    - You can now plan this work (see section 3)
 
+#### Remove works (single or multiple)
+
+- **Single work**: In the **Works** tab, use **Remove** on a row (only when the work is still **To be Planned** and not yet in progress).
+- **Multiple works**: Tick the checkboxes for the rows you want to remove. When one or more rows are selected, a bar appears showing how many works are selected and how many are **eligible** to remove. Works that are **already planned** for the selected date cannot be removed from here—the bar explains when some selected rows are not removable. Click **Remove Selected (N)** (N = eligible count), enter a **reason** (required), confirm, and wait for processing. Results may be **all succeeded**, **partial** (some rows failed—read the alert), or **none** if everything failed.
+
 **Important Notes**:
 - Non-standard works are specific to the work order you select
 - Each non-standard work gets a unique code
@@ -1253,7 +1258,7 @@ You can report multiple works at once:
 **Features**:
 - View all works with their status
 - Add non-standard works (see section 2)
-- Remove works
+- Remove works (**Remove** per row; or select rows and **Remove Selected** for bulk eligible works)
 - Plan works (see section 3)
 - View work history
 
@@ -1262,7 +1267,7 @@ You can report multiple works at once:
 - View works list
 - Use **"Add Work"** to add non-standard works
 - Use **"Plan"** button to plan works
-- Use **"Remove"** to remove works (if not yet planned)
+- Remove works using **Remove** or **Remove Selected** as described in [Remove works (single or multiple)](#remove-works-single-or-multiple)
 
 #### Manpower Plan Tab
 
@@ -4195,6 +4200,9 @@ A: The work order may not be scheduled to enter your stage yet. Check **Planning
 **Q: How do I add works to a work order?**  
 A: Go to **Production > [Stage/Shift] > Works** tab, click **Add Work**, select the work order, choose the work (and skill combination if needed), fill in details, and save. Use this when the model has no standard works for your stage or you need extra works. See [How to Add Works to a Work Order](#2-how-to-add-works-to-a-work-order).
 
+**Q: How do I remove several works at once from the Works tab?**  
+A: Select the works using the row checkboxes. Use **Remove Selected (N)** in the selection bar (N is how many selected rows are **eligible**—typically **To be Planned** and not yet started). Enter the **reason** when prompted and confirm. If some rows cannot be removed (e.g. already planned), the bar notes how many are excluded. See [Remove works (single or multiple)](#remove-works-single-or-multiple).
+
 ---
 
 ### Production — Planning Work
@@ -4796,7 +4804,7 @@ The project includes **SQL maintenance scripts** in the source tree (for **DBAs*
 ---
 
 **Document Version**: 1.1  
-**Last Updated**: 20 April 2026  
+**Last Updated**: 27 April 2026  
 **System Version**: Production Management System v1.0
 
 

@@ -129,6 +129,10 @@ export function enrichWorksWithData(
     }
 
     for (const workStatus of statuses) {
+      if (workStatus.current_status === 'Removed') {
+        continue;
+      }
+
       const derivedSwCode = workStatus.derived_sw_code;
       const otherWorkCode = workStatus.other_work_code;
 

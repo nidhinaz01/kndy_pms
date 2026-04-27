@@ -191,7 +191,7 @@ export async function saveUnplannedWorkReports(
       
       // Get skill required from virtual work
       const scRequired = virtualWork.sc_required || 'T';
-      const wsmId = virtualWork.wsm_id;
+      const wsmId = isNonStandardWork ? null : virtualWork.wsm_id;
       
       const eff = getEffectiveRowTimes(String(virtualWork.id), formData);
       const rowHours = netHoursWorkedForReportingRow(eff, shiftBreakTimes);
