@@ -4,6 +4,7 @@
 
 import { supabase } from '$lib/supabaseClient';
 import { calculateBreakTimeInMinutes } from '$lib/utils/breakTimeUtils';
+import { cOffNetWorkHours } from '$lib/utils/cOffWindowUtils';
 
 export interface ValidationResult {
   isValid: boolean;
@@ -192,7 +193,7 @@ export async function validateEmployeeShiftPlanning(
     // 3. Get all employees recorded in planning attendance (both present and absent)
     const { data: plannedAttendance, error: presentError } = await supabase
       .from('prdn_planning_manpower')
-      .select('emp_id, attendance_status, planned_hours')
+      .select('emp_id, attendance_status, planned_hours, ot_hours, c_off_value')
       .eq('stage_code', stageCode)
       .eq('shift_code', shiftCode)
       .lte('planning_from_date', planningDate)
@@ -449,6 +450,23 @@ export async function validateEmployeeShiftPlanning(
               `Please reduce work planning or update attendance hours.`
             );
           }
+        }
+
+        // Warn (non-blocking): compare planned OT against Manpower OT + C-Off allowance.
+        // Planned OT = effective planned work above attendance planned hours.
+        const declaredOtHours = Number(attendanceRecord?.ot_hours || 0);
+        const declaredOtMinutes = Number.isFinite(declaredOtHours) && declaredOtHours > 0
+          ? Math.round(declaredOtHours * 60)
+          : 0;
+        const cOffValue = Number(attendanceRecord?.c_off_value || 0);
+        const cOffMinutes = Math.round(cOffNetWorkHours(cOffValue) * 60);
+        const plannedOtMinutes = Math.max(0, workPlannedEffectiveMinutes - expectedMinutesEffective);
+        const allowedOtMinutes = Math.max(0, declaredOtMinutes + cOffMinutes);
+
+        if (plannedOtMinutes > allowedOtMinutes) {
+          warnings.push(
+            `${empName} (${empId}): Planned OT is ${(plannedOtMinutes / 60).toFixed(2)}h, but Manpower OT + C-Off allows ${(allowedOtMinutes / 60).toFixed(2)}h (OT ${(declaredOtMinutes / 60).toFixed(2)}h + C-Off ${(cOffMinutes / 60).toFixed(2)}h).`
+          );
         }
       }
 

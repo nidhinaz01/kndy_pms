@@ -1205,9 +1205,9 @@ Overtime can be reported from the Draft Report tab:
 You can report multiple works at once:
 
 1. **In Plan Tab**:
-   - Select multiple works using checkboxes
-   - Click **"Report Selected"** button
-   - Fill in report details for all selected works
+   - Select multiple skill rows using checkboxes
+   - Click **"Report Selected Skills"** button
+   - Fill in report details for the selected skill competencies
    - Save all at once
 
 **What Happens Behind the Scenes**:
@@ -4804,7 +4804,7 @@ The project includes **SQL maintenance scripts** in the source tree (for **DBAs*
 ---
 
 **Document Version**: 1.1  
-**Last Updated**: 27 April 2026  
+**Last Updated**: 29 April 2026  
 **System Version**: Production Management System v1.0
 
 

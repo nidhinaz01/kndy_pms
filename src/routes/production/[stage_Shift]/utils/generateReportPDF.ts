@@ -57,8 +57,8 @@ export function generateReportPDF(
     const groupedReportWorks = groupReportWorks(reportWorks);
 
     // Table headers - Report tab columns (merged WO/PWO, reduced Work Name, include Lost Time Details, include Status)
-    const headers = ['WO / PWO No.', 'Work Code', 'Work Name', 'Skill Competency', 'Standard Time', 'Worker', 'SC', 'Time Worked Till Date', 'From Time', 'To Time', 'Hours Worked', 'Total Hours', 'OT Hours', 'Lost Time Details', 'Status'];
-    const colWidths = [22, 24, 51, 28, 22, 35, 18, 25, 18, 18, 20, 20, 18, 50, 20];
+    const headers = ['WO / PWO No.', 'Work Code', 'Work Name', 'Skill Competency', 'Standard Time', 'Worker', 'SC', 'Time Worked Till Date', 'From Date', 'From Time', 'To Date', 'To Time', 'Hours Worked', 'Total Hours', 'OT Hours', 'Lost Time Details', 'Status'];
+    const colWidths = [18, 20, 39, 24, 18, 28, 12, 18, 14, 14, 14, 14, 16, 16, 14, 36, 14];
     const startX = margin;
     let x = startX;
 
@@ -121,7 +121,9 @@ export function generateReportPDF(
         const workerName = report.prdn_work_planning?.hr_emp?.emp_name || 'N/A';
         const skillShort = report.prdn_work_planning?.hr_emp?.skill_short || 'N/A';
         const timeWorkedTillDate = formatTime(report.hours_worked_till_date || 0);
+        const fromDate = report.from_date || 'N/A';
         const fromTime = report.from_time ? formatTimeString(report.from_time) : 'N/A';
+        const toDate = report.to_date || 'N/A';
         const toTime = report.to_time ? formatTimeString(report.to_time) : 'N/A';
         const hoursWorked = formatTime(report.hours_worked_today || 0);
         const totalHours = formatTime((report.hours_worked_till_date || 0) + (report.hours_worked_today || 0));
@@ -134,7 +136,7 @@ export function generateReportPDF(
 
         const rowValues = [
           combinedWoPwo, workCode, workName, skillCompetency, standardTime,
-          workerName, skillShort, timeWorkedTillDate, fromTime, toTime,
+          workerName, skillShort, timeWorkedTillDate, fromDate, fromTime, toDate, toTime,
           hoursWorked, totalHours, otHours, lostTimeDetails, status
         ];
 
@@ -185,7 +187,9 @@ export function generateReportPDF(
         const workerName = report.prdn_work_planning?.hr_emp?.emp_name || 'N/A';
         const skillShort = report.prdn_work_planning?.hr_emp?.skill_short || 'N/A';
         const timeWorkedTillDate = formatTime(report.hours_worked_till_date || 0);
+        const fromDate = report.from_date || 'N/A';
         const fromTime = report.from_time ? formatTimeString(report.from_time) : 'N/A';
+        const toDate = report.to_date || 'N/A';
         const toTime = report.to_time ? formatTimeString(report.to_time) : 'N/A';
         const hoursWorked = formatTime(report.hours_worked_today || 0);
         const totalHours = formatTime((report.hours_worked_till_date || 0) + (report.hours_worked_today || 0));
@@ -198,7 +202,7 @@ export function generateReportPDF(
 
         const rowValues = [
           combinedWoPwo, workCode, workName, skillCompetency, standardTime,
-          workerName, skillShort, timeWorkedTillDate, fromTime, toTime,
+          workerName, skillShort, timeWorkedTillDate, fromDate, fromTime, toDate, toTime,
           hoursWorked, totalHours, otHours, lostTimeDetails, status
         ];
 

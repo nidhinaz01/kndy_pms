@@ -12,7 +12,9 @@ interface PlannedWork {
   other_work_code?: string;
   hr_emp?: { emp_name: string; skill_short: string };
   sc_required?: string;
+  from_date?: string;
   from_time?: string;
+  to_date?: string;
   to_time?: string;
   planned_hours?: number;
   vehicleWorkFlow?: { estimated_duration_minutes?: number };
@@ -78,7 +80,9 @@ export function generatePlanExcel(
           'Worker': work.hr_emp?.emp_name || 'N/A',
           'SC': work.hr_emp?.skill_short || 'N/A',
           'Time Worked Till Date': formatTime((work.time_worked_till_date || 0) / 60),
+          'From Date': work.from_date || 'N/A',
           'From Time': fromTimeFormatted,
+          'To Date': work.to_date || 'N/A',
           'To Time': toTimeFormatted,
           'Planned Hours': formatTime(plannedHours)
         };
@@ -143,7 +147,9 @@ export function generatePlanExcel(
       { wch: 20 }, // Worker
       { wch: 10 }, // SC
       { wch: 22 }, // Time Worked Till Date
+      { wch: 14 }, // From Date
       { wch: 12 }, // From Time
+      { wch: 14 }, // To Date
       { wch: 12 }, // To Time
       { wch: 18 }  // Planned Hours
     ];

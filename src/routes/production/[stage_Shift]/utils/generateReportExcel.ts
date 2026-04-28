@@ -75,7 +75,9 @@ export function generateReportExcel(
           'Worker': planning?.hr_emp?.emp_name || 'N/A',
           'SC': planning?.hr_emp?.skill_short || 'N/A',
           'Time Worked Till Date': formatTime(report.hours_worked_till_date || 0),
+          'From Date': report.from_date || 'N/A',
           'From Time': report.from_time || 'N/A',
+          'To Date': report.to_date || 'N/A',
           'To Time': report.to_time || 'N/A',
           'Hours Worked': formatTime(report.hours_worked_today || 0),
           'Total Hours Worked': formatTime((report.hours_worked_till_date || 0) + (report.hours_worked_today || 0)),
@@ -170,7 +172,9 @@ export function generateReportExcel(
       { wch: 20 }, // Worker
       { wch: 10 }, // SC
       { wch: 22 }, // Time Worked Till Date
+      { wch: 14 }, // From Date
       { wch: 12 }, // From Time
+      { wch: 14 }, // To Date
       { wch: 12 }, // To Time
       { wch: 15 }, // Hours Worked
       { wch: 18 }, // Total Hours Worked

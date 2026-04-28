@@ -51,7 +51,9 @@
       sortable_pwoNo: group.pwoNo || '',
       sortable_workCode: group.workCode || '',
       sortable_workName: group.workName || '',
+      sortable_fromDate: group.items?.[0]?.from_date || '',
       sortable_fromTime: group.items?.[0]?.from_time || '',
+      sortable_toDate: group.items?.[0]?.to_date || '',
       sortable_toTime: group.items?.[0]?.to_time || '',
       sortable_plannedHours: group.items?.[0]?.planned_hours || 0,
       sortable_timeWorkedTillDate: group.items?.[0]?.time_worked_till_date || 0,
@@ -401,7 +403,9 @@
             <th class="px-6 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider">Standard Time</th>
             <th class="px-6 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider">Status</th>
             <th class="px-6 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider">Worker (Skill)</th>
+            <SortableHeader column="sortable_fromDate" {sortConfig} onSort={handleSort} label="From Date" />
             <SortableHeader column="sortable_fromTime" {sortConfig} onSort={handleSort} label="From Time" />
+            <SortableHeader column="sortable_toDate" {sortConfig} onSort={handleSort} label="To Date" />
             <SortableHeader column="sortable_toTime" {sortConfig} onSort={handleSort} label="To Time" />
             <SortableHeader column="sortable_plannedHours" {sortConfig} onSort={handleSort} label="Planned Hours" />
             <SortableHeader column="sortable_timeWorkedTillDate" {sortConfig} onSort={handleSort} label="Time Worked Till Date" />
@@ -493,8 +497,22 @@
               </td>
               <td class="px-6 py-4 text-sm theme-text-primary">
                 <div class="space-y-1">
+                  {#each typedGroup.items as plannedWork}
+                    <div>{plannedWork.from_date || 'N/A'}</div>
+                  {/each}
+                </div>
+                  </td>
+              <td class="px-6 py-4 text-sm theme-text-primary">
+                <div class="space-y-1">
               {#each typedGroup.items as plannedWork}
                     <div>{plannedWork.from_time || 'N/A'}</div>
+                  {/each}
+                </div>
+                  </td>
+              <td class="px-6 py-4 text-sm theme-text-primary">
+                <div class="space-y-1">
+                  {#each typedGroup.items as plannedWork}
+                    <div>{plannedWork.to_date || 'N/A'}</div>
                   {/each}
                 </div>
                   </td>

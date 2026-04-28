@@ -10,7 +10,9 @@ interface PlannedWork {
   other_work_code?: string;
   hr_emp?: { emp_name: string; skill_short: string };
   sc_required?: string;
+  from_date?: string;
   from_time?: string;
+  to_date?: string;
   to_time?: string;
   planned_hours?: number;
   vehicleWorkFlow?: { estimated_duration_minutes?: number };
@@ -56,8 +58,8 @@ export function generatePlanPDF(
 
     // Table headers - match Excel Planned Works sheet format
     // Column widths as specified
-    const headers = ['Work Order Number', 'Pre Work Order Number', 'Work Code', 'Work Name', 'Skill Competency', 'Standard Time', 'Worker', 'SC', 'Time Worked Till Date', 'From Time', 'To Time', 'Planned Hours'];
-    const colWidths = [25, 25, 25, 60, 40, 25, 50, 18, 30, 30, 30, 30];
+    const headers = ['Work Order Number', 'Pre Work Order Number', 'Work Code', 'Work Name', 'Skill Competency', 'Standard Time', 'Worker', 'SC', 'Time Worked Till Date', 'From Date', 'From Time', 'To Date', 'To Time', 'Planned Hours'];
+    const colWidths = [24, 24, 22, 49, 31, 20, 36, 14, 25, 20, 20, 20, 20, 20];
     const startX = margin;
     let x = startX;
 
@@ -154,7 +156,9 @@ export function generatePlanPDF(
           work.hr_emp?.emp_name || 'N/A',
           work.hr_emp?.skill_short || 'N/A',
           formatTime((work.time_worked_till_date || 0) / 60),
+          work.from_date || 'N/A',
           fromTimeFormatted,
+          work.to_date || 'N/A',
           toTimeFormatted,
           formatTime(plannedHours)
         ];

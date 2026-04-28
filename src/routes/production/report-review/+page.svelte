@@ -1258,7 +1258,9 @@
                     <th class="px-4 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider" style="width: 120px;">Status</th>
                     <th class="px-4 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider" style="width: 180px;">Worker (Skill)</th>
                     <th class="px-4 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider" style="width: 140px;">Time Worked Till Date</th>
+                    <th class="px-4 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider" style="width: 100px;">From Date</th>
                     <th class="px-4 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider" style="width: 100px;">From Time</th>
+                    <th class="px-4 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider" style="width: 100px;">To Date</th>
                     <th class="px-4 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider" style="width: 100px;">To Time</th>
                     <th class="px-4 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider" style="width: 140px;">Hours Worked</th>
                     <th class="px-4 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider" style="width: 140px;">Total Hours Worked</th>
@@ -1351,7 +1353,21 @@
                       <td class="px-4 py-2 text-sm text-gray-900 dark:text-gray-100">
                         <div class="flex flex-col gap-0.5">
                           {#each typedGroup.items as report}
+                            <div class="text-xs">{report.from_date || 'N/A'}</div>
+                          {/each}
+                        </div>
+                      </td>
+                      <td class="px-4 py-2 text-sm text-gray-900 dark:text-gray-100">
+                        <div class="flex flex-col gap-0.5">
+                          {#each typedGroup.items as report}
                             <div class="text-xs">{report.from_time || 'N/A'}</div>
+                          {/each}
+                        </div>
+                      </td>
+                      <td class="px-4 py-2 text-sm text-gray-900 dark:text-gray-100">
+                        <div class="flex flex-col gap-0.5">
+                          {#each typedGroup.items as report}
+                            <div class="text-xs">{report.to_date || 'N/A'}</div>
                           {/each}
                         </div>
                       </td>

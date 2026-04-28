@@ -36,7 +36,9 @@
       sortable_pwoNo: group.pwoNo || '',
       sortable_workCode: group.workCode || '',
       sortable_workName: group.workName || '',
+      sortable_fromDate: group.items?.[0]?.from_date || '',
       sortable_fromTime: group.items?.[0]?.from_time || '',
+      sortable_toDate: group.items?.[0]?.to_date || '',
       sortable_toTime: group.items?.[0]?.to_time || '',
       sortable_hoursWorked: group.items?.[0]?.hours_worked_today || 0,
       sortable_totalHoursWorked: (group.items?.[0]?.hours_worked_till_date || 0) + (group.items?.[0]?.hours_worked_today || 0),
@@ -141,7 +143,9 @@
             <th class="px-4 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider" style="width: 120px;">Status</th>
             <th class="px-4 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider" style="width: 180px;">Worker (Skill)</th>
             <th class="px-4 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider" style="width: 140px;">Time Worked Till Date</th>
+            <SortableHeader column="sortable_fromDate" {sortConfig} onSort={handleSort} label="From Date" headerClass="w-[120px]" />
             <SortableHeader column="sortable_fromTime" {sortConfig} onSort={handleSort} label="From Time" headerClass="w-[100px]" />
+            <SortableHeader column="sortable_toDate" {sortConfig} onSort={handleSort} label="To Date" headerClass="w-[120px]" />
             <SortableHeader column="sortable_toTime" {sortConfig} onSort={handleSort} label="To Time" headerClass="w-[100px]" />
             <SortableHeader column="sortable_hoursWorked" {sortConfig} onSort={handleSort} label="Hours Worked" headerClass="w-[140px]" />
             <SortableHeader column="sortable_totalHoursWorked" {sortConfig} onSort={handleSort} label="Total Hours Worked" headerClass="w-[140px]" />
@@ -231,7 +235,21 @@
               <td class="px-4 py-2 text-sm {typedGroup.hasLostTime ? 'text-gray-800' : 'theme-text-primary'}">
                 <div class="flex flex-col gap-0.5">
                   {#each typedGroup.items as report}
+                    <div class="text-xs">{report.from_date || 'N/A'}</div>
+                  {/each}
+                </div>
+              </td>
+              <td class="px-4 py-2 text-sm {typedGroup.hasLostTime ? 'text-gray-800' : 'theme-text-primary'}">
+                <div class="flex flex-col gap-0.5">
+                  {#each typedGroup.items as report}
                     <div class="text-xs">{report.from_time || 'N/A'}</div>
+                  {/each}
+                </div>
+              </td>
+              <td class="px-4 py-2 text-sm {typedGroup.hasLostTime ? 'text-gray-800' : 'theme-text-primary'}">
+                <div class="flex flex-col gap-0.5">
+                  {#each typedGroup.items as report}
+                    <div class="text-xs">{report.to_date || 'N/A'}</div>
                   {/each}
                 </div>
               </td>

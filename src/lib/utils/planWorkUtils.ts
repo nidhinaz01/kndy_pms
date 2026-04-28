@@ -109,7 +109,8 @@ export function autoCalculateEndTime(
   fromTime: string,
   remainingTime: number,
   estimatedDurationMinutes: number | undefined,
-  shiftBreakTimes: Array<{ start_time: string; end_time: string }>
+  shiftBreakTimes: Array<{ start_time: string; end_time: string }>,
+  shiftEndTime?: string
 ): string {
   if (!fromTime) return '';
 
@@ -141,7 +142,13 @@ export function autoCalculateEndTime(
       }
     }
 
-    const endMinutes = fromMinutes + clockSpanMinutes;
+    let endMinutes = fromMinutes + clockSpanMinutes;
+    if (shiftEndTime) {
+      const [shiftEndHour, shiftEndMin] = shiftEndTime.split(':').map(Number);
+      const shiftEndMinutes = (shiftEndHour * 60) + shiftEndMin;
+      // Auto path must not extend beyond shift end.
+      endMinutes = Math.min(endMinutes, shiftEndMinutes);
+    }
     const endHour = Math.floor((endMinutes % (24 * 60)) / 60);
     const endMin = endMinutes % 60;
     

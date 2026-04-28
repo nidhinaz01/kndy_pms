@@ -599,10 +599,14 @@
         formData.fromTime,
         workContinuation.remainingTime,
         work?.std_vehicle_work_flow?.estimated_duration_minutes,
-        shiftBreakTimes
+        shiftBreakTimes,
+        shiftInfo?.hr_shift_master?.end_time
       );
       if (calculatedToTime) {
         formData.toTime = calculatedToTime;
+        if (formData.fromDate) {
+          formData.toDate = formData.fromDate;
+        }
         lastAutoCalculatedToTime = calculatedToTime;
         console.log('🔄 Auto-calculated toTime:', calculatedToTime, 'from fromTime:', formData.fromTime);
       }
@@ -984,11 +988,15 @@
       formData.fromTime,
       remainingTime,
       estimatedDurationMinutes,
-      shiftBreakTimes
+      shiftBreakTimes,
+      shiftInfo?.hr_shift_master?.end_time
     );
     
     if (calculatedToTime) {
       formData.toTime = calculatedToTime;
+      if (formData.fromDate) {
+        formData.toDate = formData.fromDate;
+      }
       lastAutoCalculatedToTime = calculatedToTime;
     }
   }
