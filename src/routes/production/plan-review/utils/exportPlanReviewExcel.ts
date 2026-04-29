@@ -60,7 +60,7 @@ function manpowerRowsForExcel(manpowerPlanData: any[], ctx: PlanReviewExcelConte
       Employee: plan.hr_emp?.emp_name || 'N/A',
       Stage: stageStr,
       Attendance: attendanceStr,
-      'Reported Hours': re ? '—' : numCell(plan.actual_hours ?? plan.planned_hours),
+      'PLANNED HOURS': re ? '—' : numCell(plan.actual_hours ?? plan.planned_hours),
       'OT Hours': re ? '—' : numCell(plan.ot_hours),
       'C-Off Hours': re ? '—' : numCell(plan.c_off_value)
     };
@@ -121,7 +121,7 @@ export function exportPlanReviewExcel(
     const manpowerWs = XLSX.utils.json_to_sheet(
       manRows.length > 0
         ? manRows
-        : [{ Employee: '(No data)', Stage: '', Attendance: '', 'Reported Hours': '', 'OT Hours': '', 'C-Off Hours': '' }]
+        : [{ Employee: '(No data)', Stage: '', Attendance: '', 'PLANNED HOURS': '', 'OT Hours': '', 'C-Off Hours': '' }]
     );
     manpowerWs['!cols'] = [{ wch: 28 }, { wch: 28 }, { wch: 24 }, { wch: 14 }, { wch: 12 }, { wch: 12 }];
 

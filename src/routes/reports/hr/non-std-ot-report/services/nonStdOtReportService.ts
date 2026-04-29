@@ -44,6 +44,24 @@ export interface NonStdOtReportRow {
   createdDt: string | null;
 }
 
+export async function loadNonStdOtReportStages(): Promise<string[]> {
+  const { data, error } = await supabase
+    .from('sys_data_elements')
+    .select('de_value')
+    .eq('de_name', 'Plant-Stage')
+    .eq('is_active', true)
+    .eq('is_deleted', false)
+    .order('de_value', { ascending: true });
+
+  if (error) throw error;
+  const unique = new Set<string>();
+  for (const item of data || []) {
+    const value = item?.de_value != null ? String(item.de_value).trim() : '';
+    if (value) unique.add(value);
+  }
+  return [...unique].sort((a, b) => a.localeCompare(b));
+}
+
 function pickWo(row: { wo_no?: string | null; pwo_no?: string | null; customer_name?: string | null } | null) {
   if (!row) return { woNo: null as string | null, pwoNo: null as string | null, customerName: null as string | null };
   return {
@@ -87,7 +105,7 @@ function workNameDetailsFromPlan(p: any): string | null {
   return swt.sw_code ? String(swt.sw_code) : workCodeFromPlan(p);
 }
 
-export async function loadNonStdOtReport(fromDate: string, toDate: string): Promise<NonStdOtReportRow[]> {
+export async function loadNonStdOtReport(fromDate: string, toDate: string, stage: string): Promise<NonStdOtReportRow[]> {
   const fromD = fromDate.split('T')[0];
   const toD = toDate.split('T')[0];
   const raw: Array<{
@@ -146,6 +164,8 @@ export async function loadNonStdOtReport(fromDate: string, toDate: string): Prom
       if (!isoRangesOverlap(fromD, toD, row.from_date, row.to_date)) continue;
 
       const p = row.prdn_work_planning;
+      const rowStage = p?.stage_code != null ? String(p.stage_code) : null;
+      if (stage !== 'All' && rowStage !== stage) continue;
       const workCode = workCodeFromPlan(p);
       if (!isNonStandardCode(workCode)) continue;
 
@@ -169,7 +189,7 @@ export async function loadNonStdOtReport(fromDate: string, toDate: string): Prom
           customerName: wo.customerName,
           workCode,
           workNameDetails: workNameDetailsFromPlan(p),
-          stageCode: p?.stage_code ?? null,
+          stageCode: rowStage,
           shiftCode: p?.shift_code ?? null,
           workerId: emp.workerId ?? row.worker_id ?? null,
           workerName: emp.workerName,

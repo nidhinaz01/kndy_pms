@@ -43,7 +43,25 @@ export interface AttendancePivotReport {
   rows: AttendancePivotRow[];
 }
 
-export async function loadAttendancePivotReport(fromDate: string, toDate: string): Promise<AttendancePivotReport> {
+export async function loadAttendanceReportStages(): Promise<string[]> {
+  const { data, error } = await supabase
+    .from('sys_data_elements')
+    .select('de_value')
+    .eq('de_name', 'Plant-Stage')
+    .eq('is_active', true)
+    .eq('is_deleted', false)
+    .order('de_value', { ascending: true });
+
+  if (error) throw error;
+  const unique = new Set<string>();
+  for (const item of data || []) {
+    const value = item?.de_value != null ? String(item.de_value).trim() : '';
+    if (value) unique.add(value);
+  }
+  return [...unique].sort((a, b) => a.localeCompare(b));
+}
+
+export async function loadAttendancePivotReport(fromDate: string, toDate: string, stage: string): Promise<AttendancePivotReport> {
   const fromD = fromDate.split('T')[0];
   const toD = toDate.split('T')[0];
   const dates = eachIsoDateInclusive(fromD, toD);
@@ -92,12 +110,14 @@ export async function loadAttendancePivotReport(fromDate: string, toDate: string
       const wFrom = row.reporting_from_date ? String(row.reporting_from_date).split('T')[0] : '';
       const wTo = row.reporting_to_date ? String(row.reporting_to_date).split('T')[0] : wFrom;
       if (!isoRangesOverlap(fromD, toD, wFrom, wTo)) continue;
+      const rowStage = row.stage_code != null ? String(row.stage_code) : null;
+      if (stage !== 'All' && rowStage !== stage) continue;
 
       const emp = pickEmp(Array.isArray(row.hr_emp) ? row.hr_emp[0] : row.hr_emp);
       rawRows.push({
         id: Number(row.id),
         shiftCode: row.shift_code ?? null,
-        stageCode: row.stage_code ?? null,
+        stageCode: rowStage,
         empId: emp.empId ?? row.emp_id ?? null,
         empName: emp.empName,
         skillShort: emp.skillShort,

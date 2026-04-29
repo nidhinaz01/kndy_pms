@@ -43,6 +43,24 @@ export interface COffReportRow {
   modifiedDt: string | null;
 }
 
+export async function loadCOffReportStages(): Promise<string[]> {
+  const { data, error } = await supabase
+    .from('sys_data_elements')
+    .select('de_value')
+    .eq('de_name', 'Plant-Stage')
+    .eq('is_active', true)
+    .eq('is_deleted', false)
+    .order('de_value', { ascending: true });
+
+  if (error) throw error;
+  const unique = new Set<string>();
+  for (const item of data || []) {
+    const value = item?.de_value != null ? String(item.de_value).trim() : '';
+    if (value) unique.add(value);
+  }
+  return [...unique].sort((a, b) => a.localeCompare(b));
+}
+
 function pickEmp(row: { emp_id?: string | null; emp_name?: string | null; skill_short?: string | null } | null) {
   if (!row) {
     return { empId: null as string | null, empName: null as string | null, skillShort: null as string | null };
@@ -54,7 +72,7 @@ function pickEmp(row: { emp_id?: string | null; emp_name?: string | null; skill_
   };
 }
 
-export async function loadCOffReport(fromDate: string, toDate: string): Promise<COffReportRow[]> {
+export async function loadCOffReport(fromDate: string, toDate: string, stage: string): Promise<COffReportRow[]> {
   const fromD = fromDate.split('T')[0];
   const toD = toDate.split('T')[0];
   const out: Array<{ row: COffReportRow; sortKey: string }> = [];
@@ -105,6 +123,8 @@ export async function loadCOffReport(fromDate: string, toDate: string): Promise<
         const wTo = row.reporting_to_date ? String(row.reporting_to_date).split('T')[0] : wFrom;
         if (!isoRangesOverlap(fromD, toD, wFrom, wTo)) continue;
         if (!hasCOffUse(row)) continue;
+        const rowStage = row.stage_code != null ? String(row.stage_code) : null;
+        if (stage !== 'All' && rowStage !== stage) continue;
 
         const emp = pickEmp(Array.isArray(row.hr_emp) ? row.hr_emp[0] : row.hr_emp);
         out.push({
@@ -113,7 +133,7 @@ export async function loadCOffReport(fromDate: string, toDate: string): Promise<
             empId: emp.empId ?? row.emp_id ?? null,
             empName: emp.empName,
             skillShort: emp.skillShort,
-            stageCode: row.stage_code ?? null,
+            stageCode: rowStage,
             shiftCode: row.shift_code ?? null,
             attendanceStatus: row.attendance_status ?? null,
             recordStatus: row.status ?? null,

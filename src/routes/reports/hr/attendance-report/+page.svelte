@@ -13,6 +13,7 @@
   } from '$lib/utils/reportDateRange';
   import {
     loadAttendancePivotReport,
+    loadAttendanceReportStages,
     type AttendancePivotReport,
     type AttendancePivotRow
   } from './services/attendanceReportService';
@@ -24,6 +25,8 @@
 
   let fromDate = firstDayOfMonthIso();
   let toDate = todayIsoLocal();
+  let selectedStage = '';
+  let stageOptions: string[] = [];
   let report: AttendancePivotReport | null = null;
   let loading = false;
   let errorMessage = '';
@@ -34,6 +37,7 @@
       const { getCurrentUsername } = await import('$lib/utils/userUtils');
       const username = getCurrentUsername();
       menus = await fetchUserMenus(username);
+      stageOptions = await loadAttendanceReportStages();
     } catch (e) {
       console.error('Failed to load menus:', e);
     }
@@ -47,6 +51,12 @@
     errorMessage = '';
     tableSearch = '';
     report = null;
+    if (!selectedStage) {
+      const msg = 'Stage has to be selected.';
+      errorMessage = msg;
+      alert(msg);
+      return;
+    }
     const v = validateReportDateRange(fromDate, toDate);
     if (!v.ok) {
       errorMessage = v.error || 'Invalid dates.';
@@ -54,7 +64,7 @@
     }
     loading = true;
     try {
-      report = await loadAttendancePivotReport(v.fromDate!, v.toDate!);
+      report = await loadAttendancePivotReport(v.fromDate!, v.toDate!, selectedStage);
     } catch (e) {
       console.error(e);
       errorMessage = e instanceof Error ? e.message : 'Failed to generate report.';
@@ -82,8 +92,34 @@
     return row.cells[iso] ?? '';
   }
 
+  function normalizedStatus(value: string | null | undefined): 'P' | 'A(I)' | 'A(U)' | null {
+    const v = (value || '').trim().toUpperCase();
+    if (v === 'P' || v === 'A(I)' || v === 'A(U)') return v;
+    return null;
+  }
+
+  function rowStatusCount(row: AttendancePivotRow, status: 'P' | 'A(I)' | 'A(U)'): number {
+    if (!report) return 0;
+    let total = 0;
+    for (const d of report.dates) {
+      if (normalizedStatus(row.cells[d]) === status) total += 1;
+    }
+    return total;
+  }
+
+  function dateStatusCount(dateIso: string, status: 'P' | 'A(I)' | 'A(U)'): number {
+    let total = 0;
+    for (const row of filteredAttendanceRows) {
+      if (normalizedStatus(row.cells[dateIso]) === status) total += 1;
+    }
+    return total;
+  }
+
   $: filteredAttendanceRows =
     report?.rows.filter((r) => reportRowMatchesSearch(tableSearch, r)) ?? [];
+  $: datePCounts = Object.fromEntries((report?.dates || []).map((d) => [d, dateStatusCount(d, 'P')])) as Record<string, number>;
+  $: dateAICounts = Object.fromEntries((report?.dates || []).map((d) => [d, dateStatusCount(d, 'A(I)')])) as Record<string, number>;
+  $: dateAUCounts = Object.fromEntries((report?.dates || []).map((d) => [d, dateStatusCount(d, 'A(U)')])) as Record<string, number>;
 </script>
 
 <svelte:head>
@@ -112,6 +148,19 @@
         </div>
       </div>
       <div class="flex flex-wrap items-end justify-end gap-3">
+        <label class="flex flex-col gap-1 text-sm theme-text-secondary">
+          <span>Stage</span>
+          <select
+            bind:value={selectedStage}
+            class="rounded-md border theme-border bg-white px-2 py-1.5 text-gray-900 dark:bg-gray-900 dark:text-gray-100"
+          >
+            <option value="">--Select Stage--</option>
+            <option value="All">All</option>
+            {#each stageOptions as stage}
+              <option value={stage}>{stage}</option>
+            {/each}
+          </select>
+        </label>
         <label class="flex flex-col gap-1 text-sm theme-text-secondary">
           <span>From date</span>
           <input
@@ -209,6 +258,9 @@
                     {formatDdMmmYyyy(d)}
                   </th>
                 {/each}
+                <th class="px-2 py-2 font-medium whitespace-nowrap text-right min-w-[4rem]">P</th>
+                <th class="px-2 py-2 font-medium whitespace-nowrap text-right min-w-[4rem]">A(I)</th>
+                <th class="px-2 py-2 font-medium whitespace-nowrap text-right min-w-[4rem]">A(U)</th>
               </tr>
             </thead>
             <tbody class="theme-text-primary">
@@ -223,9 +275,62 @@
                   {#each report.dates as d}
                     <td class="px-2 py-2 text-center tabular-nums whitespace-nowrap">{cellDisplay(d, r) || '—'}</td>
                   {/each}
+                  <td class="px-2 py-2 text-right tabular-nums whitespace-nowrap">{rowStatusCount(r, 'P')}</td>
+                  <td class="px-2 py-2 text-right tabular-nums whitespace-nowrap">{rowStatusCount(r, 'A(I)')}</td>
+                  <td class="px-2 py-2 text-right tabular-nums whitespace-nowrap">{rowStatusCount(r, 'A(U)')}</td>
                 </tr>
               {/each}
             </tbody>
+            <tfoot class="theme-text-primary font-semibold">
+              <tr class="theme-border border-t">
+                <td class="px-2 py-2"></td>
+                <td class="px-2 py-2"></td>
+                <td class="px-2 py-2 whitespace-nowrap">P</td>
+                <td class="px-2 py-2"></td>
+                {#each report.dates as d}
+                  <td class="px-2 py-2 text-center tabular-nums whitespace-nowrap">{datePCounts[d] ?? 0}</td>
+                {/each}
+                <td class="px-2 py-2"></td>
+                <td class="px-2 py-2"></td>
+                <td class="px-2 py-2"></td>
+              </tr>
+              <tr class="theme-border border-t">
+                <td class="px-2 py-2"></td>
+                <td class="px-2 py-2"></td>
+                <td class="px-2 py-2 whitespace-nowrap">A(I)</td>
+                <td class="px-2 py-2"></td>
+                {#each report.dates as d}
+                  <td class="px-2 py-2 text-center tabular-nums whitespace-nowrap">{dateAICounts[d] ?? 0}</td>
+                {/each}
+                <td class="px-2 py-2"></td>
+                <td class="px-2 py-2"></td>
+                <td class="px-2 py-2"></td>
+              </tr>
+              <tr class="theme-border border-t">
+                <td class="px-2 py-2"></td>
+                <td class="px-2 py-2"></td>
+                <td class="px-2 py-2 whitespace-nowrap">A(U)</td>
+                <td class="px-2 py-2"></td>
+                {#each report.dates as d}
+                  <td class="px-2 py-2 text-center tabular-nums whitespace-nowrap">{dateAUCounts[d] ?? 0}</td>
+                {/each}
+                <td class="px-2 py-2"></td>
+                <td class="px-2 py-2"></td>
+                <td class="px-2 py-2"></td>
+              </tr>
+              <tr class="theme-border border-t">
+                <td class="px-2 py-2"></td>
+                <td class="px-2 py-2"></td>
+                <td class="px-2 py-2 whitespace-nowrap">Total</td>
+                <td class="px-2 py-2"></td>
+                {#each report.dates as d}
+                  <td class="px-2 py-2 text-center tabular-nums whitespace-nowrap">{(datePCounts[d] ?? 0) + (dateAICounts[d] ?? 0) + (dateAUCounts[d] ?? 0)}</td>
+                {/each}
+                <td class="px-2 py-2"></td>
+                <td class="px-2 py-2"></td>
+                <td class="px-2 py-2"></td>
+              </tr>
+            </tfoot>
           </table>
         </div>
       </section>

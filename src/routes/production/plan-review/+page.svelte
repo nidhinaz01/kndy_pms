@@ -946,7 +946,7 @@
                     <th class="px-4 py-2 text-left text-xs font-medium theme-text-secondary uppercase">Employee</th>
                     <th class="px-4 py-2 text-left text-xs font-medium theme-text-secondary uppercase">Stage</th>
                     <th class="px-4 py-2 text-left text-xs font-medium theme-text-secondary uppercase">Attendance</th>
-                    <th class="px-4 py-2 text-right text-xs font-medium theme-text-secondary uppercase">Reported Hours</th>
+                    <th class="px-4 py-2 text-right text-xs font-medium theme-text-secondary uppercase">PLANNED HOURS</th>
                     <th class="px-4 py-2 text-right text-xs font-medium theme-text-secondary uppercase">OT Hours</th>
                     <th class="px-4 py-2 text-right text-xs font-medium theme-text-secondary uppercase">C-Off Hours</th>
                   </tr>
