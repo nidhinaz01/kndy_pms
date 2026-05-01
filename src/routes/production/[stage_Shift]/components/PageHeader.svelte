@@ -1,12 +1,13 @@
 <script lang="ts">
-  import { createEventDispatcher } from 'svelte';
+  import { createEventDispatcher, tick } from 'svelte';
   import { goto } from '$app/navigation';
 
   export let activeTab: string = 'work-orders';
   export let selectedDate: string = '';
-  export let tabs: Array<{ id: string; label: string; icon: string }> = [];
+  export let tabs: Array<{ id: string; label: string; icon?: string }> = [];
 
   const dispatch = createEventDispatcher();
+  let tabsNavEl: HTMLElement | null = null;
 
   function handleTabChange(tabId: string) {
     dispatch('tabChange', tabId);
@@ -34,14 +35,25 @@
   function handleSidebarToggle() {
     dispatch('sidebarToggle');
   }
+
+  async function scrollActiveTabIntoView() {
+    if (!tabsNavEl || !activeTab) return;
+    await tick();
+    const activeButton = tabsNavEl.querySelector<HTMLButtonElement>(`button[data-tab-id="${activeTab}"]`);
+    activeButton?.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+  }
+
+  $: if (tabsNavEl && activeTab) {
+    scrollActiveTabIntoView();
+  }
 </script>
 
 <div class="theme-bg-primary shadow-sm border-b theme-border">
   <div class="w-full mx-auto px-4 sm:px-6 lg:px-8">
-    <div class="flex items-center justify-between py-4">
+    <div class="flex min-w-0 flex-nowrap items-center justify-between gap-x-2 gap-y-2 py-3">
       <!-- Burger Menu -->
       <button 
-        class="p-2 rounded hover:theme-bg-tertiary focus:outline-none transition-colors duration-200" 
+        class="shrink-0 rounded p-2 hover:theme-bg-tertiary focus:outline-none transition-colors duration-200" 
         on:click={handleSidebarToggle} 
         aria-label="Show sidebar"
       >
@@ -50,25 +62,35 @@
         </svg>
       </button>
 
-      <!-- Tab Navigation -->
-      <nav class="flex space-x-8 overflow-x-auto scrollbar-thin scrollbar-thumb-gray-300 dark:scrollbar-thumb-gray-600 scrollbar-track-transparent">
-        {#each tabs as tab}
-          <button
-            class="py-2 px-3 font-medium text-sm transition-colors duration-200 rounded-lg whitespace-nowrap flex-shrink-0 {activeTab === tab.id 
-              ? 'border-2 border-blue-500 text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 shadow-sm' 
-              : 'border-2 border-transparent theme-text-secondary hover:theme-text-primary hover:border-gray-300 dark:hover:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700/20'}"
-            on:click={() => handleTabChange(tab.id)}
-          >
-            <span class="mr-2">{tab.icon}</span>
-            {tab.label}
-          </button>
-        {/each}
+      <!-- Tab Navigation: single horizontal row; narrow pills so labels wrap inside (2 lines for longer names) -->
+      <nav
+        bind:this={tabsNavEl}
+        class="min-w-0 flex-1 overflow-x-auto overflow-y-hidden overscroll-x-contain px-0.5 py-0.5 scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-transparent dark:scrollbar-thumb-gray-600"
+        aria-label="Production sections"
+      >
+        <div class="mx-auto flex w-max max-w-none flex-nowrap items-stretch justify-center gap-x-1 sm:gap-x-1.5">
+          {#each tabs as tab}
+            <button
+              type="button"
+              data-tab-id={tab.id}
+              class="flex min-h-[3.25rem] w-[3.75rem] shrink-0 flex-col items-center justify-center rounded-lg border-2 px-1 py-1.5 text-center transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/55 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:focus-visible:ring-blue-400/50 dark:focus-visible:ring-offset-slate-900 sm:w-[4.25rem] sm:min-h-[3.5rem] sm:px-1.5 {activeTab === tab.id
+                ? 'border-blue-600 bg-blue-100 font-semibold text-blue-950 shadow-sm ring-2 ring-blue-500/45 ring-offset-0 dark:border-blue-400 dark:bg-blue-950 dark:text-blue-50 dark:ring-blue-400/40'
+                : 'border-slate-300 bg-transparent text-slate-600 hover:border-slate-400 hover:bg-slate-100 hover:text-slate-900 dark:border-slate-600 dark:text-slate-400 dark:hover:border-slate-500 dark:hover:bg-slate-800 dark:hover:text-slate-100'}"
+              aria-current={activeTab === tab.id ? 'page' : undefined}
+              on:click={() => handleTabChange(tab.id)}
+            >
+              <span
+                class="w-full max-w-full hyphens-auto break-words text-center text-[0.65rem] font-medium leading-[1.1] sm:text-[0.7rem] sm:leading-tight"
+              >{tab.label}</span>
+            </button>
+          {/each}
+        </div>
       </nav>
 
-      <!-- Date Selection -->
-      <div class="flex items-center space-x-4">
-        <label for="selectedDate" class="text-sm font-medium theme-text-primary">
-          Select Date:
+      <!-- Date picker -->
+      <div class="flex shrink-0 flex-row flex-wrap items-center justify-end gap-x-2 gap-y-1 sm:gap-x-3">
+        <label for="selectedDate" class="shrink-0 text-sm font-medium theme-text-primary">
+          Date:
         </label>
         <input
           id="selectedDate"
@@ -76,17 +98,14 @@
           bind:value={selectedDate}
           on:input={handleDateInput}
           on:change={handleDateChange}
-          class="px-3 py-2 border theme-border rounded-lg theme-bg-primary theme-text-primary focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+          class="min-w-0 rounded-lg border theme-border px-2 py-1.5 text-sm theme-bg-primary theme-text-primary focus:border-transparent focus:ring-2 focus:ring-blue-500 sm:px-3 sm:py-2"
         />
-        <span class="text-sm theme-text-secondary">
-          Current Date: {new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' })}
-        </span>
       </div>
 
       <!-- Favicon -->
       <button
         on:click={() => goto('/dashboard')}
-        class="flex items-center hover:opacity-80 transition-opacity cursor-pointer"
+        class="flex shrink-0 items-center hover:opacity-80 transition-opacity cursor-pointer"
         aria-label="Go to dashboard"
       >
         <img src="/favicon.png" alt="Company Logo" class="h-8 w-auto" />

@@ -232,6 +232,20 @@ export async function savePlannedAttendance(
         if (!toTime) toTime = shiftInfo.shiftEndTime;
       }
 
+      // Hard block: present attendance cannot be saved with zero/negative shift hours.
+      if (!fromTime || !toTime) {
+        return {
+          success: false,
+          error: 'From time and To time are required for present attendance'
+        };
+      }
+      if (!Number.isFinite(Number(plannedHours)) || Number(plannedHours) <= 0) {
+        return {
+          success: false,
+          error: 'Present attendance must have shift hours greater than 0'
+        };
+      }
+
       // Validate: if planned_hours < full shift, notes is required
       const shiftInfo = await getFullShiftHours(shiftCode);
       if (plannedHours < shiftInfo.fullShiftHours) {
@@ -590,6 +604,20 @@ export async function saveReportedManpower(
         // Set default times if not provided
         if (!fromTime) fromTime = shiftInfo.shiftStartTime;
         if (!toTime) toTime = shiftInfo.shiftEndTime;
+      }
+
+      // Hard block: present attendance cannot be saved with zero/negative shift hours.
+      if (!fromTime || !toTime) {
+        return {
+          success: false,
+          error: 'From time and To time are required for present attendance'
+        };
+      }
+      if (!Number.isFinite(Number(actualHours)) || Number(actualHours) <= 0) {
+        return {
+          success: false,
+          error: 'Present attendance must have shift hours greater than 0'
+        };
       }
 
       // Get planned hours from planning (if exists)

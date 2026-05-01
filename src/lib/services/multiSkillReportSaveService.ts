@@ -15,6 +15,14 @@ function normalizeReportingDateStr(d: string | null | undefined): string {
   return d ? String(d).split('T')[0].trim() : '';
 }
 
+function normalizeSkill(skill: string | null | undefined): string {
+  return String(skill || '').trim().toUpperCase();
+}
+
+function buildSkillMismatchReason(requiredSkill: string, workerSkill: string): string {
+  return `Worker skill "${workerSkill}" does not match required skill "${requiredSkill}" at reporting.`;
+}
+
 export async function saveMultiSkillReports(
   selectedWorks: any[],
   formData: MultiSkillReportFormData,
@@ -293,6 +301,24 @@ export async function saveMultiSkillReports(
       deviation_type: 'no_worker' | 'skill_mismatch' | 'exceeds_std_time';
       reason: string;
     }> = [];
+
+    const uniqueWorkerIds = Array.from(
+      new Set(
+        savedReports
+          .map((report: any) => String(report?.worker_id || '').trim())
+          .filter(Boolean)
+      )
+    );
+    const workerSkillById = new Map<string, string>();
+    if (uniqueWorkerIds.length > 0) {
+      const { data: workerRows } = await supabase
+        .from('hr_emp')
+        .select('emp_id, skill_short')
+        .in('emp_id', uniqueWorkerIds);
+      (workerRows || []).forEach((row: any) => {
+        workerSkillById.set(String(row.emp_id), String(row.skill_short || ''));
+      });
+    }
     
     savedReports.forEach((report: any) => {
       const work = skillWorks.find(w => w.id === report.planning_id);
@@ -304,6 +330,24 @@ export async function saveMultiSkillReports(
             planning_id: work.id,
             deviation_type: deviation.deviationType || 'no_worker',
             reason: deviation.reason.trim()
+          });
+        }
+        const requiredSkill = String(work.sc_required || work.prdn_work_planning?.sc_required || '');
+        const workerSkill = String(workerSkillById.get(String(report.worker_id)) || '');
+        const hasManualSkillMismatch = deviation?.hasDeviation && deviation.deviationType === 'skill_mismatch';
+        if (
+          requiredSkill &&
+          workerSkill &&
+          normalizeSkill(requiredSkill) &&
+          normalizeSkill(workerSkill) &&
+          normalizeSkill(requiredSkill) !== normalizeSkill(workerSkill) &&
+          !hasManualSkillMismatch
+        ) {
+          deviationsToCreate.push({
+            reporting_id: report.id,
+            planning_id: work.id,
+            deviation_type: 'skill_mismatch',
+            reason: buildSkillMismatchReason(requiredSkill, workerSkill)
           });
         }
       }

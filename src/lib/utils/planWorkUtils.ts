@@ -53,6 +53,18 @@ export function calculatePlannedHours(fromTime: string, toTime: string): number 
   }
 }
 
+/** Gross duration minus break intervals that overlap the work slot (hours). */
+export function calculateNetPlannedHours(
+  fromTime: string,
+  toTime: string,
+  shiftBreakTimes?: Array<{ start_time: string; end_time: string }>
+): number {
+  const gross = calculatePlannedHours(fromTime, toTime);
+  if (!shiftBreakTimes?.length) return gross;
+  const breakOverlapHours = calculateBreakTimeInSlot(fromTime, toTime, shiftBreakTimes);
+  return Math.max(0, gross - breakOverlapHours);
+}
+
 /**
  * Effective dates/times for one planning row (skill slot or trainee index).
  * Custom override is times-only; dates always come from Step 1 (`formData.fromDate` / `toDate`).
@@ -70,16 +82,17 @@ export function getEffectiveRowTimes(
   const fromDate = formData.fromDate || '';
   const toDate = formData.toDate || fromDate;
   const o = formData.rowTimeOverrides?.[rowKey];
+  const breaks = formData.shiftBreakTimes ?? [];
   const defaultPlanned =
     formData.plannedHours ??
-    calculatePlannedHours(formData.fromTime || '', formData.toTime || '');
+    calculateNetPlannedHours(formData.fromTime || '', formData.toTime || '', breaks);
   if (o?.useCustom && o.fromTime && o.toTime) {
     return {
       fromDate,
       toDate,
       fromTime: o.fromTime,
       toTime: o.toTime,
-      plannedHours: calculatePlannedHours(o.fromTime, o.toTime)
+      plannedHours: calculateNetPlannedHours(o.fromTime, o.toTime, breaks)
     };
   }
   return {

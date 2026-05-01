@@ -48,6 +48,8 @@ export interface RowTimeFormLike {
   fromTime?: string;
   toTime?: string;
   plannedHours?: number;
+  /** When set, planned hours subtract overlap with these breaks inside each slot. */
+  shiftBreakTimes?: Array<{ start_time: string; end_time: string }>;
   rowTimeOverrides?: Record<string, RowTimeOverride>;
 }
 
@@ -61,6 +63,8 @@ export interface PlanWorkFormData {
   toTime: string;
   plannedHours: number;
   selectedSkillMappingIndex: number;
+  /** Shift breaks from DB; used for net planned hours (overlap subtraction). */
+  shiftBreakTimes: Array<{ start_time: string; end_time: string }>;
   /** Per assignment row: custom from/to time only (optional). */
   rowTimeOverrides: Record<string, RowTimeOverride>;
 }
@@ -86,6 +90,7 @@ export const initialPlanWorkFormData: PlanWorkFormData = {
   toTime: '',
   plannedHours: 0,
   selectedSkillMappingIndex: -1,
+  shiftBreakTimes: [],
   rowTimeOverrides: {}
 };
 

@@ -7,6 +7,14 @@ import { multiSkillHasAtLeastOneAssignedWorker } from '$lib/utils/multiSkillRepo
 import { calculatePieceRateForPlanning } from './pieceRateCalculationService';
 import { getWorkDisplayCode } from '$lib/utils/workDisplayUtils';
 
+function normalizeSkill(skill: string | null | undefined): string {
+  return String(skill || '').trim().toUpperCase();
+}
+
+function buildSkillMismatchReason(requiredSkill: string, workerSkill: string): string {
+  return `Worker skill "${workerSkill}" does not match required skill "${requiredSkill}" at reporting.`;
+}
+
 /**
  * Save unplanned work reports
  * Creates planning records first (with report_unplanned_work = true), then creates reporting records
@@ -129,6 +137,16 @@ export async function saveUnplannedWorkReports(
         ...(formData.selectedTrainees || []).map(t => t.emp_id).filter(Boolean)
       ])
     ) as string[];
+    const workerSkillById = new Map<string, string>();
+    if (workerIdsForTillDate.length > 0) {
+      const { data: workerRows } = await supabase
+        .from('hr_emp')
+        .select('emp_id, skill_short')
+        .in('emp_id', workerIdsForTillDate);
+      (workerRows || []).forEach((row: any) => {
+        workerSkillById.set(String(row.emp_id), String(row.skill_short || ''));
+      });
+    }
 
     const timeWorkedTillDateByWorker: Record<string, number> = {};
     if (dateStr && woDetailsId && workerIdsForTillDate.length > 0 && (derivedSwCode || otherWorkCode)) {
@@ -224,15 +242,27 @@ export async function saveUnplannedWorkReports(
       createdPlanningRecords.push(planningRecord);
       
       // Create deviation record if needed
-      if (deviation && deviation.hasDeviation && deviation.reason) {
+      const requiredSkill = String(virtualWork.sc_required || '');
+      const workerSkill = String(workerSkillById.get(String(workerId)) || '');
+      const hasSkillMismatch =
+        !!requiredSkill &&
+        !!workerSkill &&
+        normalizeSkill(requiredSkill) !== normalizeSkill(workerSkill);
+      if ((deviation && deviation.hasDeviation && deviation.reason) || hasSkillMismatch) {
         const { error: deviationError } = await supabase
           .from('prdn_work_planning_deviations')
           .insert({
             planning_id: planningRecord.id,
-            deviation_type: deviation.deviationType === 'no_worker' ? 'no_worker' : 
-                           deviation.deviationType === 'skill_mismatch' ? 'skill_mismatch' : 
-                           'exceeds_std_time',
-            reason: deviation.reason,
+            deviation_type: hasSkillMismatch
+              ? 'skill_mismatch'
+              : deviation.deviationType === 'no_worker'
+                ? 'no_worker'
+                : deviation.deviationType === 'skill_mismatch'
+                  ? 'skill_mismatch'
+                  : 'exceeds_std_time',
+            reason: hasSkillMismatch
+              ? buildSkillMismatchReason(requiredSkill, workerSkill)
+              : deviation.reason,
             is_active: true,
             is_deleted: false,
             created_by: currentUser,
@@ -280,16 +310,22 @@ export async function saveUnplannedWorkReports(
       }
       
       // Create reporting deviation if needed
-      if (deviation && deviation.hasDeviation && deviation.reason) {
+      if ((deviation && deviation.hasDeviation && deviation.reason) || hasSkillMismatch) {
         const { error: reportingDeviationError } = await supabase
           .from('prdn_work_reporting_deviations')
           .insert({
             reporting_id: reportRecord.id,
             planning_id: planningRecord.id,
-            deviation_type: deviation.deviationType === 'no_worker' ? 'no_worker' : 
-                           deviation.deviationType === 'skill_mismatch' ? 'skill_mismatch' : 
-                           'exceeds_std_time',
-            reason: deviation.reason,
+            deviation_type: hasSkillMismatch
+              ? 'skill_mismatch'
+              : deviation.deviationType === 'no_worker'
+                ? 'no_worker'
+                : deviation.deviationType === 'skill_mismatch'
+                  ? 'skill_mismatch'
+                  : 'exceeds_std_time',
+            reason: hasSkillMismatch
+              ? buildSkillMismatchReason(requiredSkill, workerSkill)
+              : deviation.reason,
             is_active: true,
             is_deleted: false,
             created_by: currentUser,

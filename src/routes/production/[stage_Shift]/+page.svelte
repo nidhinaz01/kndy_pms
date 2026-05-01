@@ -290,6 +290,13 @@
   // Tab change handler
   async function handleTabChange(tabId: string) {
     try {
+      console.log(`[tab-switch] requested -> ${tabId}`);
+      // Guard against stale overlays intercepting pointer events.
+      showSidebar = false;
+      if (bulkAttendanceOverlay) {
+        console.warn('[tab-switch] clearing stale bulkAttendanceOverlay');
+        bulkAttendanceOverlay = null;
+      }
       if (tabId !== 'draft-report') {
         selectedDraftReportRows = new Set();
       }
@@ -622,7 +629,7 @@
     on:sidebarToggle={handleSidebarToggle}
   />
 
-  <div class="container mx-auto px-4 py-6">
+  <div class="w-full px-4 py-6">
     {#if activeTab === 'work-orders'}
       <WorkOrdersTab 
         {workOrdersData}
@@ -667,6 +674,7 @@
         {draftManpowerPlanData}
         isLoading={isDraftPlanLoading}
         {stageCode}
+        {shiftCode}
         {selectedDate}
         {expandedGroups}
         {selectedRows}

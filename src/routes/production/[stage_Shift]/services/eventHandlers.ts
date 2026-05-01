@@ -722,10 +722,9 @@ export async function handleDeletePlan(context: EventHandlerContext, event: Cust
   const plannedWork = event.detail;
   const confirmed = confirm('Are you sure you want to delete this work plan?');
   if (!confirmed) return;
-  const { getCurrentUsername, getCurrentTimestamp } = await import('$lib/utils/userUtils');
   const { error } = await supabase
     .from('prdn_work_planning')
-    .update({ is_deleted: true, modified_by: getCurrentUsername(), modified_dt: getCurrentTimestamp() })
+    .delete()
     .eq('id', plannedWork.id);
   if (!error) {
     // Update work status to 'To be Planned' when any skill is deleted
@@ -949,7 +948,7 @@ export function deselectVisibleDraftReportRows(context: EventHandlerContext, eve
 }
 
 /**
- * Soft-delete multiple draft reports by reporting row id.
+ * Hard-delete multiple draft reports by reporting row id.
  */
 export async function handleMultiDeleteDraftReports(context: EventHandlerContext) {
   const rows = context.selectedDraftReportRows;
@@ -966,17 +965,9 @@ export async function handleMultiDeleteDraftReports(context: EventHandlerContext
   const reportIds = Array.from(rows).filter(Boolean);
   if (reportIds.length === 0) return;
 
-  const { getCurrentUsername, getCurrentTimestamp } = await import('$lib/utils/userUtils');
-  const currentUser = getCurrentUsername();
-  const now = getCurrentTimestamp();
-
   const { error } = await supabase
     .from('prdn_work_reporting')
-    .update({
-      is_deleted: true,
-      modified_by: currentUser,
-      modified_dt: now
-    })
+    .delete()
     .in('id', reportIds);
 
   if (!error) {
@@ -1741,29 +1732,16 @@ export async function handleSubmitPlanning(context: EventHandlerContext) {
       dateStr
     );
 
-    if (!validation.isValid) {
-      const errorMessage = validation.errors.join('\n');
-      if (validation.warnings.length > 0) {
-        const warningMessage = validation.warnings.join('\n');
-        const proceed = confirm(
-          `Validation Errors:\n${errorMessage}\n\nWarnings:\n${warningMessage}\n\nDo you want to proceed anyway?`
-        );
-        if (!proceed) {
-          context.setDraftPlanLoading(false);
-          return;
-        }
-      } else {
-        alert(`Validation failed:\n${errorMessage}\n\nPlease fix these issues before submitting.`);
-        context.setDraftPlanLoading(false);
-        return;
-      }
-    } else if (validation.warnings.length > 0) {
-      const warningMessage = validation.warnings.join('\n');
-      const proceed = confirm(`Warnings:\n${warningMessage}\n\nDo you want to proceed?`);
-      if (!proceed) {
-        context.setDraftPlanLoading(false);
-        return;
-      }
+    // Fully blocking: any validation issue (errors or warnings) must prevent submission.
+    if (!validation.isValid || validation.errors.length > 0 || validation.warnings.length > 0) {
+      const issueLines = [
+        ...validation.errors.map((line) => `Error: ${line}`),
+        ...validation.warnings.map((line) => `Warning: ${line}`)
+      ];
+      const issueMessage = issueLines.join('\n');
+      alert(`Validation failed:\n${issueMessage}\n\nPlease fix these issues before submitting.`);
+      context.setDraftPlanLoading(false);
+      return;
     }
 
   await submitPlanning(context.stageCode, dateStr, context.shiftCode);
@@ -1926,18 +1904,10 @@ export async function handleDeleteReport(context: EventHandlerContext, event: Cu
   const reportIds = group.items.map((item: any) => item.id).filter(Boolean);
   if (reportIds.length === 0) return;
   
-  const { getCurrentUsername, getCurrentTimestamp } = await import('$lib/utils/userUtils');
-  const currentUser = getCurrentUsername();
-  const now = getCurrentTimestamp();
-  
-  // Soft delete all reports
+  // Hard delete all reports
   const { error } = await supabase
     .from('prdn_work_reporting')
-    .update({ 
-      is_deleted: true, 
-      modified_by: currentUser, 
-      modified_dt: now 
-    })
+    .delete()
     .in('id', reportIds);
   
   if (!error) {
@@ -1973,29 +1943,15 @@ export async function handleSubmitReporting(context: EventHandlerContext) {
       dateStr
     );
 
-    if (!validation.isValid) {
-      const errorMessage = validation.errors.join('\n');
-      if (validation.warnings.length > 0) {
-        const warningMessage = validation.warnings.join('\n');
-        const proceed = confirm(
-          `Validation Errors:\n${errorMessage}\n\nWarnings:\n${warningMessage}\n\nDo you want to proceed anyway?`
-        );
-        if (!proceed) {
-          context.setDraftReportLoading(false);
-          return;
-        }
-      } else {
-        alert(`Validation failed:\n${errorMessage}\n\nPlease fix these issues before submitting.`);
-        context.setDraftReportLoading(false);
-        return;
-      }
-    } else if (validation.warnings.length > 0) {
-      const warningMessage = validation.warnings.join('\n');
-      const proceed = confirm(`Warnings:\n${warningMessage}\n\nDo you want to proceed?`);
-      if (!proceed) {
-        context.setDraftReportLoading(false);
-        return;
-      }
+    if (!validation.isValid || validation.errors.length > 0 || validation.warnings.length > 0) {
+      const issueLines = [
+        ...validation.errors.map((line) => `Error: ${line}`),
+        ...validation.warnings.map((line) => `Warning: ${line}`)
+      ];
+      const issueMessage = issueLines.join('\n');
+      alert(`Validation failed:\n${issueMessage}\n\nPlease fix these issues before submitting.`);
+      context.setDraftReportLoading(false);
+      return;
     }
     
     // OT gates only for employees with declared OT hours on reporting manpower (faster; no crew-wide OT scan).

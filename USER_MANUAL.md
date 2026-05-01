@@ -1191,6 +1191,7 @@ Overtime can be reported from the Draft Report tab:
 
 3. **Confirm Submission**:
    - Review any warnings (e.g., overtime calculations)
+   - If the screen shows **Cannot Submit** or blocking validation errors, resolve those first
    - Confirm submission
    - System processes the submission
 
@@ -1407,6 +1408,7 @@ Full detail and examples for teams and developers: see **`PRODUCTION_STAGE_REASS
 - Edit draft reports (when no reporting submission exists, or the latest submission is **Rejected** / **Reverted**)
 - Delete draft reports
 - Submit all reports
+- Inline validation summary (errors/warnings) to fix before submit
 
 **How to Use**:
 - Navigate to **Draft Report** tab
@@ -4845,7 +4847,7 @@ The project includes **SQL maintenance scripts** in the source tree (for **DBAs*
 ---
 
 **Document Version**: 1.1  
-**Last Updated**: 29 April 2026  
+**Last Updated**: 1 May 2026  
 **System Version**: Production Management System v1.0
 
 

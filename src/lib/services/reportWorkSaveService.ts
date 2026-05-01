@@ -2,6 +2,14 @@ import { supabase } from '$lib/supabaseClient';
 import type { ReportWorkFormData } from '$lib/types/reportWork';
 import { calculatePieceRateForPlanning } from './pieceRateCalculationService';
 
+function normalizeSkill(skill: string | null | undefined): string {
+  return String(skill || '').trim().toUpperCase();
+}
+
+function buildSkillMismatchReason(requiredSkill: string, workerSkill: string): string {
+  return `Worker skill "${workerSkill}" does not match required skill "${requiredSkill}" at reporting.`;
+}
+
 export async function saveWorkReport(
   plannedWork: any,
   formData: ReportWorkFormData
@@ -49,6 +57,39 @@ export async function saveWorkReport(
 
     if (error) {
       return { success: false, error: error.message || 'Unknown error' };
+    }
+
+    const requiredSkill = String(
+      plannedWork?.sc_required || plannedWork?.prdn_work_planning?.sc_required || ''
+    );
+    if (requiredSkill && formData.selectedWorkerId && data?.id) {
+      const { data: workerRow } = await supabase
+        .from('hr_emp')
+        .select('skill_short')
+        .eq('emp_id', formData.selectedWorkerId)
+        .maybeSingle();
+      const workerSkill = String(workerRow?.skill_short || '');
+      if (
+        normalizeSkill(requiredSkill) &&
+        normalizeSkill(workerSkill) &&
+        normalizeSkill(requiredSkill) !== normalizeSkill(workerSkill)
+      ) {
+        const { error: mismatchDeviationError } = await supabase
+          .from('prdn_work_reporting_deviations')
+          .insert({
+            reporting_id: data.id,
+            planning_id: plannedWork.id,
+            deviation_type: 'skill_mismatch',
+            reason: buildSkillMismatchReason(requiredSkill, workerSkill),
+            is_active: true,
+            is_deleted: false,
+            created_by: currentUser,
+            created_dt: now
+          });
+        if (mismatchDeviationError) {
+          console.error('Error creating reporting skill mismatch deviation:', mismatchDeviationError);
+        }
+      }
     }
 
     // Calculate piece rate if work is completed

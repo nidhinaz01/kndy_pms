@@ -5,6 +5,14 @@ import { getCurrentUsername, getCurrentTimestamp } from '$lib/utils/userUtils';
 import type { PlanWorkFormData, WorkContinuation, SelectedWorker } from '$lib/types/planWork';
 import { cancelWorkPlans } from '$lib/services/workCancellationService';
 
+function normalizeSkill(skill: string | null | undefined): string {
+  return String(skill || '').trim().toUpperCase();
+}
+
+function buildSkillMismatchReason(requiredSkill: string, workerSkill: string): string {
+  return `Worker skill "${workerSkill}" does not match required skill "${requiredSkill}".`;
+}
+
 async function validatePlanningSubmissionGate(
   stageCode: string,
   shiftCode: string,
@@ -105,6 +113,8 @@ export async function saveWorkPlanning(
   const updatePromises: PromiseLike<any>[] = [];
   const insertPromises: PromiseLike<any>[] = [];
   const planIdsToKeep = new Set<number>();
+  const updatePlanSkillMeta: Array<{ planId: number; requiredSkill: string; workerSkill: string }> = [];
+  const insertPlanSkillMeta: Array<{ requiredSkill: string; workerSkill: string }> = [];
   
   if (requiredSkills.length > 0) {
     const selectedSkillMapping = work.skill_mappings[formData.selectedSkillMappingIndex >= 0 ? formData.selectedSkillMappingIndex : 0];
@@ -156,12 +166,21 @@ export async function saveWorkPlanning(
             .select()
             .single();
           updatePromises.push(updatePromise);
+          updatePlanSkillMeta.push({
+            planId: existingPlan.id,
+            requiredSkill: skillShort,
+            workerSkill: String((worker as SelectedWorker).skill_short || '')
+          });
           console.log(`🔄 Updating plan ${existingPlan.id} for skill ${skillShort}, worker ${workerId}`);
         } else {
           // Create new plan
           insertPromises.push(
             createWorkPlanning(planData, currentUser)
           );
+          insertPlanSkillMeta.push({
+            requiredSkill: skillShort,
+            workerSkill: String((worker as SelectedWorker).skill_short || '')
+          });
           console.log(`➕ Creating new plan for skill ${skillShort}, worker ${workerId}`);
         }
       }
@@ -208,11 +227,20 @@ export async function saveWorkPlanning(
           .select()
           .single();
         updatePromises.push(updatePromise);
+        updatePlanSkillMeta.push({
+          planId: existingPlan.id,
+          requiredSkill: 'GEN',
+          workerSkill: String((worker as SelectedWorker).skill_short || '')
+        });
       } else {
         // Create new plan
         insertPromises.push(
           createWorkPlanning(planData, currentUser)
         );
+        insertPlanSkillMeta.push({
+          requiredSkill: 'GEN',
+          workerSkill: String((worker as SelectedWorker).skill_short || '')
+        });
       }
     }
   }
@@ -310,6 +338,59 @@ export async function saveWorkPlanning(
       allPlanIds.push(result.id);
     }
   });
+
+  const planSkillMismatchRows: Array<{ planning_id: number; reason: string }> = [];
+  updatePlanSkillMeta.forEach((meta) => {
+    const required = normalizeSkill(meta.requiredSkill);
+    const actual = normalizeSkill(meta.workerSkill);
+    if (!required || !actual || required === actual) return;
+    planSkillMismatchRows.push({
+      planning_id: meta.planId,
+      reason: buildSkillMismatchReason(meta.requiredSkill, meta.workerSkill)
+    });
+  });
+  insertResults.forEach((result: any, idx: number) => {
+    const meta = insertPlanSkillMeta[idx];
+    const planId = result?.id;
+    if (!meta || !planId) return;
+    const required = normalizeSkill(meta.requiredSkill);
+    const actual = normalizeSkill(meta.workerSkill);
+    if (!required || !actual || required === actual) return;
+    planSkillMismatchRows.push({
+      planning_id: planId,
+      reason: buildSkillMismatchReason(meta.requiredSkill, meta.workerSkill)
+    });
+  });
+  if (allPlanIds.length > 0) {
+    await supabase
+      .from('prdn_work_planning_deviations')
+      .update({
+        is_deleted: true,
+        modified_by: currentUser,
+        modified_dt: now
+      })
+      .in('planning_id', allPlanIds)
+      .eq('deviation_type', 'skill_mismatch')
+      .eq('is_deleted', false);
+  }
+  if (planSkillMismatchRows.length > 0) {
+    const { error: mismatchDeviationError } = await supabase
+      .from('prdn_work_planning_deviations')
+      .insert(
+        planSkillMismatchRows.map((row) => ({
+          planning_id: row.planning_id,
+          deviation_type: 'skill_mismatch',
+          reason: row.reason,
+          is_active: true,
+          is_deleted: false,
+          created_by: currentUser,
+          created_dt: now
+        }))
+      );
+    if (mismatchDeviationError) {
+      throw new Error(`Failed to create skill mismatch deviation(s): ${mismatchDeviationError.message}`);
+    }
+  }
   
   // Create planning records for trainees and deviation records
   if (formData.selectedTrainees && formData.selectedTrainees.length > 0) {

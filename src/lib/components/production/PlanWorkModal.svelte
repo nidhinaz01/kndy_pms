@@ -3,7 +3,7 @@
   import Button from '$lib/components/common/Button.svelte';
   import { X } from 'lucide-svelte';
   import { supabase } from '$lib/supabaseClient';
-  import { calculatePlannedHours, calculateBreakTimeInSlot, autoCalculateEndTime, getIndividualSkills, getSkillShort, generateTimeSlots, getEffectiveRowTimes, getCanonicalPlanWorkKey, getWorkerSlotKey } from '$lib/utils/planWorkUtils';
+  import { calculateNetPlannedHours, autoCalculateEndTime, getIndividualSkills, getSkillShort, generateTimeSlots, getEffectiveRowTimes, getCanonicalPlanWorkKey, getWorkerSlotKey } from '$lib/utils/planWorkUtils';
   import { formatTime } from '$lib/utils/timeFormatUtils';
   import { checkTimeOverlap, checkTimeExcess, checkSkillMismatch } from '$lib/utils/planWorkValidation';
   import { loadWorkers, loadWorkContinuation, loadExistingPlans, loadShiftInfo, checkAlternativeSkillCombinations } from '$lib/services/planWorkService';
@@ -641,26 +641,23 @@
     }
   }
 
-  // Watch for time changes - explicitly depend on fromTime, toTime
-  // Planned hours = simple duration between fromTime and toTime (no break time subtraction)
+  // Watch for time changes - depends on fromTime, toTime, and shift breaks (net hours)
   // This runs AFTER the auto-calculate above has updated toTime
-  // Use explicit reactive statement to ensure it runs when either time changes
   $: {
     const fromTime = formData.fromTime;
     const toTime = formData.toTime;
-    
+    const breaks = shiftBreakTimes;
+
     if (fromTime && toTime) {
-      // Calculate simple duration - no break time involved
-      const calculatedHours = calculatePlannedHours(fromTime, toTime);
-      
+      const calculatedHours = calculateNetPlannedHours(fromTime, toTime, breaks);
+
       console.log('📊 Planned hours calculation:', {
-        fromTime: fromTime,
-        toTime: toTime,
-        calculatedHours: calculatedHours,
-        fromTimeType: typeof fromTime,
-        toTimeType: typeof toTime
+        fromTime,
+        toTime,
+        breaksCount: breaks.length,
+        calculatedHours
       });
-      
+
       formData.plannedHours = calculatedHours;
     } else {
       formData.plannedHours = 0;
@@ -759,15 +756,17 @@
           end_time: b.end_time
         }));
           console.log('🕐 Loaded break times:', shiftBreakTimes.map(bt => `${bt.start_time}-${bt.end_time}`).join(', '));
-        } else {
-          // Reset to empty array if no breaks
+      } else {
+        // Reset to empty array if no breaks
           shiftBreakTimes = [];
           console.log('🕐 No break times found');
         }
       } else {
         shiftBreakTimes = [];
       }
-      
+
+      formData = { ...formData, shiftBreakTimes: [...shiftBreakTimes] };
+
       // After shift info loads, update fromTime to match closest time slot (for edit mode only, and only if fromTime was pre-filled)
       // Only do this once when shift info first loads, not on every reactive update
       // Don't update if user has manually selected a time

@@ -28,6 +28,12 @@
   let isCalculatingOT = false;
   let hasOvertime = false;
   let otReported = false;
+  let validationErrors: string[] = [];
+  let validationWarnings: string[] = [];
+  let isValidationLoading = false;
+  let lastValidationRequestKey = '';
+  let validationRefreshToken = 0;
+  let showIssuesModal = false;
   /** Same checks as submit: all present / reassigned-in employees have work hours aligned with manpower before Report OT. */
   let allEmployeeReportingComplete = true;
   let searchTerm = '';
@@ -89,6 +95,16 @@
     dispatch('refresh');
     // Recalculate OT when refreshing
     checkOvertime();
+    validationRefreshToken += 1;
+  }
+
+  function openIssuesModal() {
+    if (blockingIssues.length === 0) return;
+    showIssuesModal = true;
+  }
+
+  function closeIssuesModal() {
+    showIssuesModal = false;
   }
 
   function getUniqueSkills(items: any[]): string {
@@ -299,18 +315,72 @@
   $: isApproved = reportingSubmissionStatus?.status === 'approved';
   $: isRejected = reportingSubmissionStatus?.status === 'rejected';
   $: isReverted = reportingSubmissionStatus?.status === 'reverted';
+  $: blockingIssues = [
+    ...validationErrors.map((message) => ({ type: 'error' as const, message })),
+    ...validationWarnings.map((message) => ({ type: 'warning' as const, message }))
+  ];
+  $: hasBlockingIssues = blockingIssues.length > 0;
   $: canEdit = !hasSubmission || isRejected || isReverted; // Can edit if no submission, rejected, or reverted
   $: shouldDisableSubmit =
     isLoading ||
+    isValidationLoading ||
     totalReports === 0 ||
     isPendingApproval ||
     isApproved ||
+    hasBlockingIssues ||
     (hasOvertime && (!otReported || !allEmployeeReportingComplete));
+
+  async function loadValidationIssues(requestKey: string) {
+    const requestStartedFor = requestKey;
+    isValidationLoading = true;
+    try {
+      const dateStr = reportingDateStr();
+      const result = await validateEmployeeShiftReporting(stageCode, shiftCode, dateStr);
+      if (lastValidationRequestKey !== requestStartedFor) return;
+      validationErrors = result.errors || [];
+      validationWarnings = result.warnings || [];
+    } catch (error) {
+      if (lastValidationRequestKey !== requestStartedFor) return;
+      validationErrors = [`Unable to evaluate draft-report issues: ${(error as Error).message}`];
+      validationWarnings = [];
+    } finally {
+      if (lastValidationRequestKey === requestStartedFor) {
+        isValidationLoading = false;
+      }
+    }
+  }
+
+  $: {
+    const dateKey = reportingDateStr();
+    const nextKey = [
+      stageCode || '',
+      shiftCode || '',
+      dateKey || '',
+      String(allDraftReports?.length || 0),
+      String(draftManpowerReportData?.length || 0),
+      String(reportingSubmissionStatus?.status || ''),
+      String(isLoading),
+      String(validationRefreshToken)
+    ].join('|');
+    if (nextKey !== lastValidationRequestKey) {
+      lastValidationRequestKey = nextKey;
+      if (!stageCode || !shiftCode || !dateKey || isLoading) {
+        validationErrors = [];
+        validationWarnings = [];
+        isValidationLoading = false;
+      } else {
+        void loadValidationIssues(nextKey);
+      }
+    }
+  }
+
   $: submitDisabledReason = (() => {
     if (isLoading) return 'Loading data...';
+    if (isValidationLoading) return 'Checking reporting issues...';
     if (totalReports === 0) return 'No reports to submit';
     if (isPendingApproval) return 'Report is pending approval';
     if (isApproved) return 'Report has been approved';
+    if (hasBlockingIssues) return `Resolve ${blockingIssues.length} issue(s) listed below.`;
     if (hasOvertime && !allEmployeeReportingComplete)
       return 'Finish reporting for all employees (manpower + work hours), then use Report OT.';
     if (hasOvertime && !otReported) return 'Overtime detected but not reported. Please click "Report OT" first.';
@@ -483,6 +553,35 @@
         class="w-full px-4 py-2 border theme-border rounded-lg theme-bg-primary theme-text-primary focus:ring-2 focus:ring-blue-500 focus:border-transparent"
       />
     </div>
+  </div>
+
+  <div class="mt-3">
+    {#if isValidationLoading}
+      <div class="rounded-lg border theme-border px-4 py-3 theme-bg-secondary">
+        <p class="text-sm theme-text-secondary">Checking report issues...</p>
+      </div>
+    {:else if blockingIssues.length > 0}
+      <button
+        type="button"
+        class="w-full rounded-lg border border-red-300 dark:border-red-700 bg-red-50 dark:bg-red-900/10 px-4 py-3 text-left"
+        on:click={openIssuesModal}
+      >
+        <div class="flex items-center justify-between gap-2">
+          <p class="text-sm font-semibold text-red-700 dark:text-red-300">
+            Resolve all issues before submitting report
+          </p>
+          <span class="text-xs text-red-700 dark:text-red-300">
+            {blockingIssues.length} issue{blockingIssues.length === 1 ? '' : 's'}
+          </span>
+        </div>
+      </button>
+    {:else}
+      <div class="rounded-lg border border-green-300 dark:border-green-700 bg-green-50 dark:bg-green-900/10 px-4 py-3">
+        <p class="text-sm text-green-700 dark:text-green-300">
+          No blocking issues found. Report can be submitted.
+        </p>
+      </div>
+    {/if}
   </div>
 
   {#if duplicateWorkerReportHints.length > 0}
@@ -961,4 +1060,41 @@
     on:close={handleOvertimeModalClose}
     on:confirm={handleOvertimeConfirm}
   />
+
+  {#if showIssuesModal}
+    <button
+      type="button"
+      class="fixed inset-0 z-[9999] w-full h-full border-none bg-black bg-opacity-50 p-0"
+      aria-label="Close issues modal"
+      on:click={closeIssuesModal}
+    ></button>
+    <div class="fixed inset-0 z-[10000] flex items-center justify-center p-4">
+      <div
+        class="w-full max-w-3xl rounded-lg border-2 border-gray-300 theme-bg-primary shadow-xl dark:border-gray-600"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Draft report issues"
+        tabindex="-1"
+      >
+        <div class="border-b px-6 py-4 theme-border">
+          <div class="flex items-center justify-between gap-3">
+            <h3 class="text-lg font-semibold theme-text-primary">Draft Report Issues</h3>
+            <Button variant="secondary" size="sm" on:click={closeIssuesModal}>Close</Button>
+          </div>
+          <p class="mt-1 text-sm theme-text-secondary">
+            Resolve all issues below before submitting report.
+          </p>
+        </div>
+        <div class="max-h-[60vh] overflow-y-auto px-6 py-4">
+          <ol class="list-decimal space-y-2 pl-5">
+            {#each blockingIssues as issue}
+              <li class="text-sm {issue.type === 'error' ? 'text-red-700 dark:text-red-300' : 'text-amber-700 dark:text-amber-300'}">
+                <span class="ml-1">{issue.type === 'error' ? 'Error:' : 'Warning:'} {issue.message}</span>
+              </li>
+            {/each}
+          </ol>
+        </div>
+      </div>
+    </div>
+  {/if}
 </div>

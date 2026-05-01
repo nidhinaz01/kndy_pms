@@ -8,6 +8,7 @@
   import PlanHistoryModal from './PlanHistoryModal.svelte';
   import { supabase } from '$lib/supabaseClient';
   import { sortTableData, handleSortClick, type SortConfig } from '$lib/utils/tableSorting';
+  import { validateEmployeeShiftPlanning } from '$lib/api/production/planningValidationService';
 
   export let draftPlanData: any[] = [];
   export let draftManpowerPlanData: any[] = []; // For external reference only (not used in this component yet)
@@ -16,6 +17,7 @@
   // Reference draftManpowerPlanData to satisfy linter (for future use)
   $: void draftManpowerPlanData;
   export let stageCode: string = '';
+  export let shiftCode: string = '';
   export let selectedDate: string = '';
   export let expandedGroups: string[] = []; // Kept for compatibility but no longer used
   export let selectedRows: Set<string> = new Set();
@@ -28,6 +30,11 @@
   let hasRejectedSubmission = false; // Track if there's a previous rejected submission
   let searchTerm = '';
   let sortConfig: SortConfig = { column: null, direction: null };
+  let validationErrors: string[] = [];
+  let validationWarnings: string[] = [];
+  let isValidationLoading = false;
+  let lastValidationRequestKey = '';
+  let showIssuesModal = false;
 
   /** When true, show `prdn_work_planning.id` column for debugging (default off). */
   let showDebugIds = false;
@@ -191,8 +198,70 @@
   $: isReverted = planningSubmissionStatus?.status === 'reverted';
   $: isResubmitted = isPendingApproval && hasRejectedSubmission; // Resubmitted if pending and there's a previous rejected
   $: canSubmit = !hasSubmission || isRejected || isReverted; // Can submit if no submission, rejected, or reverted
-  $: shouldDisableSubmit = isLoading || totalPlans === 0 || isPendingApproval || isApproved;
+  $: blockingIssues = [
+    ...validationErrors.map((message) => ({ type: 'error' as const, message })),
+    ...validationWarnings.map((message) => ({ type: 'warning' as const, message }))
+  ];
+  $: hasBlockingIssues = blockingIssues.length > 0;
+  $: shouldDisableSubmit =
+    isLoading ||
+    isValidationLoading ||
+    totalPlans === 0 ||
+    isPendingApproval ||
+    isApproved ||
+    hasBlockingIssues;
   $: canEdit = !hasSubmission || isRejected || isReverted; // Can edit if no submission, rejected, or reverted
+
+  async function loadValidationIssues(requestKey: string) {
+    const requestStartedFor = requestKey;
+    isValidationLoading = true;
+    try {
+      let dateStr: string;
+      if (typeof selectedDate === 'string') {
+        dateStr = selectedDate.split('T')[0];
+      } else {
+        dateStr = new Date(selectedDate).toISOString().split('T')[0];
+      }
+      const result = await validateEmployeeShiftPlanning(stageCode, shiftCode, dateStr);
+      if (lastValidationRequestKey !== requestStartedFor) return;
+      validationErrors = result.errors || [];
+      validationWarnings = result.warnings || [];
+    } catch (error) {
+      if (lastValidationRequestKey !== requestStartedFor) return;
+      validationErrors = [`Unable to evaluate draft-plan issues: ${(error as Error).message}`];
+      validationWarnings = [];
+    } finally {
+      if (lastValidationRequestKey === requestStartedFor) {
+        isValidationLoading = false;
+      }
+    }
+  }
+
+  $: {
+    const dateKey =
+      typeof selectedDate === 'string'
+        ? selectedDate.split('T')[0]
+        : new Date(selectedDate).toISOString().split('T')[0];
+    const nextKey = [
+      stageCode || '',
+      shiftCode || '',
+      dateKey || '',
+      String(allDraftPlans?.length || 0),
+      String(draftManpowerPlanData?.length || 0),
+      String(planningSubmissionStatus?.status || ''),
+      String(isLoading)
+    ].join('|');
+    if (nextKey !== lastValidationRequestKey) {
+      lastValidationRequestKey = nextKey;
+      if (!stageCode || !shiftCode || !dateKey || isLoading) {
+        validationErrors = [];
+        validationWarnings = [];
+        isValidationLoading = false;
+      } else {
+        void loadValidationIssues(nextKey);
+      }
+    }
+  }
 
   $: submissionStatusDisplay = (() => {
     if (!planningSubmissionStatus) {
@@ -218,6 +287,15 @@
 
   function handleShowHistory() {
     showHistoryModal = true;
+  }
+
+  function openIssuesModal() {
+    if (blockingIssues.length === 0) return;
+    showIssuesModal = true;
+  }
+
+  function closeIssuesModal() {
+    showIssuesModal = false;
   }
 
   function rowStatusDisplay(status: string | undefined): { text: string; color: string } {
@@ -302,6 +380,34 @@
         placeholder="Search by work code, work name, WO number, PWO number, worker, or skill..."
         class="w-full px-4 py-2 border theme-border rounded-lg theme-bg-primary theme-text-primary focus:ring-2 focus:ring-blue-500 focus:border-transparent"
       />
+    </div>
+    <div class="mt-4">
+      {#if isValidationLoading}
+        <div class="rounded-lg border theme-border px-4 py-3 theme-bg-secondary">
+          <p class="text-sm theme-text-secondary">Checking plan issues...</p>
+        </div>
+      {:else if blockingIssues.length > 0}
+        <button
+          type="button"
+          class="w-full rounded-lg border border-red-300 dark:border-red-700 bg-red-50 dark:bg-red-900/10 px-4 py-3 text-left"
+          on:click={openIssuesModal}
+        >
+          <div class="flex items-center justify-between gap-2">
+            <p class="text-sm font-semibold text-red-700 dark:text-red-300">
+              Resolve all issues before submitting plan
+            </p>
+            <span class="text-xs text-red-700 dark:text-red-300">
+              {blockingIssues.length} issue{blockingIssues.length === 1 ? '' : 's'}
+            </span>
+          </div>
+        </button>
+      {:else}
+        <div class="rounded-lg border border-green-300 dark:border-green-700 bg-green-50 dark:bg-green-900/10 px-4 py-3">
+          <p class="text-sm text-green-700 dark:text-green-300">
+            No blocking issues found. Plan can be submitted.
+          </p>
+        </div>
+      {/if}
     </div>
   </div>
   
@@ -650,3 +756,40 @@
   stageCode={stageCode}
   planningDate={selectedDate}
 />
+
+{#if showIssuesModal}
+  <button
+    type="button"
+    class="fixed inset-0 z-[9999] w-full h-full border-none bg-black bg-opacity-50 p-0"
+    aria-label="Close issues modal"
+    on:click={closeIssuesModal}
+  ></button>
+  <div class="fixed inset-0 z-[10000] flex items-center justify-center p-4">
+    <div
+      class="w-full max-w-3xl rounded-lg border-2 border-gray-300 theme-bg-primary shadow-xl dark:border-gray-600"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Draft plan issues"
+      tabindex="-1"
+    >
+      <div class="border-b px-6 py-4 theme-border">
+        <div class="flex items-center justify-between gap-3">
+          <h3 class="text-lg font-semibold theme-text-primary">Draft Plan Issues</h3>
+          <Button variant="secondary" size="sm" on:click={closeIssuesModal}>Close</Button>
+        </div>
+        <p class="mt-1 text-sm theme-text-secondary">
+          Resolve all issues below before submitting plan.
+        </p>
+      </div>
+      <div class="max-h-[60vh] overflow-y-auto px-6 py-4">
+        <ol class="list-decimal space-y-2 pl-5">
+          {#each blockingIssues as issue, index}
+            <li class="text-sm {issue.type === 'error' ? 'text-red-700 dark:text-red-300' : 'text-amber-700 dark:text-amber-300'}">
+              <span class="ml-1">{issue.type === 'error' ? 'Error:' : 'Warning:'} {issue.message}</span>
+            </li>
+          {/each}
+        </ol>
+      </div>
+    </div>
+  </div>
+{/if}
