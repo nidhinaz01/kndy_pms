@@ -7,6 +7,13 @@
   import { filterGroupedWorksBySearch } from '../utils/productionTabSearchUtils';
   import { formatDateTimeLocal } from '$lib/utils/formatDate';
   import { sortTableData, handleSortClick, type SortConfig } from '$lib/utils/tableSorting';
+  import {
+    formatDateDdMmYy,
+    formatTimeWithoutSeconds,
+    formatRemainingTimeMinutesDisplay,
+    getGroupedSkillsRequiredForReports,
+    planningScRequiredForReportRow
+  } from '../utils/reportTableDisplayUtils';
 
   export let reportData: any[] = [];
   export let isLoading: boolean = false;
@@ -17,7 +24,11 @@
   const dispatch = createEventDispatcher();
 
   let searchTerm = '';
+  const WORK_NAME_PREVIEW_LENGTH = 30;
+  let expandedWorkNames: Record<string, boolean> = {};
   let sortConfig: SortConfig = { column: null, direction: null };
+  /** When true, show `prdn_work_reporting.id` column for debugging (default off). */
+  let showDebugIds = false;
 
   $: groupedReportWorks = groupReportWorks(reportData);
   $: filteredGroupedReportWorks = filterGroupedWorksBySearch(groupedReportWorks, searchTerm);
@@ -68,20 +79,14 @@
     dispatch('generatePDF');
   }
 
-  function getUniqueSkills(items: any[]): string {
-    if (!items || items.length === 0) return 'N/A';
-    // Prefer an explicit combined sc_name when available (e.g., "US + T")
-    for (const report of items) {
-      const scName = report.skillMapping?.sc_name || report.prdn_work_planning?.std_work_skill_mapping?.sc_name;
-      if (scName && typeof scName === 'string' && scName.trim() !== '') {
-        return scName;
-      }
-    }
-    // Fallback: collect unique tokens (sc_required or mapping short) and join with ' + ' to match Plan format
-    const tokens = items
-      .map(report => report.prdn_work_planning?.sc_required || report.skillMapping?.sc_name || 'N/A')
-      .filter((t, i, arr) => arr.indexOf(t) === i);
-    return tokens.join(' + ');
+  function getWorkNamePreview(name: string): { preview: string; truncated: boolean } {
+    const full = (name || '').trim();
+    if (full.length <= WORK_NAME_PREVIEW_LENGTH) return { preview: full || 'N/A', truncated: false };
+    return { preview: `${full.slice(0, WORK_NAME_PREVIEW_LENGTH)}...`, truncated: true };
+  }
+
+  function toggleWorkName(key: string) {
+    expandedWorkNames = { ...expandedWorkNames, [key]: !expandedWorkNames[key] };
   }
 </script>
 
@@ -94,6 +99,14 @@
       </p>
     </div>
     <div class="flex items-center space-x-3">
+      <Button
+        variant={showDebugIds ? 'primary' : 'secondary'}
+        size="sm"
+        title={showDebugIds ? 'Hide reporting row IDs' : 'Show prdn_work_reporting.id column for debugging'}
+        on:click={() => (showDebugIds = !showDebugIds)}
+      >
+        ID
+      </Button>
       <Button variant="secondary" size="sm" on:click={handleRefresh} disabled={isLoading}>
         {isLoading ? 'Loading...' : 'Refresh'}
       </Button>
@@ -131,52 +144,104 @@
   {:else}
     <!-- Report Data Table -->
     <div class="overflow-x-auto">
-      <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700" style="table-layout: fixed; width: 100%;">
+      <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700" style="table-layout: auto; word-wrap: break-word;">
         <thead class="theme-bg-secondary">
           <tr>
-            <SortableHeader column="sortable_woNo" {sortConfig} onSort={handleSort} label="Work Order" headerClass="w-[100px]" />
-            <SortableHeader column="sortable_pwoNo" {sortConfig} onSort={handleSort} label="PWO Number" headerClass="w-[120px]" />
-            <SortableHeader column="sortable_workCode" {sortConfig} onSort={handleSort} label="Work Code" headerClass="w-[120px]" />
-            <SortableHeader column="sortable_workName" {sortConfig} onSort={handleSort} label="Work Name" headerClass="w-[250px]" />
-            <th class="px-4 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider" style="width: 180px;">Skills Required</th>
-            <th class="px-4 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider" style="width: 120px;">Standard Time</th>
-            <th class="px-4 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider" style="width: 120px;">Status</th>
-            <th class="px-4 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider" style="width: 180px;">Worker (Skill)</th>
-            <th class="px-4 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider" style="width: 140px;">Time Worked Till Date</th>
-            <SortableHeader column="sortable_fromDate" {sortConfig} onSort={handleSort} label="From Date" headerClass="w-[120px]" />
-            <SortableHeader column="sortable_fromTime" {sortConfig} onSort={handleSort} label="From Time" headerClass="w-[100px]" />
-            <SortableHeader column="sortable_toDate" {sortConfig} onSort={handleSort} label="To Date" headerClass="w-[120px]" />
-            <SortableHeader column="sortable_toTime" {sortConfig} onSort={handleSort} label="To Time" headerClass="w-[100px]" />
+            {#if showDebugIds}
+              <th
+                class="px-6 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider w-[88px]"
+                title="prdn_work_reporting.id (per worker/skill row)"
+              >
+                ID
+              </th>
+            {/if}
+            <SortableHeader column="sortable_woNo" {sortConfig} onSort={handleSort} label="Work Order" headerClass="w-[100px] min-w-[100px] max-w-[100px]" />
+            <SortableHeader column="sortable_pwoNo" {sortConfig} onSort={handleSort} label="PWO Number" headerClass="w-[100px] min-w-[100px] max-w-[100px]" />
+            <SortableHeader column="sortable_workCode" {sortConfig} onSort={handleSort} label="Work Code" headerClass="w-[120px] min-w-[120px] max-w-[120px]" />
+            <SortableHeader column="sortable_workName" {sortConfig} onSort={handleSort} label="Work Name" headerClass="max-w-[200px] w-[200px]" />
+            <th class="px-6 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider">Skills Required</th>
+            <th class="px-6 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider" style="width: 120px;">Standard Time</th>
+            <th class="px-6 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider" style="width: 120px;">Status</th>
+            <th class="px-6 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider">Skill</th>
+            <th class="px-6 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider" style="width: 180px;">Worker (Skill)</th>
+            <th class="px-6 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider whitespace-nowrap" style="min-width: 140px;">Time Worked Till Date</th>
+            <SortableHeader column="sortable_fromDate" {sortConfig} onSort={handleSort} label="From Date" headerClass="w-[100px]" />
+            <SortableHeader column="sortable_fromTime" {sortConfig} onSort={handleSort} label="From Time" headerClass="w-[90px]" />
+            <SortableHeader column="sortable_toDate" {sortConfig} onSort={handleSort} label="To Date" headerClass="w-[100px]" />
+            <SortableHeader column="sortable_toTime" {sortConfig} onSort={handleSort} label="To Time" headerClass="w-[90px]" />
             <SortableHeader column="sortable_hoursWorked" {sortConfig} onSort={handleSort} label="Hours Worked" headerClass="w-[140px]" />
             <SortableHeader column="sortable_totalHoursWorked" {sortConfig} onSort={handleSort} label="Total Hours Worked" headerClass="w-[140px]" />
             <SortableHeader column="sortable_otHours" {sortConfig} onSort={handleSort} label="OT Hours" headerClass="w-[120px]" />
             <SortableHeader column="sortable_ltHours" {sortConfig} onSort={handleSort} label="Lost Time" headerClass="w-[120px]" />
-            <th class="px-4 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider" style="width: 200px;">Reason</th>
+            <th class="px-6 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider" style="width: 200px;">Reason</th>
             <SortableHeader column="sortable_reportedOn" {sortConfig} onSort={handleSort} label="Reported On" headerClass="w-[150px]" />
           </tr>
         </thead>
         <tbody class="theme-bg-primary divide-y divide-gray-200 dark:divide-gray-700">
           {#each sortedGroupedWorks as group (group.groupKey)}
             {@const typedGroup = group}
+            {@const skillsRequiredLabel = getGroupedSkillsRequiredForReports(typedGroup)}
             <!-- Single Row per Work -->
             <tr class="hover:theme-bg-secondary transition-colors" 
                 class:lost-time={typedGroup.hasLostTime}>
-              <td class="px-4 py-2 whitespace-nowrap text-sm font-medium {typedGroup.hasLostTime ? 'text-gray-800' : 'theme-text-primary'}">
+              {#if showDebugIds}
+                <td class="px-6 py-4 text-sm theme-text-primary align-top">
+                  <div class="flex flex-col gap-0.5">
+                    {#each typedGroup.items as report}
+                      <div class="text-xs font-mono tabular-nums" title="prdn_work_reporting.id">
+                        {report.id ?? '—'}
+                      </div>
+                    {/each}
+                  </div>
+                </td>
+              {/if}
+              <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-left w-[100px] min-w-[100px] max-w-[100px] {typedGroup.hasLostTime ? 'text-gray-800' : 'theme-text-primary'}">
                 {typedGroup.woNo}
               </td>
-              <td class="px-4 py-2 whitespace-nowrap text-sm {typedGroup.hasLostTime ? 'text-gray-800' : 'theme-text-primary'}">
+              <td class="px-6 py-4 whitespace-nowrap text-sm text-left w-[100px] min-w-[100px] max-w-[100px] {typedGroup.hasLostTime ? 'text-gray-800' : 'theme-text-primary'}">
                 {typedGroup.pwoNo}
               </td>
-              <td class="px-4 py-2 whitespace-nowrap text-sm font-medium {typedGroup.hasLostTime ? 'text-gray-800' : 'theme-text-primary'}">
+              <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-left w-[120px] min-w-[120px] max-w-[120px] {typedGroup.hasLostTime ? 'text-gray-800' : 'theme-text-primary'}">
                 {typedGroup.workCode}
               </td>
-              <td class="px-4 py-2 text-sm {typedGroup.hasLostTime ? 'text-gray-800' : 'theme-text-primary'}" style="word-wrap: break-word;">
-                {typedGroup.workName}
+              <td class="px-6 py-4 text-sm {typedGroup.hasLostTime ? 'text-gray-800' : 'theme-text-primary'}" style="max-width: 200px; word-wrap: break-word;">
+                <div class="break-words">
+                  <button
+                    type="button"
+                    class="cursor-pointer text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 rounded"
+                    title={getWorkNamePreview(typedGroup.workName || '').truncated ? typedGroup.workName : undefined}
+                    aria-expanded={expandedWorkNames[typedGroup.groupKey] || false}
+                    on:click={() => toggleWorkName(typedGroup.groupKey)}
+                  >
+                    {getWorkNamePreview(typedGroup.workName || '').preview}
+                  </button>
+                  {#if getWorkNamePreview(typedGroup.workName || '').truncated}
+                    <div class="mt-1">
+                      <button
+                        type="button"
+                        class="text-xs text-blue-700 dark:text-blue-300 hover:underline"
+                        aria-expanded={expandedWorkNames[typedGroup.groupKey] || false}
+                        on:click={() => toggleWorkName(typedGroup.groupKey)}
+                      >
+                        {expandedWorkNames[typedGroup.groupKey] ? 'Hide full name' : 'Show full name'}
+                      </button>
+                    </div>
+                  {/if}
+                  {#if expandedWorkNames[typedGroup.groupKey] && getWorkNamePreview(typedGroup.workName || '').truncated}
+                    <div class="mt-2 rounded border theme-border theme-bg-secondary p-2 text-xs leading-relaxed break-words">
+                      {typedGroup.workName}
+                    </div>
+                  {/if}
+                </div>
               </td>
-              <td class="px-4 py-2 text-sm {typedGroup.hasLostTime ? 'text-gray-800' : 'theme-text-primary'}">
-                {getUniqueSkills(typedGroup.items)}
+              <td class="px-6 py-4 whitespace-nowrap text-sm {typedGroup.hasLostTime ? 'text-gray-800' : 'theme-text-primary'}">
+                <span
+                  class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-400"
+                >
+                  {skillsRequiredLabel}
+                </span>
               </td>
-              <td class="px-4 py-2 whitespace-nowrap text-sm {typedGroup.hasLostTime ? 'text-gray-800' : 'theme-text-primary'}">
+              <td class="px-6 py-4 whitespace-nowrap text-sm {typedGroup.hasLostTime ? 'text-gray-800' : 'theme-text-primary'}">
                 {#if typedGroup.items && typedGroup.items.length > 0}
                   {@const firstItem = typedGroup.items[0]}
                   {#if firstItem?.vehicleWorkFlow?.estimated_duration_minutes}
@@ -190,7 +255,7 @@
                   N/A
                 {/if}
               </td>
-              <td class="px-4 py-2 text-sm">
+              <td class="px-6 py-4 text-sm">
                 {#if typedGroup.items && typedGroup.items.length > 0}
                   {@const allCompleted = typedGroup.items.every((item: any) => item.completion_status === 'C')}
                   {@const anyNotCompleted = typedGroup.items.some((item: any) => item.completion_status === 'NC')}
@@ -205,17 +270,19 @@
                   <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300">Unknown</span>
                 {/if}
               </td>
-              <td class="px-4 py-2 text-sm {typedGroup.hasLostTime ? 'text-gray-800' : 'theme-text-primary'}">
+              <td class="px-6 py-4 text-sm {typedGroup.hasLostTime ? 'text-gray-800' : 'theme-text-primary'}">
+                <div class="flex flex-col gap-0.5">
+                  {#each typedGroup.items as report}
+                    <div class="font-medium whitespace-nowrap text-xs">{planningScRequiredForReportRow(report)}</div>
+                  {/each}
+                </div>
+              </td>
+              <td class="px-6 py-4 text-sm {typedGroup.hasLostTime ? 'text-gray-800' : 'theme-text-primary'}">
                 <div class="flex flex-col gap-0.5">
                   {#each typedGroup.items as report}
                     <div class="text-xs">
                       {#if report.worker_id}
-                        <div class="font-medium">
-                          {report.reporting_hr_emp?.emp_name || report.worker_id || 'N/A'}
-                        </div>
-                        <div class="text-xs theme-text-secondary">
-                          ({report.reporting_hr_emp?.skill_short || 'N/A'})
-                        </div>
+                        <span class="font-medium whitespace-nowrap">{report.reporting_hr_emp?.emp_name || report.worker_id || 'N/A'} ({report.reporting_hr_emp?.skill_short || 'N/A'})</span>
                       {:else}
                         <span class="theme-text-secondary">N/A</span>
                       {/if}
@@ -223,44 +290,44 @@
                   {/each}
                 </div>
               </td>
-              <td class="px-4 py-2 text-sm {typedGroup.hasLostTime ? 'text-gray-800' : 'theme-text-primary'}">
+              <td class="px-6 py-4 text-sm whitespace-nowrap {typedGroup.hasLostTime ? 'text-gray-800' : 'theme-text-primary'}">
                 <div class="flex flex-col gap-0.5">
                   {#each typedGroup.items as report}
-                    <div class="text-xs">
+                    <div class="text-xs font-medium whitespace-nowrap">
                       {formatTime(report.hours_worked_till_date || 0)}
                     </div>
                   {/each}
                 </div>
               </td>
-              <td class="px-4 py-2 text-sm {typedGroup.hasLostTime ? 'text-gray-800' : 'theme-text-primary'}">
+              <td class="px-6 py-4 text-sm w-[100px] {typedGroup.hasLostTime ? 'text-gray-800' : 'theme-text-primary'}">
                 <div class="flex flex-col gap-0.5">
                   {#each typedGroup.items as report}
-                    <div class="text-xs">{report.from_date || 'N/A'}</div>
+                    <div class="text-xs whitespace-nowrap">{formatDateDdMmYy(report.from_date)}</div>
                   {/each}
                 </div>
               </td>
-              <td class="px-4 py-2 text-sm {typedGroup.hasLostTime ? 'text-gray-800' : 'theme-text-primary'}">
+              <td class="px-6 py-4 text-sm w-[90px] {typedGroup.hasLostTime ? 'text-gray-800' : 'theme-text-primary'}">
                 <div class="flex flex-col gap-0.5">
                   {#each typedGroup.items as report}
-                    <div class="text-xs">{report.from_time || 'N/A'}</div>
+                    <div class="text-xs whitespace-nowrap">{formatTimeWithoutSeconds(report.from_time)}</div>
                   {/each}
                 </div>
               </td>
-              <td class="px-4 py-2 text-sm {typedGroup.hasLostTime ? 'text-gray-800' : 'theme-text-primary'}">
+              <td class="px-6 py-4 text-sm w-[100px] {typedGroup.hasLostTime ? 'text-gray-800' : 'theme-text-primary'}">
                 <div class="flex flex-col gap-0.5">
                   {#each typedGroup.items as report}
-                    <div class="text-xs">{report.to_date || 'N/A'}</div>
+                    <div class="text-xs whitespace-nowrap">{formatDateDdMmYy(report.to_date)}</div>
                   {/each}
                 </div>
               </td>
-              <td class="px-4 py-2 text-sm {typedGroup.hasLostTime ? 'text-gray-800' : 'theme-text-primary'}">
+              <td class="px-6 py-4 text-sm w-[90px] {typedGroup.hasLostTime ? 'text-gray-800' : 'theme-text-primary'}">
                 <div class="flex flex-col gap-0.5">
                   {#each typedGroup.items as report}
-                    <div class="text-xs">{report.to_time || 'N/A'}</div>
+                    <div class="text-xs whitespace-nowrap">{formatTimeWithoutSeconds(report.to_time)}</div>
                   {/each}
                 </div>
               </td>
-              <td class="px-4 py-2 text-sm {typedGroup.hasLostTime ? 'text-gray-800' : 'theme-text-primary'}">
+              <td class="px-6 py-4 text-sm {typedGroup.hasLostTime ? 'text-gray-800' : 'theme-text-primary'}">
                 <div class="flex flex-col gap-0.5">
                   {#each typedGroup.items as report}
                     <div class="text-xs">
@@ -272,14 +339,14 @@
                           Std: {formatTime(report.skillTimeStandard.standard_time_minutes / 60)}
                         </div>
                         <div class="text-xs {report.lt_minutes_total > 0 ? 'text-gray-600' : 'theme-text-secondary'}">
-                          Rem: {formatTime(report.remainingTimeMinutes / 60)}
+                          Rem: {formatRemainingTimeMinutesDisplay(report.remainingTimeMinutes)}
                         </div>
                       {/if}
                     </div>
                   {/each}
                 </div>
               </td>
-              <td class="px-4 py-2 text-sm {typedGroup.hasLostTime ? 'text-gray-800' : 'theme-text-primary'}">
+              <td class="px-6 py-4 text-sm {typedGroup.hasLostTime ? 'text-gray-800' : 'theme-text-primary'}">
                 <div class="flex flex-col gap-0.5">
                   {#each typedGroup.items as report}
                     <div class="text-xs font-medium">
@@ -288,7 +355,7 @@
                   {/each}
                 </div>
               </td>
-              <td class="px-4 py-2 text-sm {typedGroup.hasLostTime ? 'text-gray-800' : 'theme-text-primary'}">
+              <td class="px-6 py-4 text-sm {typedGroup.hasLostTime ? 'text-gray-800' : 'theme-text-primary'}">
                 <div class="flex flex-col gap-0.5">
                   {#each typedGroup.items as report}
                     <div class="text-xs">
@@ -303,7 +370,7 @@
                   {/each}
                 </div>
               </td>
-              <td class="px-4 py-2 text-sm {typedGroup.hasLostTime ? 'text-gray-800' : 'theme-text-primary'}">
+              <td class="px-6 py-4 text-sm {typedGroup.hasLostTime ? 'text-gray-800' : 'theme-text-primary'}">
                 <div class="flex flex-col gap-0.5">
                   {#each typedGroup.items as report}
                     <div class="text-xs">
@@ -318,7 +385,7 @@
                   {/each}
                 </div>
               </td>
-              <td class="px-4 py-2 text-sm {typedGroup.hasLostTime ? 'text-gray-800' : 'theme-text-primary'}">
+              <td class="px-6 py-4 text-sm {typedGroup.hasLostTime ? 'text-gray-800' : 'theme-text-primary'}">
                 <div class="flex flex-col gap-0.5">
                   {#each typedGroup.items as report}
                     <div class="text-xs space-y-1">
@@ -344,7 +411,7 @@
                   {/each}
                 </div>
               </td>
-              <td class="px-4 py-2 text-sm {typedGroup.hasLostTime ? 'text-gray-800' : 'theme-text-primary'}">
+              <td class="px-6 py-4 text-sm {typedGroup.hasLostTime ? 'text-gray-800' : 'theme-text-primary'}">
                 <div class="flex flex-col gap-0.5">
                   {#each typedGroup.items as report}
                     <div class="text-xs">

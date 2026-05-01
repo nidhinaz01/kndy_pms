@@ -47,6 +47,8 @@
   let originalDurationMinutes: number | null = null; // Track original duration when editing
   let savedSelectedWorkers: { [skill: string]: SelectedWorker | null } = {}; // Fix 4: Save workers when going back
   let userHasSelectedFromTime = false; // Track if user has manually selected fromTime
+  let traineeAdditionPlanIds = new Set<number>();
+  let traineeAdditionReasonByPlanId = new Map<number, string>();
 
   function buildWorkerSlotMap(targetWork: any, mappingIndex: number): { [slotKey: string]: SelectedWorker | null } {
     if (!targetWork?.skill_mappings || targetWork.skill_mappings.length === 0) {
@@ -149,6 +151,10 @@
       const isEditMode = work?.existingDraftPlans && Array.isArray(work.existingDraftPlans) && work.existingDraftPlans.length > 0;
       
       if (isEditMode) {
+        void loadTraineeAdditionMetadata(work.existingDraftPlans).then(() => {
+          if (!isOpen || !work?.existingDraftPlans) return;
+          prefillFormFromExistingPlans(work.existingDraftPlans, true);
+        });
         // Pre-fill form with existing plan data (will be called again after workers load)
         // Don't prefill workers yet - wait for availableWorkers to load
         prefillFormFromExistingPlans(work.existingDraftPlans, false);
@@ -225,10 +231,52 @@
     savedSelectedWorkers = {}; // Fix 4: Clear saved workers when modal closes or work changes
     // Next open must not think we are still on the last work (avoids skipped reset when keys collide)
     previousWorkId = null;
+    traineeAdditionPlanIds = new Set<number>();
+    traineeAdditionReasonByPlanId = new Map<number, string>();
   }
   
-  /** Additional trainees are saved with notes like `Trainee: Name` — not skill-mapping slots. */
+  function getPlanNumericId(plan: any): number | null {
+    const raw = plan?.id ?? plan?.planning_id;
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  async function loadTraineeAdditionMetadata(plans: any[]): Promise<void> {
+    traineeAdditionPlanIds = new Set<number>();
+    traineeAdditionReasonByPlanId = new Map<number, string>();
+    const planIds = (plans || [])
+      .map((plan: any) => getPlanNumericId(plan))
+      .filter((id: number | null): id is number => id !== null);
+
+    if (planIds.length === 0) return;
+
+    const { data, error } = await supabase
+      .from('prdn_work_planning_deviations')
+      .select('planning_id, reason')
+      .eq('deviation_type', 'trainee_addition')
+      .eq('is_active', true)
+      .eq('is_deleted', false)
+      .in('planning_id', planIds);
+
+    if (error) {
+      console.warn('Unable to load trainee-addition deviations:', error);
+      return;
+    }
+
+    for (const row of data || []) {
+      const planningId = Number(row?.planning_id);
+      if (!Number.isFinite(planningId)) continue;
+      traineeAdditionPlanIds.add(planningId);
+      if (typeof row?.reason === 'string' && row.reason.trim()) {
+        traineeAdditionReasonByPlanId.set(planningId, row.reason.trim());
+      }
+    }
+  }
+
+  /** Additional trainees are identified by trainee_addition deviation records; notes-prefix is legacy fallback. */
   function isAdditionalTraineePlan(plan: any): boolean {
+    const planId = getPlanNumericId(plan);
+    if (planId !== null && traineeAdditionPlanIds.has(planId)) return true;
     const n = plan?.notes;
     return typeof n === 'string' && n.trim().startsWith('Trainee:');
   }
@@ -494,21 +542,13 @@
         .map((p: any) => p.id ?? p.planning_id)
         .filter((id: any) => id != null && id !== '');
       if (traineePlanIds.length > 0 && !formData.traineeDeviationReason?.trim()) {
-        void (async () => {
-          const { data, error } = await supabase
-            .from('prdn_work_planning_deviations')
-            .select('reason')
-            .eq('deviation_type', 'trainee_addition')
-            .in('planning_id', traineePlanIds as number[])
-            .eq('is_active', true)
-            .eq('is_deleted', false)
-            .limit(1);
-          const reason = Array.isArray(data) && data[0]?.reason ? data[0].reason : null;
-          if (!error && reason) {
-            formData.traineeDeviationReason = reason;
-            formData = { ...formData };
-          }
-        })();
+        const existingReason = traineePlanIds
+          .map((id: any) => traineeAdditionReasonByPlanId.get(Number(id)))
+          .find((reason: string | undefined) => Boolean(reason && reason.trim()));
+        if (existingReason) {
+          formData.traineeDeviationReason = existingReason;
+          formData = { ...formData };
+        }
       }
 
       // Ensure selected workers are in the available list

@@ -167,17 +167,9 @@ export async function loadPlannedWorksData(stageCode: string, shiftCode: string,
       dateStr = String(selectedDate || '').split('T')[0];
     }
     
-    // Load approved works
-    const approvedData = await loadStagePlannedWorks(stageCode, dateStr, 'approved', shiftCode);
-    
-    // Also load cancelled works (they should still appear in Plan tab)
-    const cancelledData = await loadStagePlannedWorksWithCancelled(stageCode, shiftCode, dateStr);
-    
-    // Combine both, with cancelled works marked
-    const data = [
-      ...approvedData.map(w => ({ ...w, isCancelled: false })),
-      ...cancelledData.map(w => ({ ...w, isCancelled: true }))
-    ];
+    // Load only active approved works.
+    // Cancelled (soft-deleted) rows must not appear in Plan tab.
+    const data = await loadStagePlannedWorks(stageCode, dateStr, 'approved', shiftCode);
     console.log(`📋 Loaded ${data.length} planned works for ${stageCode} on ${dateStr}`);
     
     // Enrich with skill-specific time standards and vehicle work flow using batch queries

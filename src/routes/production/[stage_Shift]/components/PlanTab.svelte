@@ -25,7 +25,11 @@
 
   // Search state
   let searchTerm = '';
+  const WORK_NAME_PREVIEW_LENGTH = 30;
+  let expandedWorkNames: Record<string, boolean> = {};
   let sortConfig: SortConfig = { column: null, direction: null };
+  /** When true, show `prdn_work_planning.id` column for debugging (default off). */
+  let showDebugIds = false;
 
   $: groupedPlannedWorks = groupPlannedWorks(plannedWorksWithStatus || []);
   $: filteredGroupedPlannedWorks = filterGroupedWorksBySearch(groupedPlannedWorks, searchTerm);
@@ -126,6 +130,66 @@
   $: workCode = workCodes.length === 1 ? workCodes[0] : null;
   $: allReported = workCode ? areAllSkillsReported(workCode, plannedWorksWithStatus) : false;
   $: hasReported = hasReportedSkillsSelected(selectedRows, plannedWorksWithStatus);
+
+  function getWorkNamePreview(name: string): { preview: string; truncated: boolean } {
+    const full = (name || '').trim();
+    if (full.length <= WORK_NAME_PREVIEW_LENGTH) return { preview: full || 'N/A', truncated: false };
+    return { preview: `${full.slice(0, WORK_NAME_PREVIEW_LENGTH)}...`, truncated: true };
+  }
+
+  function toggleWorkName(key: string) {
+    expandedWorkNames = { ...expandedWorkNames, [key]: !expandedWorkNames[key] };
+  }
+
+  /** `std_work_skill_mapping` from Supabase may be object or single-element array. */
+  function stdMappingScName(item: any): string | null {
+    const mapping = item?.std_work_skill_mapping;
+    if (!mapping) return null;
+    const row = Array.isArray(mapping) ? mapping[0] : mapping;
+    const name = row?.sc_name;
+    if (name == null || String(name).trim() === '') return null;
+    return String(name).trim();
+  }
+
+  /**
+   * Per grouped work row:
+   * non-standard -> prdn_work_additions.other_work_sc (via workAdditionData)
+   * standard -> first row with wsm_id uses std_work_skill_mapping.sc_name
+   */
+  function getGroupedSkillsRequiredDisplay(group: { items?: any[] }): string {
+    const items = group.items || [];
+    if (items.length === 0) return 'N/A';
+    const isNonStandard = items.some((it) => Boolean(it?.other_work_code));
+    if (isNonStandard) {
+      for (const item of items) {
+        const sc = item?.workAdditionData?.other_work_sc;
+        if (sc != null && String(sc).trim() !== '') return String(sc).trim();
+      }
+      return 'N/A';
+    }
+    for (const item of items) {
+      if (item?.wsm_id == null || item.wsm_id === '') continue;
+      const name = stdMappingScName(item);
+      if (name) return name;
+    }
+    return 'N/A';
+  }
+
+  function formatDateDdMmYy(value: string | null | undefined): string {
+    if (!value) return 'N/A';
+    const datePart = String(value).split('T')[0];
+    const [year, month, day] = datePart.split('-');
+    if (!year || !month || !day) return value;
+    return `${day}-${month}-${year.slice(-2)}`;
+  }
+
+  function formatTimeWithoutSeconds(value: string | null | undefined): string {
+    if (!value) return 'N/A';
+    const timePart = String(value).split('T').pop() || '';
+    const parts = timePart.split(':');
+    if (parts.length < 2) return value;
+    return `${parts[0]}:${parts[1]}`;
+  }
 </script>
 
 <div class="theme-bg-primary rounded-lg shadow border theme-border">
@@ -138,6 +202,14 @@
         </p>
       </div>
       <div class="flex items-center space-x-3">
+        <Button
+          variant={showDebugIds ? 'primary' : 'secondary'}
+          size="sm"
+          title={showDebugIds ? 'Hide planning row IDs' : 'Show prdn_work_planning.id column for debugging'}
+          on:click={() => (showDebugIds = !showDebugIds)}
+        >
+          ID
+        </Button>
         <Button variant="secondary" size="sm" on:click={handleRefresh} disabled={isLoading}>
           {isLoading ? 'Loading...' : 'Refresh'}
         </Button>
@@ -219,18 +291,26 @@
         <thead class="theme-bg-secondary">
           <tr>
             <th class="px-6 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider">Select</th>
-            <SortableHeader column="sortable_woNo" {sortConfig} onSort={handleSort} label="Work Order" />
-            <SortableHeader column="sortable_pwoNo" {sortConfig} onSort={handleSort} label="PWO Number" />
-            <SortableHeader column="sortable_workCode" {sortConfig} onSort={handleSort} label="Work Code" />
-            <SortableHeader column="sortable_workName" {sortConfig} onSort={handleSort} label="Work Name" headerClass="max-w-[200px] w-[200px]" />
+            {#if showDebugIds}
+              <th
+                class="px-6 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider whitespace-nowrap w-[88px]"
+                title="prdn_work_planning.id (per skill row)"
+              >
+                ID
+              </th>
+            {/if}
+            <SortableHeader column="sortable_woNo" {sortConfig} onSort={handleSort} label="Work Order" headerClass="w-[100px] min-w-[100px] max-w-[100px]" />
+            <SortableHeader column="sortable_pwoNo" {sortConfig} onSort={handleSort} label="PWO Number" headerClass="w-[100px] min-w-[100px] max-w-[100px]" />
+            <SortableHeader column="sortable_workCode" {sortConfig} onSort={handleSort} label="Work Code" headerClass="w-[120px] min-w-[120px] max-w-[120px]" />
+            <SortableHeader column="sortable_workName" {sortConfig} onSort={handleSort} label="Work Name" headerClass="w-[200px] min-w-[200px] max-w-[200px]" />
             <th class="px-6 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider">Skills Required</th>
             <th class="px-6 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider">Standard Time</th>
             <th class="px-6 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider">Status</th>
             <th class="px-6 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider">Worker (Skill)</th>
-            <SortableHeader column="sortable_fromDate" {sortConfig} onSort={handleSort} label="From Date" />
-            <SortableHeader column="sortable_fromTime" {sortConfig} onSort={handleSort} label="From Time" />
-            <SortableHeader column="sortable_toDate" {sortConfig} onSort={handleSort} label="To Date" />
-            <SortableHeader column="sortable_toTime" {sortConfig} onSort={handleSort} label="To Time" />
+            <SortableHeader column="sortable_fromDate" {sortConfig} onSort={handleSort} label="From Date" headerClass="w-[100px]" />
+            <SortableHeader column="sortable_fromTime" {sortConfig} onSort={handleSort} label="From Time" headerClass="w-[90px]" />
+            <SortableHeader column="sortable_toDate" {sortConfig} onSort={handleSort} label="To Date" headerClass="w-[100px]" />
+            <SortableHeader column="sortable_toTime" {sortConfig} onSort={handleSort} label="To Time" headerClass="w-[90px]" />
             <SortableHeader column="sortable_plannedHours" {sortConfig} onSort={handleSort} label="Planned Hours" />
             <SortableHeader column="sortable_timeWorkedTillDate" {sortConfig} onSort={handleSort} label="Time Worked Till Date" />
             <SortableHeader column="sortable_remainingTime" {sortConfig} onSort={handleSort} label="Remaining Time" />
@@ -240,6 +320,7 @@
         <tbody class="theme-bg-primary divide-y divide-gray-200 dark:divide-gray-700">
           {#each sortedGroupedWorks as group}
             {@const typedGroup = group}
+            {@const skillsRequiredLabel = getGroupedSkillsRequiredDisplay(typedGroup)}
             {@const allSelected = typedGroup.items.every((item: any) => selectedRows.has(item.id))}
             {@const someSelected = typedGroup.items.some((item: any) => selectedRows.has(item.id))}
             {@const isCancelled = typedGroup.items.some((item: any) => item.status === 'cancelled' || item.isCancelled)}
@@ -269,26 +350,56 @@
                   }}
                 />
               </td>
-              <td class="px-6 py-4 whitespace-nowrap text-sm font-medium theme-text-primary">{typedGroup.woNo}</td>
-              <td class="px-6 py-4 whitespace-nowrap text-sm theme-text-primary">{typedGroup.pwoNo}</td>
-              <td class="px-6 py-4 whitespace-nowrap text-sm font-medium theme-text-primary">{typedGroup.workCode}</td>
-              <td class="px-6 py-4 text-sm theme-text-primary" style="max-width: 200px; word-wrap: break-word;">{typedGroup.workName}</td>
-              <td class="px-6 py-4 whitespace-nowrap text-sm theme-text-primary">
-                <div class="flex flex-wrap gap-1">
-                  {#each typedGroup.items as plannedWork}
-                    {@const isTrainee = plannedWork.sc_required === 'T'}
-                    <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium {
-                      isTrainee 
-                        ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-400' 
-                        : 'bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-400'
-                    }">
-                      {plannedWork.sc_required || 'N/A'}
-                      {#if isTrainee}
-                        <span class="ml-1 text-xs">(T)</span>
-                      {/if}
-                    </span>
-                  {/each}
+              {#if showDebugIds}
+                <td class="px-6 py-4 text-sm theme-text-primary align-top">
+                  <div class="flex flex-col gap-0.5">
+                    {#each typedGroup.items as plannedWork}
+                      <div class="text-xs font-mono tabular-nums" title="prdn_work_planning.id">
+                        {plannedWork.id ?? '—'}
+                      </div>
+                    {/each}
+                  </div>
+                </td>
+              {/if}
+              <td class="px-6 py-4 whitespace-nowrap text-sm font-medium theme-text-primary text-left w-[100px] min-w-[100px] max-w-[100px]">{typedGroup.woNo}</td>
+              <td class="px-6 py-4 whitespace-nowrap text-sm theme-text-primary text-left w-[100px] min-w-[100px] max-w-[100px]">{typedGroup.pwoNo}</td>
+              <td class="px-6 py-4 whitespace-nowrap text-sm font-medium theme-text-primary text-left w-[120px] min-w-[120px] max-w-[120px]">{typedGroup.workCode}</td>
+              <td class="px-6 py-4 text-sm theme-text-primary w-[200px] min-w-[200px] max-w-[200px]" style="word-wrap: break-word;">
+                <div class="break-words">
+                  <button
+                    type="button"
+                    class="cursor-pointer text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 rounded"
+                    title={getWorkNamePreview(typedGroup.workName || '').truncated ? typedGroup.workName : undefined}
+                    aria-expanded={expandedWorkNames[groupKey] || false}
+                    on:click={() => toggleWorkName(groupKey)}
+                  >
+                    {getWorkNamePreview(typedGroup.workName || '').preview}
+                  </button>
+                  {#if getWorkNamePreview(typedGroup.workName || '').truncated}
+                    <div class="mt-1">
+                      <button
+                        type="button"
+                        class="text-xs text-blue-700 dark:text-blue-300 hover:underline"
+                        aria-expanded={expandedWorkNames[groupKey] || false}
+                        on:click={() => toggleWorkName(groupKey)}
+                      >
+                        {expandedWorkNames[groupKey] ? 'Hide full name' : 'Show full name'}
+                      </button>
+                    </div>
+                  {/if}
+                  {#if expandedWorkNames[groupKey] && getWorkNamePreview(typedGroup.workName || '').truncated}
+                    <div class="mt-2 rounded border theme-border theme-bg-secondary p-2 text-xs leading-relaxed break-words">
+                      {typedGroup.workName}
+                    </div>
+                  {/if}
                 </div>
+              </td>
+              <td class="px-6 py-4 whitespace-nowrap text-sm theme-text-primary">
+                <span
+                  class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-400"
+                >
+                  {skillsRequiredLabel}
+                </span>
               </td>
               <td class="px-6 py-4 whitespace-nowrap text-sm theme-text-primary">
                 {#if typedGroup.items && typedGroup.items.length > 0}
@@ -327,35 +438,35 @@
                   {#each typedGroup.items as plannedWork}
                     {@const empName = plannedWork.hr_emp?.emp_name || 'N/A'}
                     {@const skillShort = plannedWork.hr_emp?.skill_short || 'N/A'}
-                    <div class="font-medium">{empName} ({skillShort})</div>
+                    <div class="font-medium whitespace-nowrap">{empName} ({skillShort})</div>
                   {/each}
                 </div>
               </td>
-              <td class="px-6 py-4 text-sm theme-text-primary">
+              <td class="px-6 py-4 text-sm theme-text-primary w-[100px]">
                 <div class="space-y-1">
                   {#each typedGroup.items as plannedWork}
-                    <div>{plannedWork.from_date || 'N/A'}</div>
+                    <div class="whitespace-nowrap">{formatDateDdMmYy(plannedWork.from_date)}</div>
                   {/each}
                 </div>
                   </td>
-              <td class="px-6 py-4 text-sm theme-text-primary">
+              <td class="px-6 py-4 text-sm theme-text-primary w-[90px]">
                 <div class="space-y-1">
               {#each typedGroup.items as plannedWork}
-                    <div>{plannedWork.from_time || 'N/A'}</div>
+                    <div class="whitespace-nowrap">{formatTimeWithoutSeconds(plannedWork.from_time)}</div>
                   {/each}
                 </div>
                   </td>
-              <td class="px-6 py-4 text-sm theme-text-primary">
+              <td class="px-6 py-4 text-sm theme-text-primary w-[100px]">
                 <div class="space-y-1">
                   {#each typedGroup.items as plannedWork}
-                    <div>{plannedWork.to_date || 'N/A'}</div>
+                    <div class="whitespace-nowrap">{formatDateDdMmYy(plannedWork.to_date)}</div>
                   {/each}
                 </div>
                   </td>
-              <td class="px-6 py-4 text-sm theme-text-primary">
+              <td class="px-6 py-4 text-sm theme-text-primary w-[90px]">
                 <div class="space-y-1">
                   {#each typedGroup.items as plannedWork}
-                    <div>{plannedWork.to_time || 'N/A'}</div>
+                    <div class="whitespace-nowrap">{formatTimeWithoutSeconds(plannedWork.to_time)}</div>
                   {/each}
                 </div>
                   </td>
@@ -402,7 +513,9 @@
                 <div class="space-y-1">
                   {#each typedGroup.items as plannedWork}
                       <div class="font-medium">
-                        {plannedWork.remaining_time ? formatTime(plannedWork.remaining_time) : 'N/A'}
+                        {plannedWork.remaining_time === null || plannedWork.remaining_time === undefined
+                          ? 'N/A'
+                          : formatTime(Number(plannedWork.remaining_time) || 0)}
                       </div>
                   {/each}
                     </div>

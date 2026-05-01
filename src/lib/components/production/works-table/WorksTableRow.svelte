@@ -3,6 +3,7 @@
   import { formatTime, getWorkId } from '$lib/utils/worksTableUtils';
   import { getWorkDisplayCode, getWorkDisplayName } from '$lib/utils/workDisplayUtils';
   import type { WorkPlanningStatus, WorkStatus } from '$lib/types/worksTable';
+  const WORK_NAME_PREVIEW_LENGTH = 30;
 
   // Format minutes to "x Hr y Min" format
   function formatTimeVerbose(minutes: number): string {
@@ -26,6 +27,12 @@
   export let onPlanWork: () => void = () => {};
   export let onViewWork: () => void = () => {};
   export let onRemoveWork: () => void = () => {};
+  let showFullWorkName = false;
+  $: fullWorkName = getWorkDisplayName(work) || 'N/A';
+  $: isWorkNameTruncated = fullWorkName.length > WORK_NAME_PREVIEW_LENGTH;
+  $: workNamePreview = isWorkNameTruncated
+    ? `${fullWorkName.slice(0, WORK_NAME_PREVIEW_LENGTH)}...`
+    : fullWorkName;
 
   // Debug: Log work data for specific works
   $: {
@@ -41,7 +48,7 @@
   }
 </script>
 
-<tr class="hover:theme-bg-secondary transition-colors duration-150 {isSelected ? 'bg-blue-50 dark:bg-blue-900/20 text-gray-900 dark:text-gray-100' : ''}" 
+<tr class="works-row hover:theme-bg-secondary transition-colors duration-150 {isSelected ? 'bg-blue-50 dark:bg-blue-900/20 text-gray-900 dark:text-gray-100' : ''}" 
     class:time-exceeded={work.time_exceeded}>
   <td class="px-6 py-4 whitespace-nowrap {isSelected ? 'text-gray-900 dark:text-gray-100' : ''}">
     <input
@@ -66,7 +73,32 @@
   </td>
   <td class="px-6 py-4 text-sm {isSelected ? 'text-gray-900 dark:text-gray-100' : 'theme-text-primary'} max-w-xs">
     <div class="break-words">
-      {getWorkDisplayName(work) || 'N/A'}
+      <button
+        type="button"
+        class="cursor-pointer text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 rounded"
+        title={isWorkNameTruncated ? fullWorkName : undefined}
+        aria-expanded={showFullWorkName}
+        on:click={() => (showFullWorkName = !showFullWorkName)}
+      >
+        {workNamePreview}
+      </button>
+      {#if isWorkNameTruncated}
+        <div class="mt-1">
+          <button
+            type="button"
+            class="text-xs text-blue-700 dark:text-blue-300 hover:underline"
+            aria-expanded={showFullWorkName}
+            on:click={() => (showFullWorkName = !showFullWorkName)}
+          >
+            {showFullWorkName ? 'Hide full name' : 'Show full name'}
+          </button>
+        </div>
+      {/if}
+      {#if showFullWorkName && isWorkNameTruncated}
+        <div class="mt-2 rounded border theme-border theme-bg-secondary p-2 text-xs leading-relaxed break-words">
+          {fullWorkName}
+        </div>
+      {/if}
     </div>
   </td>
   <td class="px-6 py-4 whitespace-nowrap text-sm">
@@ -219,6 +251,11 @@
 </tr>
 
 <style>
+  :global(tr.works-row td) {
+    padding-top: 0.5rem;
+    padding-bottom: 0.5rem;
+  }
+
   :global(.time-exceeded) {
     background-color: rgba(239, 68, 68, 0.1);
   }

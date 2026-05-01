@@ -62,7 +62,7 @@
         </svg>
       </button>
 
-      <!-- Tab Navigation: single horizontal row; narrow pills so labels wrap inside (2 lines for longer names) -->
+      <!-- Tab Navigation: single horizontal row with slightly wider pills -->
       <nav
         bind:this={tabsNavEl}
         class="min-w-0 flex-1 overflow-x-auto overflow-y-hidden overscroll-x-contain px-0.5 py-0.5 scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-transparent dark:scrollbar-thumb-gray-600"
@@ -73,14 +73,14 @@
             <button
               type="button"
               data-tab-id={tab.id}
-              class="flex min-h-[3.25rem] w-[3.75rem] shrink-0 flex-col items-center justify-center rounded-lg border-2 px-1 py-1.5 text-center transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/55 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:focus-visible:ring-blue-400/50 dark:focus-visible:ring-offset-slate-900 sm:w-[4.25rem] sm:min-h-[3.5rem] sm:px-1.5 {activeTab === tab.id
+              class="flex min-h-[3.25rem] w-[4.2rem] shrink-0 flex-col items-center justify-center rounded-lg border-2 px-1.5 py-1.5 text-center transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/55 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:focus-visible:ring-blue-400/50 dark:focus-visible:ring-offset-slate-900 sm:w-[4.7rem] sm:min-h-[3.5rem] sm:px-2 {activeTab === tab.id
                 ? 'border-blue-600 bg-blue-100 font-semibold text-blue-950 shadow-sm ring-2 ring-blue-500/45 ring-offset-0 dark:border-blue-400 dark:bg-blue-950 dark:text-blue-50 dark:ring-blue-400/40'
                 : 'border-slate-300 bg-transparent text-slate-600 hover:border-slate-400 hover:bg-slate-100 hover:text-slate-900 dark:border-slate-600 dark:text-slate-400 dark:hover:border-slate-500 dark:hover:bg-slate-800 dark:hover:text-slate-100'}"
               aria-current={activeTab === tab.id ? 'page' : undefined}
               on:click={() => handleTabChange(tab.id)}
             >
               <span
-                class="w-full max-w-full hyphens-auto break-words text-center text-[0.65rem] font-medium leading-[1.1] sm:text-[0.7rem] sm:leading-tight"
+                class="w-full max-w-full hyphens-auto break-words text-center text-[0.68rem] font-medium leading-[1.1] sm:text-[0.72rem] sm:leading-tight"
               >{tab.label}</span>
             </button>
           {/each}

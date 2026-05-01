@@ -521,7 +521,9 @@ export async function getDraftWorkReports(
       dedupedRows.push(r);
     }
     await attachReportingWorkersToRows(dedupedRows);
-    return dedupedRows;
+    const { batchEnrichItems } = await import('$lib/utils/workEnrichmentService');
+    const enriched = await batchEnrichItems(dedupedRows, stageCode);
+    return enriched || dedupedRows;
   } catch (error) {
     console.error('Error fetching draft work reports:', error);
     return [];

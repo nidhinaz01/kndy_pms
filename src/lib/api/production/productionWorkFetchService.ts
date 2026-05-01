@@ -46,8 +46,7 @@ export async function fetchProductionWorks(stage: string, selectedDate: string):
       workFlowMap,
       skillMappingsMap,
       addedWorkMap,
-      skillTimeStandardsMap,
-      skillCombinationMap
+      skillTimeStandardsMap
     } = createLookupMaps(
       workTypesData,
       workTypeDetailsData,
@@ -67,7 +66,6 @@ export async function fetchProductionWorks(stage: string, selectedDate: string):
       skillMappingsMap,
       addedWorkMap,
       skillTimeStandardsMap,
-      skillCombinationMap,
       stage
     );
 

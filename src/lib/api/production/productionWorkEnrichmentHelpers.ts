@@ -108,7 +108,6 @@ export function enrichWorksWithData(
   skillMappingsMap: Map<string, any[]>,
   addedWorkMap: Map<string, any>,
   skillTimeStandardsMap: Map<number, { isUniform: boolean; values: Array<{ skill_short: string; standard_time_minutes: number }> }>,
-  skillCombinationMap: Map<string, any>,
   stage: string
 ): ProductionWork[] {
   const allEnrichedWorks: ProductionWork[] = [];
@@ -211,7 +210,11 @@ export function enrichWorksWithData(
           continue;
         }
 
-        const skillCombination = addedWork.other_work_sc ? skillCombinationMap.get(addedWork.other_work_sc) : null;
+        // For non-standard work, use the raw planned skill combination from prdn_work_additions.other_work_sc
+        // directly (no std_skill_combinations lookup/fallback).
+        const nonStandardSkillCombination = typeof addedWork.other_work_sc === 'string'
+          ? addedWork.other_work_sc.trim()
+          : '';
 
         allEnrichedWorks.push({
           sw_id: 0,
@@ -241,10 +244,10 @@ export function enrichWorksWithData(
           mstr_wo_type: {
             wo_type_name: workOrder.wo_model
           },
-          skill_mappings: skillCombination ? [{
+          skill_mappings: nonStandardSkillCombination ? [{
             wsm_id: 0,
             derived_sw_code: otherWorkCode,
-            sc_name: skillCombination.sc_name
+            sc_name: nonStandardSkillCombination
           }] : [],
           wo_details_id: woId,
           wo_no: workOrder.wo_no,
