@@ -19,6 +19,7 @@
     formatManpowerAttendanceShort
   } from '$lib/utils/manpowerAttendanceStatus';
   import { prefersExternalPdfOpen } from '$lib/utils/pdfViewerDevice';
+  import { countDraftWorkReportsForStageShiftDate } from '$lib/api/production/planningReportingService';
 
   let showSidebar = false;
   let menus: any[] = [];
@@ -289,6 +290,9 @@
   let rejectionReason = '';
   let showRevertModal = false;
   let revertReason = '';
+  /** Work reporting rows for this stage, shift, and planning date (any status, non-deleted); revert blocked when positive. */
+  let draftReportRowCount: number | null = null;
+  let isDraftReportCountLoading = false;
 
   /** Pending/approved submission card title in sidebar, e.g. P1S1 - GEN */
   function submissionStageShiftLabel(submission: { stage_code?: string; shift_code?: string } | null | undefined): string {
@@ -313,6 +317,7 @@
       selectedSubmission = null;
       worksPlanData = [];
       manpowerPlanData = [];
+      draftReportRowCount = null;
     }
     loadSubmissions();
   }
@@ -351,9 +356,35 @@
   async function handleSubmissionSelect(submission: any) {
     selectedSubmission = submission;
     selectedStage = submission.stage_code;
+    draftReportRowCount = null;
     // Don't change selectedDate when selecting a submission - use the date from the submission
     // But keep the date selector independent
     await loadSubmissionDetails();
+  }
+
+  async function refreshDraftReportRowCount() {
+    const sub = selectedSubmission;
+    if (!sub || sub.status !== 'approved') {
+      draftReportRowCount = null;
+      return;
+    }
+    const stageCode = (sub.stage_code || '').trim();
+    const shiftCode = (sub.shift_code || '').trim();
+    const planningDate =
+      typeof sub.planning_date === 'string' ? sub.planning_date.split('T')[0] : String(sub.planning_date || '');
+    if (!stageCode || !shiftCode || !planningDate) {
+      draftReportRowCount = null;
+      return;
+    }
+    isDraftReportCountLoading = true;
+    try {
+      draftReportRowCount = await countDraftWorkReportsForStageShiftDate(stageCode, planningDate, shiftCode);
+    } catch (err) {
+      console.error('Error counting work reports for revert guard:', err);
+      draftReportRowCount = null;
+    } finally {
+      isDraftReportCountLoading = false;
+    }
   }
   
   async function loadSubmissionDetails() {
@@ -440,6 +471,12 @@
       console.error('Error loading submission details:', error);
     } finally {
       isLoading = false;
+    }
+
+    if (selectedSubmission?.status === 'approved') {
+      await refreshDraftReportRowCount();
+    } else {
+      draftReportRowCount = null;
     }
   }
 
@@ -595,6 +632,7 @@
       showApprovalModal = false;
       rejectionReason = '';
       selectedSubmission = null;
+      draftReportRowCount = null;
       await loadSubmissions();
     } catch (error) {
       console.error('Error processing approval:', error);
@@ -609,7 +647,16 @@
     rejectionReason = '';
   }
 
-  function handleOpenRevertModal() {
+  async function handleOpenRevertModal() {
+    if (!selectedSubmission || selectedSubmission.status !== 'approved') return;
+    await refreshDraftReportRowCount();
+    const n = draftReportRowCount;
+    if (n !== null && n > 0) {
+      alert(
+        `Cannot revert to draft: there ${n === 1 ? 'is' : 'are'} ${n} work reporting row${n === 1 ? '' : 's'} (any status) for the Draft Report scope — ${selectedSubmission.stage_code} / ${(selectedSubmission.shift_code || '').trim()} / ${selectedSubmission.planning_date}. Remove or resolve those rows first.`
+      );
+      return;
+    }
     showRevertModal = true;
   }
 
@@ -622,6 +669,27 @@
     if (!selectedSubmission || selectedSubmission.status !== 'approved') return;
     if (!revertReason.trim()) {
       alert('Please provide a reason for reverting to draft');
+      return;
+    }
+
+    const stageCode = (selectedSubmission.stage_code || '').trim();
+    const shiftCode = (selectedSubmission.shift_code || '').trim();
+    const planningDate =
+      typeof selectedSubmission.planning_date === 'string'
+        ? selectedSubmission.planning_date.split('T')[0]
+        : String(selectedSubmission.planning_date || '');
+    let reportCount = 0;
+    try {
+      reportCount = await countDraftWorkReportsForStageShiftDate(stageCode, planningDate, shiftCode);
+    } catch (err) {
+      console.error('Error verifying work reports before revert:', err);
+      alert('Unable to verify work reporting rows. Please try again.');
+      return;
+    }
+    if (reportCount > 0) {
+      alert(
+        `Cannot revert to draft: there ${reportCount === 1 ? 'is' : 'are'} ${reportCount} work reporting row${reportCount === 1 ? '' : 's'} (any status) for this stage, shift, and date. Remove or resolve those rows first.`
+      );
       return;
     }
 
@@ -645,6 +713,7 @@
       selectedSubmission = null;
       worksPlanData = [];
       manpowerPlanData = [];
+      draftReportRowCount = null;
       await loadSubmissions();
     } catch (error) {
       console.error('Error reverting approved plan:', error);
@@ -838,13 +907,30 @@
               </Button>
             </div>
           {:else if selectedSubmission.status === 'approved'}
-            <div class="flex items-center gap-2">
-              <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-400">
-                ✓ Approved
-              </span>
-              <Button variant="secondary" size="sm" on:click={handleOpenRevertModal} disabled={isLoading}>
-                Revert to Draft
-              </Button>
+            <div class="flex flex-col items-end gap-1">
+              <div class="flex items-center gap-2">
+                <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-400">
+                  ✓ Approved
+                </span>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  on:click={handleOpenRevertModal}
+                  disabled={isLoading ||
+                    isDraftReportCountLoading ||
+                    (draftReportRowCount !== null && draftReportRowCount > 0)}
+                >
+                  Revert to Draft
+                </Button>
+              </div>
+              {#if isDraftReportCountLoading}
+                <p class="text-xs theme-text-secondary max-w-md text-right">Checking work reporting…</p>
+              {:else if draftReportRowCount !== null && draftReportRowCount > 0}
+                <p class="text-xs text-orange-700 dark:text-orange-300 max-w-md text-right">
+                  Revert is disabled: {draftReportRowCount} work reporting row{draftReportRowCount === 1 ? '' : 's'} exist
+                  (any status) for this stage, shift, and date. Clear those rows before reverting the plan.
+                </p>
+              {/if}
             </div>
           {/if}
         </div>

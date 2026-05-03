@@ -1,9 +1,15 @@
 import { supabase } from '$lib/supabaseClient';
 import { createWorkPlanning } from '$lib/api/production';
-import { getIndividualSkills, getEffectiveRowTimes, getWorkerSlotKey } from '$lib/utils/planWorkUtils';
+import {
+  getIndividualSkills,
+  getEffectiveRowTimes,
+  getWorkerSlotKey,
+  buildExistingPlansBySlotKey
+} from '$lib/utils/planWorkUtils';
 import { getCurrentUsername, getCurrentTimestamp } from '$lib/utils/userUtils';
 import type { PlanWorkFormData, WorkContinuation, SelectedWorker } from '$lib/types/planWork';
 import { cancelWorkPlans } from '$lib/services/workCancellationService';
+import { getVehicleWorkFlowStandardTimeHours } from '$lib/utils/standardTimeFromWork';
 
 function normalizeSkill(skill: string | null | undefined): string {
   return String(skill || '').trim().toUpperCase();
@@ -53,11 +59,6 @@ export async function saveWorkPlanning(
   // Use toDate if provided, otherwise use fromDate
   const planningToDate = toDate || fromDate;
   const requiredSkills = work?.skill_mappings || [];
-  const assignedWorkers = Object.values(formData.selectedWorkers).filter(Boolean);
-  
-  if (requiredSkills.length > 0 && assignedWorkers.length === 0) {
-    throw new Error('Please assign workers for all required skills');
-  }
 
   if (!formData.fromTime || !formData.toTime) {
     throw new Error('Please fill in all required fields');
@@ -96,41 +97,71 @@ export async function saveWorkPlanning(
   const woDetailsId = work.prdn_wo_details_id || work.wo_details_id || 1;
   const derivedSwCode = isNonStandardWork ? null : (work.std_work_type_details?.derived_sw_code || null);
   const otherWorkCode = isNonStandardWork ? work.sw_code : null;
-  
-  // Create a map of existing plans by skill and worker for matching
+  const stdTimeHoursForPlan = isNonStandardWork ? null : getVehicleWorkFlowStandardTimeHours(work);
+
   const existingPlansMap = new Map<string, any>();
-  if (isEditMode) {
+  if (isEditMode && requiredSkills.length === 0) {
     work.existingDraftPlans.forEach((plan: any) => {
       const skill = plan.sc_required || plan.skill_short;
       const workerId = plan.worker_id || plan.hr_emp?.emp_id;
       if (skill && workerId) {
-        const key = `${skill}-${workerId}`;
-        existingPlansMap.set(key, plan);
+        existingPlansMap.set(`${skill}-${workerId}`, plan);
       }
     });
   }
-  
+
   const updatePromises: PromiseLike<any>[] = [];
   const insertPromises: PromiseLike<any>[] = [];
+  const updateNoWorkerPayloads: Array<{ reason: string } | null> = [];
+  const insertNoWorkerPayloads: Array<{ skillShort: string; reason: string } | null> = [];
   const planIdsToKeep = new Set<number>();
   const updatePlanSkillMeta: Array<{ planId: number; requiredSkill: string; workerSkill: string }> = [];
   const insertPlanSkillMeta: Array<{ requiredSkill: string; workerSkill: string }> = [];
-  
+
   if (requiredSkills.length > 0) {
-    const selectedSkillMapping = work.skill_mappings[formData.selectedSkillMappingIndex >= 0 ? formData.selectedSkillMappingIndex : 0];
+    const selectedSkillMapping =
+      work.skill_mappings[
+        formData.selectedSkillMappingIndex >= 0 ? formData.selectedSkillMappingIndex : 0
+      ];
     const individualSkills = getIndividualSkills(selectedSkillMapping);
     const wsmId = (selectedSkillMapping as any)?.wsm_id || null;
-    
-    individualSkills.forEach((skillShort, index) => {
+
+    let assignedWorkerSlots = 0;
+    for (let index = 0; index < individualSkills.length; index++) {
+      const skillShort = individualSkills[index];
       const workerKey = getWorkerSlotKey(skillShort, index);
       const worker = formData.selectedWorkers[workerKey];
-      
-      if (worker) {
-        const workerId = (worker as any).emp_id;
-        const matchKey = `${skillShort}-${workerId}`;
-        const existingPlan = existingPlansMap.get(matchKey);
-        const eff = getEffectiveRowTimes(workerKey, formData);
-        
+      const dev = formData.planningSlotDeviations?.[workerKey];
+      const hasW = !!(worker as SelectedWorker | null)?.emp_id;
+      const hasDev = !!(dev?.noWorker && dev.reason?.trim());
+      if (!hasW && !hasDev) {
+        throw new Error(
+          `Assign a worker or mark "No worker available" with a reason for slot ${workerKey}.`
+        );
+      }
+      if (hasW) assignedWorkerSlots++;
+    }
+    if (assignedWorkerSlots === 0) {
+      throw new Error(
+        'At least one skill competency must have a worker assigned. You cannot mark every competency as no worker.'
+      );
+    }
+
+    const existingPlansBySlot =
+      isEditMode && selectedSkillMapping
+        ? buildExistingPlansBySlotKey(work.existingDraftPlans || [], selectedSkillMapping)
+        : new Map<string, any>();
+
+    for (let index = 0; index < individualSkills.length; index++) {
+      const skillShort = individualSkills[index];
+      const workerKey = getWorkerSlotKey(skillShort, index);
+      const worker = formData.selectedWorkers[workerKey];
+      const dev = formData.planningSlotDeviations?.[workerKey];
+      const existingPlan = existingPlansBySlot.get(workerKey);
+      const eff = getEffectiveRowTimes(workerKey, formData);
+
+      if ((worker as SelectedWorker | null)?.emp_id) {
+        const workerId = (worker as SelectedWorker).emp_id;
         const planData = {
           stage_code: stageCode,
           shift_code: shiftCode,
@@ -146,45 +177,96 @@ export async function saveWorkPlanning(
           planned_hours: eff.plannedHours,
           time_worked_till_date: workContinuation.timeWorkedTillDate,
           remaining_time: Math.max(0, workContinuation.remainingTime - eff.plannedHours),
+          std_time_hours: stdTimeHoursForPlan,
           status: 'draft' as const,
           notes: hasReplanContext ? replanReason : `Planned for ${skillShort} skill`,
           wsm_id: isNonStandardWork ? null : wsmId
         };
-        
+
         if (existingPlan && existingPlan.id) {
-          // Update existing plan
           planIdsToKeep.add(existingPlan.id);
-          const updatePromise = supabase
-            .from('prdn_work_planning')
-            .update({
-              ...planData,
-              is_deleted: false, // Ensure it's not deleted
-              modified_by: currentUser,
-              modified_dt: now
-            })
-            .eq('id', existingPlan.id)
-            .select()
-            .single();
-          updatePromises.push(updatePromise);
+          updatePromises.push(
+            supabase
+              .from('prdn_work_planning')
+              .update({
+                ...planData,
+                is_deleted: false,
+                modified_by: currentUser,
+                modified_dt: now
+              })
+              .eq('id', existingPlan.id)
+              .select()
+              .single()
+          );
           updatePlanSkillMeta.push({
             planId: existingPlan.id,
             requiredSkill: skillShort,
             workerSkill: String((worker as SelectedWorker).skill_short || '')
           });
-          console.log(`🔄 Updating plan ${existingPlan.id} for skill ${skillShort}, worker ${workerId}`);
+          updateNoWorkerPayloads.push(null);
         } else {
-          // Create new plan
-          insertPromises.push(
-            createWorkPlanning(planData, currentUser)
-          );
+          insertPromises.push(createWorkPlanning(planData, currentUser));
           insertPlanSkillMeta.push({
             requiredSkill: skillShort,
             workerSkill: String((worker as SelectedWorker).skill_short || '')
           });
-          console.log(`➕ Creating new plan for skill ${skillShort}, worker ${workerId}`);
+          insertNoWorkerPayloads.push(null);
+        }
+      } else if (dev?.noWorker && dev.reason?.trim()) {
+        const reason = dev.reason.trim();
+        const planData = {
+          stage_code: stageCode,
+          shift_code: shiftCode,
+          wo_details_id: woDetailsId,
+          derived_sw_code: derivedSwCode,
+          other_work_code: otherWorkCode,
+          sc_required: skillShort,
+          worker_id: null as string | null,
+          from_date: eff.fromDate || fromDate,
+          from_time: eff.fromTime,
+          to_date: eff.toDate || planningToDate,
+          to_time: eff.toTime,
+          planned_hours: 0,
+          time_worked_till_date: workContinuation.timeWorkedTillDate,
+          remaining_time: Math.max(0, workContinuation.remainingTime),
+          std_time_hours: stdTimeHoursForPlan,
+          status: 'draft' as const,
+          notes: hasReplanContext ? replanReason : `No worker (planning): ${skillShort}`,
+          wsm_id: isNonStandardWork ? null : wsmId
+        };
+
+        if (existingPlan && existingPlan.id) {
+          planIdsToKeep.add(existingPlan.id);
+          updatePromises.push(
+            supabase
+              .from('prdn_work_planning')
+              .update({
+                ...planData,
+                worker_id: null,
+                is_deleted: false,
+                modified_by: currentUser,
+                modified_dt: now
+              })
+              .eq('id', existingPlan.id)
+              .select()
+              .single()
+          );
+          updatePlanSkillMeta.push({
+            planId: existingPlan.id,
+            requiredSkill: skillShort,
+            workerSkill: ''
+          });
+          updateNoWorkerPayloads.push({ reason });
+        } else {
+          insertPromises.push(createWorkPlanning(planData, currentUser));
+          insertPlanSkillMeta.push({
+            requiredSkill: skillShort,
+            workerSkill: ''
+          });
+          insertNoWorkerPayloads.push({ skillShort, reason });
         }
       }
-    });
+    }
   } else {
     const worker = formData.selectedWorkers[getWorkerSlotKey('GEN', 0)] || null;
     if (worker) {
@@ -192,7 +274,7 @@ export async function saveWorkPlanning(
       const matchKey = `GEN-${workerId}`;
       const existingPlan = existingPlansMap.get(matchKey);
       const eff = getEffectiveRowTimes(getWorkerSlotKey('GEN', 0), formData);
-      
+
       const planData = {
         stage_code: stageCode,
         shift_code: shiftCode,
@@ -208,55 +290,44 @@ export async function saveWorkPlanning(
         planned_hours: eff.plannedHours,
         time_worked_till_date: workContinuation.timeWorkedTillDate,
         remaining_time: Math.max(0, workContinuation.remainingTime - eff.plannedHours),
+        std_time_hours: stdTimeHoursForPlan,
         status: 'draft' as const,
         notes: hasReplanContext ? replanReason : 'General work planning'
       };
-      
+
       if (existingPlan && existingPlan.id) {
-        // Update existing plan
         planIdsToKeep.add(existingPlan.id);
-        const updatePromise = supabase
-          .from('prdn_work_planning')
-          .update({
-            ...planData,
-            is_deleted: false,
-            modified_by: currentUser,
-            modified_dt: now
-          })
-          .eq('id', existingPlan.id)
-          .select()
-          .single();
-        updatePromises.push(updatePromise);
+        updatePromises.push(
+          supabase
+            .from('prdn_work_planning')
+            .update({
+              ...planData,
+              is_deleted: false,
+              modified_by: currentUser,
+              modified_dt: now
+            })
+            .eq('id', existingPlan.id)
+            .select()
+            .single()
+        );
         updatePlanSkillMeta.push({
           planId: existingPlan.id,
           requiredSkill: 'GEN',
           workerSkill: String((worker as SelectedWorker).skill_short || '')
         });
+        updateNoWorkerPayloads.push(null);
       } else {
-        // Create new plan
-        insertPromises.push(
-          createWorkPlanning(planData, currentUser)
-        );
+        insertPromises.push(createWorkPlanning(planData, currentUser));
         insertPlanSkillMeta.push({
           requiredSkill: 'GEN',
           workerSkill: String((worker as SelectedWorker).skill_short || '')
         });
+        insertNoWorkerPayloads.push(null);
       }
     }
   }
 
-  if (requiredSkills.length > 0) {
-    const selectedSkillMapping = work.skill_mappings[formData.selectedSkillMappingIndex >= 0 ? formData.selectedSkillMappingIndex : 0];
-    const individualSkills = getIndividualSkills(selectedSkillMapping);
-    const missingSlots = individualSkills.flatMap((skillShort, index) => {
-      const slotKey = getWorkerSlotKey(skillShort, index);
-      const slotWorker = formData.selectedWorkers[slotKey];
-      return !slotWorker || !slotWorker.emp_id ? [slotKey] : [];
-    });
-    if (missingSlots.length > 0) {
-      throw new Error(`Missing worker assignment for slot(s): ${missingSlots.join(', ')}`);
-    }
-  } else {
+  if (requiredSkills.length === 0) {
     const generalWorker = formData.selectedWorkers[getWorkerSlotKey('GEN', 0)];
     if (!generalWorker || !generalWorker.emp_id) {
       throw new Error(`Missing worker assignment for slot ${getWorkerSlotKey('GEN', 0)}`);
@@ -343,7 +414,7 @@ export async function saveWorkPlanning(
   updatePlanSkillMeta.forEach((meta) => {
     const required = normalizeSkill(meta.requiredSkill);
     const actual = normalizeSkill(meta.workerSkill);
-    if (!required || !actual || required === actual) return;
+    if (!required || !meta.workerSkill?.trim() || !actual || required === actual) return;
     planSkillMismatchRows.push({
       planning_id: meta.planId,
       reason: buildSkillMismatchReason(meta.requiredSkill, meta.workerSkill)
@@ -355,7 +426,7 @@ export async function saveWorkPlanning(
     if (!meta || !planId) return;
     const required = normalizeSkill(meta.requiredSkill);
     const actual = normalizeSkill(meta.workerSkill);
-    if (!required || !actual || required === actual) return;
+    if (!required || !meta.workerSkill?.trim() || !actual || required === actual) return;
     planSkillMismatchRows.push({
       planning_id: planId,
       reason: buildSkillMismatchReason(meta.requiredSkill, meta.workerSkill)
@@ -371,6 +442,16 @@ export async function saveWorkPlanning(
       })
       .in('planning_id', allPlanIds)
       .eq('deviation_type', 'skill_mismatch')
+      .eq('is_deleted', false);
+    await supabase
+      .from('prdn_work_planning_deviations')
+      .update({
+        is_deleted: true,
+        modified_by: currentUser,
+        modified_dt: now
+      })
+      .in('planning_id', allPlanIds)
+      .eq('deviation_type', 'no_worker')
       .eq('is_deleted', false);
   }
   if (planSkillMismatchRows.length > 0) {
@@ -391,7 +472,37 @@ export async function saveWorkPlanning(
       throw new Error(`Failed to create skill mismatch deviation(s): ${mismatchDeviationError.message}`);
     }
   }
-  
+
+  const noWorkerDeviationRows: Array<{ planning_id: number; reason: string }> = [];
+  insertResults.forEach((result: any, idx: number) => {
+    const nw = insertNoWorkerPayloads[idx];
+    if (nw && result?.id) {
+      noWorkerDeviationRows.push({ planning_id: result.id, reason: nw.reason });
+    }
+  });
+  updateResults.forEach((result: any, idx: number) => {
+    const nw = updateNoWorkerPayloads[idx];
+    if (nw && result?.data?.id) {
+      noWorkerDeviationRows.push({ planning_id: result.data.id, reason: nw.reason });
+    }
+  });
+  if (noWorkerDeviationRows.length > 0) {
+    const { error: nwDevErr } = await supabase.from('prdn_work_planning_deviations').insert(
+      noWorkerDeviationRows.map((row) => ({
+        planning_id: row.planning_id,
+        deviation_type: 'no_worker',
+        reason: row.reason,
+        is_active: true,
+        is_deleted: false,
+        created_by: currentUser,
+        created_dt: now
+      }))
+    );
+    if (nwDevErr) {
+      throw new Error(`Failed to create no-worker planning deviation(s): ${nwDevErr.message}`);
+    }
+  }
+
   // Create planning records for trainees and deviation records
   if (formData.selectedTrainees && formData.selectedTrainees.length > 0) {
     if (!formData.traineeDeviationReason || !formData.traineeDeviationReason.trim()) {
@@ -419,6 +530,7 @@ export async function saveWorkPlanning(
         planned_hours: eff.plannedHours,
         time_worked_till_date: workContinuation.timeWorkedTillDate,
         remaining_time: Math.max(0, workContinuation.remainingTime - eff.plannedHours),
+        std_time_hours: stdTimeHoursForPlan,
         status: 'draft' as const,
         notes: hasReplanContext ? replanReason : `Trainee: ${trainee.emp_name}`,
         wsm_id: null // Trainees don't have skill mappings

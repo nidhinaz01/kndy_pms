@@ -2,7 +2,12 @@ import { supabase } from '$lib/supabaseClient';
 import { cOffNetWorkHours } from '$lib/utils/cOffWindowUtils';
 
 const SHIFT_HOUR_LIMIT_DE_NAME = 'Shift Hour Limit';
-const BALANCE_EPS = 0.06;
+
+/** Tolerance for C‑Off/OT balance vs net hours − shift hour limit (must match server-side expectations). */
+export const MANPOWER_COFF_OT_BALANCE_EPS = 0.06;
+
+/** Notes required when actual (net) hours are below nominal full shift (UI + API reporting). */
+export const MANPOWER_REPORT_NOTES_FULL_SHIFT_EPS = 0.01;
 
 /**
  * Standard workday cap (hours) from sys_data_elements — used with net attendance (after breaks)
@@ -52,8 +57,8 @@ export function validateManpowerOtCoffBalance(
 
   const excess = netHours - shiftHourLimit;
 
-  if (excess <= BALANCE_EPS) {
-    if (coff > BALANCE_EPS || ot > BALANCE_EPS) {
+  if (excess <= MANPOWER_COFF_OT_BALANCE_EPS) {
+    if (coff > MANPOWER_COFF_OT_BALANCE_EPS || ot > MANPOWER_COFF_OT_BALANCE_EPS) {
       return {
         ok: false,
         message:
@@ -63,14 +68,14 @@ export function validateManpowerOtCoffBalance(
     return { ok: true };
   }
 
-  if (coff > excess + BALANCE_EPS) {
+  if (coff > excess + MANPOWER_COFF_OT_BALANCE_EPS) {
     return {
       ok: false,
       message: `C‑Off is ${coff} h but excess above the shift hour limit is only ${excess.toFixed(2)} h. Reduce C‑Off or extend attendance.`
     };
   }
 
-  if (Math.abs(excess - coff - ot) > BALANCE_EPS) {
+  if (Math.abs(excess - coff - ot) > MANPOWER_COFF_OT_BALANCE_EPS) {
     return {
       ok: false,
       message: `Net attendance after breaks is ${netHours.toFixed(2)} h. Limit is ${shiftHourLimit.toFixed(2)} h, so excess is ${excess.toFixed(2)} h. C‑Off (${coff} h) + OT (${ot.toFixed(2)} h) must equal ${excess.toFixed(2)} h.`

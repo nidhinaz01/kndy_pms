@@ -114,9 +114,9 @@ The application is organized into the following main modules:
 6. **Accounts** - Non-commercial work orders (internal / accounting)
 7. **Standards** - Standard works and workflow definitions
 8. **R&D** - Research and development document management
-9. **Reports** - Operational reports (e.g. month-to-date production status)
+9. **Reports** - Operational reports grouped as **Production** (Daily Production Status, Deviation Report, Lost Time Report) and **HR** (OT Report, C Off Report, Attendance Report, Non Std OT Report, Manhour Report); see [Reports Module](#reports-module).
 10. **System Admin** - System administration and configuration
-11. **Piece Rate** - Piece rate calculations and reporting
+11. **Piece Rate** - **Time Period (1 Emp)** (per-employee view/export) and **Stage** (stage-wide Excel); see [Piece Rate Module](#piece-rate-module)
 
 ---
 
@@ -3543,193 +3543,214 @@ Archives completed or obsolete work orders by moving their data to a separate ar
 
 ## Piece Rate Module
 
-### Overview
+### Navigation
 
-The Piece Rate module provides piece rate calculations and reporting based on completed work. Use **Time Period (1 Emp)** to review piece rate for one employee on screen; use **Stage** to export Excel for a whole stage and date range.
+Under **Piece Rate** in the sidebar:
 
-### Sub-Menus
+| Sub-menu | Route |
+|----------|-------|
+| **Time Period (1 Emp)** | `/piece-rate/time-period` |
+| **Stage** | `/piece-rate/stage` |
 
-#### Time Period (1 Emp)
+### When amounts are calculated (user view)
+
+- When **at least one** reporting line for the same planned work (**same planning record**) is marked **Completed** (`completion_status` = **C**), the system recalculates piece-rate fields on **all** reporting lines for that plan.
+- If **no** line is completed, stored piece-rate amounts for that plan are **cleared**.
+
+### How the system calculates piece rate (technical)
+
+**Standard work** (the plan has a **derived standard work code** — not “other work” only):
+
+- For each skill in the work’s **skill combination**, the system reads **standard time** (minutes) for that skill and the **hourly rate** for that skill from the skill-rate master (the rate row whose effective date is **on or before** the report line’s date, choosing the **latest** such row).
+- It computes a **total money value for the work**: sum over those skills of *(hourly rate × standard time in hours)*.
+- It sums **minutes worked** across all reporting lines on that planning using **hours worked on date** (converted to minutes).
+- Each line receives **POW** (proportion of work) = that line’s minutes ÷ **total minutes** across lines; **piece rate amount** = total work value × POW. The stored **type** is **PR**. **Standard time** on the report stores the **total standard minutes** used in that calculation. **Rate of worker** is stored as an **average** of the hourly rates used across skills in the combination.
+
+**Non-standard work** (no derived standard work code — other-work path):
+
+- For each qualifying reporting line, **hourly salary** = employee **salary** ÷ (**number of calendar days in that month that are not holidays** × **8** hours per day). Holidays come from the same **holiday list** used elsewhere (every calendar day counts unless it is listed as a holiday).
+- **Piece rate amount** = hourly salary × **1.15** × **hours worked on date**; **rate of worker** = hourly salary × 1.15; **POW** = **1** per line; **type** is **SL**. Standard time is not used for this path.
+
+Until this calculation runs, fields such as **piece rate amount**, **POW**, **type**, and related rates may stay empty.
+
+### Time Period (1 Emp)
 
 **Path**: `/piece-rate/time-period`
 
-**Description**: 
-View piece rate calculations for individual employees over a time period.
+**Purpose**: Review one employee’s work-reporting lines with piece-rate, overtime, and lost-time amounts.
 
-**Features**:
-- Select employee
-- Select date range (must be within same month/year)
-- View piece rate calculations
-- See piece rate earnings per work
-- View total piece rate for the period
+**Filters**: Select **Employee**; **From** and **To** must be in the **same calendar month and year**, with **To** ≥ **From**.
 
-**How to Use**:
+**Actions**: **Load Data** fills the table; **Export Excel** downloads one worksheet (**PR Report**) with the same columns as the table below.
 
-1. **Viewing Piece Rates**:
-   - Navigate to Piece Rate > Time Period (1 Emp)
-   - Select an employee from dropdown
-   - Select "From Date" and "To Date" (must be same month/year)
-   - Click "Load Data"
-   - View piece rate calculations:
-     - Work details
-     - Standard time
-     - Actual hours worked
-     - Piece rate amount
-     - Total piece rate for period
+#### On-screen columns (each row = one work reporting record)
 
-**How Piece Rates Work**:
+| Column | Meaning |
+|--------|---------|
+| Date | Report line date (`from_date`) |
+| Stage | Stage from the linked production plan |
+| WO No | Work order number from the plan |
+| Work Code | Derived standard work code or other work code |
+| Work Name | Standard work name/description, or description from **other work** additions |
+| Std. SC | Skill competency label from work skill mapping |
+| Std. Time | Stored standard minutes for piece rate (`pr_std_time`), shown as hours/minutes |
+| Start Time / End Time | Report window start and end (date + time) |
+| Hours Worked Till Date / Hours Worked on Date | As stored on the report |
+| SC Required / SC of Emp | Required competency on the plan vs employee’s skill |
+| Type | **PR** (standard) or **SL** (non-standard salary-based), when set |
+| Rate of Work / Rate of Worker | Stored rates from calculation |
+| POW | Share of total minutes (standard work); **1** for typical non-standard lines |
+| Piece Rate | Calculated amount (`pr_amount`) |
+| Overtime | Overtime amount on the line |
+| Lost Time Details / Lost Time Amount | Formatted lost-time lines; sum of payable **LT value** on that record |
+| Status | Completed vs not completed |
 
-- Piece rates are automatically calculated when work is completed (completion status = 'C')
-- Piece rate is based on standard time, not actual time
-- If multiple workers work on the same work, piece rate is distributed proportionally
-- Piece rate is calculated using the formula: (Standard Time / Total Hours) × Piece Rate Amount
+#### Excel export (Time Period)
 
-**Prerequisites**:
-- Employees must be registered
-- Work reports must be completed (status = 'C')
-- Time standards must be defined in Standards > Works > Time Standards
-- Piece rate must be configured for works
+Single sheet **PR Report**: columns match the export labels above (same names as on screen where applicable). Numeric columns use accounting-style formatting in Excel.
 
-**Areas Affected**:
-- Piece rate calculations (automatic on work completion)
-- Employee earnings tracking
-- Production reporting (piece rate is part of work reports)
-
-#### Stage (Excel export)
+### Stage (Excel export)
 
 **Path**: `/piece-rate/stage`
 
-**Description**: 
-Exports **piece rate data to Excel** for a **single production stage** over a **date range**. There is no on-screen data table; you choose stage and dates, then **Export Excel report**. Generation runs asynchronously with a progress-style modal.
+**Purpose**: Download **all employees’** reporting rows for **one Plant-Stage** and a date range **within one calendar month**.
 
-**Features**:
-- **Stage**: Picked from **System Admin > Data Elements** category **Plant-Stage** (same stage list as elsewhere in the app).
-- **From / To dates**: Must fall in the **same month and year**; “to” must be on or after “from.”
-- **Excel workbook** typically includes:
-  - **Detail**: All reporting rows for the stage and period (multi-employee line detail).
-  - **Consolidated**: Per-employee totals plus a grand total.
+**Filters**: **Stage** from **Plant-Stage** data elements; **From** / **To** in the **same month and year**. There is **no** on-screen data grid—run **Export Excel report** after selecting filters.
 
-**How to Use**:
+**Logic**: The export gathers active planning IDs for the chosen stage, then loads reporting lines whose reporting window overlaps the selected dates. Other-work descriptions are resolved from work additions where applicable.
 
-1. Navigate to **Piece Rate > Stage** (or **Piece Rate - Stage** in the menu).
-2. Select **stage**, **from date**, and **to date** (same calendar month).
-3. Click **Export Excel report**. Wait until the file downloads or the modal completes.
-4. Open the file in Excel for analysis or sharing.
+#### Excel workbook structure
 
-**Prerequisites**:
-- Completed production reports with piece rate data for the period
-- Plant-Stage data elements configured
+| Sheet | Contents |
+|-------|----------|
+| **Consolidated** | One row per employee: **Total Hours** (till-date + on-date hours summed), **Total Piece Rate**, **Total Overtime**, **Total Lost Time**, **Record Count**, plus a **Grand Total** row |
+| **Detail** | Line-level columns: Employee, Date, Stage, WO No, Work Code, Work Name, Std. SC, Std. Time, Start/End Time, Hours Worked Till Date / on Date, **Total Hours**, SC Required, SC of Emp, Type, Rate of Work / Worker, POW, Piece Rate, Overtime, Lost Time Details, Lost Time Amount, Status |
 
-**Areas Affected**:
-- None (export only)
+Sheet order in the file: **Consolidated** first, then **Detail**. Typical filename: `PR Report-{Stage}-{from}-{to}-{timestamp}.xlsx`.
+
+**Prerequisites**: Plant-Stage configured; reporting data in range.
 
 ---
 
 ## Reports Module
 
-### Overview
+### Navigation
 
-The **Reports** area provides read-only operational reports. Your administrator may group them under a **Reports** menu in the sidebar. Documented reports:
+Under **Reports**:
 
-- **Daily Production Status** (`/reports/production/...`) — month-to-date production entry/exit and targets  
-- **Lost Time Report** — lost-time lines from work reports (with worker name) over a date range  
-- **Deviation Report** — planning and reporting deviations overlapping a date range  
-- **C-Off Report** (`/reports/hr/c-off-report`) — planning and reporting manpower rows with C-Off, where the attendance window overlaps the range  
-- **Overtime Report** (`/reports/hr/ot-report`) — work reporting rows with overtime minutes &gt; 0 and a worker name, where the report window overlaps the range  
-- **Non-Standard Overtime Report** (`/reports/hr/non-std-ot-report`) — overtime rows where work code does **not** start with `P`, `M`, or `C`, with worker name and overlapping report window  
-- **Manhour Report** (`/reports/hr/manhour-report`) — employee-wise daily manhours pivot from work reporting (`hours_worked_today`), with stage filter and consolidated/details views  
-- **Attendance Report** (`/reports/hr/attendance-report`) — **reporting** manpower in a **pivot** table: one row per shift / stage / employee / skill, with a **letter per calendar day** (**P** = present, **A(I)** = absent informed, **A(U)** = absent uninformed) for days covered by the reporting window  
+| Group | Reports |
+|-------|---------|
+| **Production** | Daily Production Status, Deviation Report, Lost Time Report |
+| **HR** | OT Report, C Off Report, Attendance Report, Non Std OT Report, Manhour Report |
 
-**Shared date rules** (Lost Time, Deviation, C-Off Report, Overtime Report, Non-Standard Overtime Report, Manhour Report, **Attendance Report**): **From** and **To** dates must both be set; **from** ≤ **to**; **to** cannot be after today; the range cannot exceed **93 days** (about three months). Defaults are often the first day of the current month through today. **Daily Production Status** uses a single **As of date** (month-to-date from the 1st of that month) instead.
+Paths use `/reports/production/...` and `/reports/hr/...` as documented below.
+
+### Shared rules for date-range reports
+
+These apply to **Lost Time**, **Deviation**, **C-Off**, **OT**, **Non-Std OT**, **Manhour**, and **Attendance**:
+
+- **From** and **To** are required; **From** ≤ **To**; **To** cannot be after **today** (local date).
+- The inclusive span cannot exceed **93 days** (~three months).
+- **Daily Production Status** does **not** use From/To; it uses one **As of date** (month-to-date from the 1st of that month).
+
+Most HR/production range screens default **From** to the first day of the current month and **To** to today.
+
+### Stage selector (HR reports)
+
+For **OT Report**, **Non-Std OT Report**, **C-Off Report**, **Manhour Report**, and **Attendance Report**, choose **Stage** before generating: pick a specific Plant-Stage or **All**. The application requires a selection (**All** is valid).
+
+---
 
 ### Daily Production Status
 
 **Path**: `/reports/production/daily-production-status`
 
-**Description**: 
-A **month-to-date (MTD)** snapshot from the **1st of the selected month** through the **As of date** you choose. It summarizes working days, daily entry targets from the production plan, plant-level entry/exit counts, and a **by-stage, by-day** grid of work order entries and exits from production dates (`prdn_dates`).
+#### Purpose (user)
 
-**Features**:
-- **As of date**: Pick any date; the report period runs from that month’s first day through that date (inclusive).
-- **Generate Report**: Loads summary and detail tables (may take a few seconds).
-- **Export Excel**: Downloads an Excel workbook with the same report content (after a report has been generated).
-- **Summary (month to date)**:
-  - **Period** (start → as-of date)
-  - **Working days completed**: Count of working days in that range (weekends excluded; **Planning > Holiday List** active holidays excluded).
-  - **Daily entry target**: From the **production plan per shift** (`plan_prod_plan_per_shift.ppd_count`) whose period covers the as-of date (uses an active plan when available; otherwise a plan that still includes that date).
-  - **Target (daily × working days)**: Working days × daily entry target when both are known.
-- **Plants** table: For each plant (e.g. P1, P2, P3), **Entered** = distinct work orders with an **entry** at the plant’s first line stage (PnS1). **Exited** = distinct work orders with an **exit** at the plant’s last line stage (e.g. P1S4, P2S4); P3 may use P3S1 for both when it is the only stage.
-- **By stage (month to date)**: One row per stage from **System Admin > Data Elements** category **Plant-Stage**, plus any stage found in `prdn_dates` that is not in that list. For each calendar day in the period: **Entry** count and WO numbers, **Exit** count and WO numbers (up to two WO numbers per line in each cell). Scroll horizontally for more dates; the Stage column stays fixed.
+Month-to-date snapshot: **working-day count**, **daily entry target** and **period target**, **plant** entry/exit counts, and a **by-stage by-day** grid of production **entry** and **exit** events.
 
-**How to Use**:
+#### Generation logic (technical)
 
-1. Open **Reports > Daily Production Status** (or navigate to `/reports/production/daily-production-status` if you have the menu).
-2. Set **As of date**.
-3. Click **Generate Report**.
-4. Review the summary, plant matrix, and by-stage grid.
-5. Optionally click **Export Excel** to save a file for sharing or archiving.
-6. Use the header logo shortcut to return to the **Dashboard** if shown.
+- **Period**: First calendar day of the **as-of** month through the selected **As of date** (inclusive).
+- **Working days completed**: Each calendar day in that interval that is **not** listed as an active holiday in **Planning > Holiday List** (`plan_holidays`). **Weekends are not automatically excluded**—only dates marked as holidays are skipped.
+- **Daily entry target**: `ppd_count` from **production plan per shift** for a plan whose period **covers** the as-of date (prefers an active plan; otherwise a plan that still includes that date).
+- **Period target**: **Working days completed** × **daily entry target** (when both exist).
+- **Plant matrix (P1, P2, P3)**: For each plant prefix, **Entered** = count of **distinct** sales orders with an **entry** row at that plant’s **first line** stage (`PnS1`). **Exited** = distinct sales orders with an **exit** at that plant’s **last** `PnS*` stage (if only one stage exists, e.g. P3, entry and exit use that stage).
+- **By-stage grid**: Stage rows = all **Plant-Stage** values from data elements, plus any `stage_code` seen in production date movements that is missing from that list. For each calendar day and stage, **entry**/**exit** counts and WO labels come from `prdn_dates` rows with `date_type` **entry** or **exit**, `actual_date` on that day; WO labels prefer `wo_no`, else a synthetic id.
 
-**Prerequisites**:
-- Menu access to the report (assigned by administrator).
-- **Holiday list** and **production plan** data for accurate working days and targets.
-- **Plant-Stage** data elements for the by-stage breakdown.
-- Production **entry/exit** dates recorded in the system (`prdn_dates`).
+#### On-screen layout
 
-**Areas Affected**:
-- None (read-only report and export)
+1. **Summary (month to date)**: Period, working days completed, daily entry target, target (daily × working days).
+2. **Plants**: Plant, entry stage, exit stage, Entered, Exited (with short explanation under the table).
+3. **By stage (month to date)**: Fixed **Stage** column; for each date, cells show entry count, up to two lines of entry WO numbers, exit count, up to two lines of exit WO numbers (horizontal scroll).
+
+#### Excel export
+
+Workbook with three sheets:
+
+| Sheet | Contents |
+|-------|----------|
+| **Summary** | Key/value rows: Report through date, Period, Working days completed, Daily entry target (vehicles/day), Target (daily × working days) |
+| **Plants** | Plant, Entry stage, Exit stage, Entered, Exited |
+| **By stage** | Header row: **Stage**, then for each date four columns: `{date} Entry count`, `{date} Entry WO nos.`, `{date} Exit count`, `{date} Exit WO nos.` | Full WO lists are comma-separated in one cell. |
+
+---
 
 ### Lost Time Report
 
 **Path**: `/reports/production/lost-time-report`
 
-**Description**: 
-Lists **lost-time detail lines** from submitted work reports whose reporting window **overlaps** the selected **From** / **To** date range. Only rows that have lost-time data (`lt_details`) and a **worker name** are included (rows without a named worker are excluded).
+#### Purpose (user)
 
-**Features**:
-- **From date** / **To date**: Same validation as other range reports (see Overview above).
-- **Generate Report**: Loads a wide results table.
-- **Export Excel**: Exports the current result set; the Excel file includes additional columns such as shift, worker ID/skill, LT comments, report status, and audit fields (beyond what is shown on screen).
-- On-screen columns include (among others): Shift, Stage, Date (report from, with time if present), Work order, Work code, Work name + details, Skill competency, Std time, Worker, Report to (date/time), Minutes, Reason, Payable (Yes/No), Value.
+Lists each **lost-time line** from work reporting, for rows that overlap your date range and have a **named worker**.
 
-**How to Use**:
+#### Generation logic (technical)
 
-1. Open **Reports > Lost Time Report** (or `/reports/production/lost-time-report`).
-2. Set **From** and **To** dates.
-3. Click **Generate Report**.
-4. Review the table; use **Export Excel** if you need the extended columns or a file to share.
+- Loads **non-deleted** work reporting rows with non-null **`lt_details`** JSON; prefilters with `from_date` ≤ range **To** and `to_date` ≥ range **From**.
+- Keeps only rows whose **[from_date, to_date]** **overlaps** the selected range (inclusive date logic).
+- Expands **`lt_details`** into **one output row per array line** (minutes, reason, payable flag, value per line).
+- **Excludes** rows where the worker has **no display name** (trimmed empty).
+- **Standard time** column: prefers **`pr_std_time`** on the report; else resolves planned standard minutes via the same enrichment used in production for that stage/plan.
+- Sort: newest **`from_date`** first, then **`created_dt`**.
 
-**Prerequisites**:
-- Menu access; lost-time reasons configured in **System Admin > Lost Time Reasons** where applicable.
-- Work reports in the range with lost-time lines and named workers.
+#### On-screen columns
 
-**Areas Affected**:
-- None (read-only)
+Shift, Stage, Date (report **from** date + time), Work order, Work code, Work name + details, Skill competency, Std time, Worker, Report to (to date/time), Minutes (line), Reason, Payable (Yes/No), Value (line).
+
+#### Excel export
+
+| Sheet | Contents |
+|-------|----------|
+| **Summary** | From date, To date, Row count |
+| **Lost time** | Shift code, Stage code, Date (from + time), WO/PWO/Customer, Work code, Work name + details, Std work skill competency, Std time, Worker name, Worker ID, Skill, Report to date/time, LT minutes/reason/payable/value (line), LT minutes total (report), LT comments, Report status, Completion status, Created/Modified by and dates |
+
+---
 
 ### Deviation Report
 
 **Path**: `/reports/production/deviation-report`
 
-**Description**: 
-Shows **planning and reporting deviations** whose time windows overlap the selected **From** / **To** range. Planning-side deviations (including trainee addition) appear as **one** row with context **Plan**. Reporting-side deviations appear as **two** rows each: **Plan** (planned window/worker and standard time from skill mapping) and **Report** (reported window/worker and reported standard time when present). Overlap is determined by each row’s `from_date` / `to_date` with your filter range.
+#### Purpose (user)
 
-**Features**:
-- **From date** / **To date**: Same validation as Lost Time Report (max ~3 months, to ≤ today).
-- **Generate Report** / **Export Excel** (Excel after rows are loaded).
-- Table columns include: Stage, Shift, Date, **Context** (Plan / Report), Type, Reason, Work order, Work code, Work name + details, Skill competency, Std time, Worker.
+Shows **planning** and **reporting** deviations whose parent plan or report window **overlaps** the selected range.
 
-**How to Use**:
+#### Generation logic (technical)
 
-1. Open **Reports > Deviation Report** (or `/reports/production/deviation-report`).
-2. Set **From** and **To** dates.
-3. Click **Generate Report**.
-4. Review Plan vs Report lines; export to Excel if needed.
+- Collects planning IDs and reporting IDs whose **`from_date`–`to_date`** windows intersect the filter (broad query + overlap check).
+- **Planning deviations** (`prdn_work_planning_deviations`): **one** row per deviation, **Context** = **Plan**; worker/time/window from the plan; **Date** column uses plan **`from_date`**.
+- **Reporting deviations** (`prdn_work_reporting_deviations`): **two** rows per deviation — **Plan** (planned worker/window; standard time from enrichment priority: skill standard minutes → vehicle-flow estimate minutes → planned hours×60) and **Report** (reporting worker/window; **Std time** prefers **`pr_std_time`** then plan standard minutes). **Date** uses plan **`from_date`** for Plan row and report **`from_date`** for Report row.
+- **Skill competency** column: prefers **all** active skill-mapping labels for the derived standard work code; else embedded mapping names; else single enrichment label.
+- Sort: descending **Date**, then deviation id, **Plan** before **Report**.
 
-**Prerequisites**:
-- Menu access; deviation records recorded during planning/reporting in Production.
+#### On-screen columns
 
-**Areas Affected**:
-- None (read-only)
+Stage, Shift, Date, Context (Plan / Report), Type, Reason, Work order, Work code, Work name + details, Skill competency, Std time, Worker.
+
+#### Excel export
+
+Summary (From, To, Row count) plus **Deviations** sheet with: Stage, Shift, Date, Context, Deviation ID, Deviation type, Reason, WO/PWO/Customer, Work code, Work name + details, Std work skill competency, Std time, Worker ID/Name, Skill, Derived SW code, Other work code, Report status (Report context only), Completion status (Report context only), Created/Modified audit fields.
+
+---
 
 <span id="c-off-report"></span>
 
@@ -3737,53 +3758,66 @@ Shows **planning and reporting deviations** whose time windows overlap the selec
 
 **Path**: `/reports/hr/c-off-report`
 
-**Description**:  
-Lists **planning** and **reporting** manpower lines whose **attendance window overlaps** the selected **From** / **To** range and where **C-Off** applies (**C-Off value &gt; 0** or a **C-Off from date** is set). Use this to review or export comp-off–related attendance in one place.
+#### Purpose (user)
 
-**Features**:
-- Same **From** / **To** validation as [Lost Time Report](#lost-time-report) (see [Reports Module](#reports-module) overview).
-- **Generate Report** loads a table with columns such as: **Source** (plan vs report), shift, stage, employee, skill, attendance status, **Window** / **Times**, planned hours, actual hours, **C-Off (d)**, **C-Off window**, notes.
-- **Export Excel** downloads the current result set (enabled when there is at least one row).
+Lists **reporting manpower** rows (**Manpower Report** / `prdn_reporting_manpower`) where **C-Off** is in use and the attendance window overlaps your range—**not** planning manpower.
 
-**How to Use**:
+#### Generation logic (technical)
 
-1. Open **Reports > C-Off Report** (or `/reports/hr/c-off-report` if your menu includes it).
-2. Set **From** and **To** dates.
-3. Click **Generate Report**; optionally **Export Excel**.
+- Rows must have status **draft**, **pending_approval**, or **approved**; not deleted.
+- Window overlap: **`reporting_from_date`**–**`reporting_to_date`** intersects **[From, To]**.
+- **C-Off filter**: **`c_off_value` > 0** OR **`c_off_from_date`** is set.
+- Optional **Stage** filter: specific stage or **All**.
+- Sort: newest-first using window start and created timestamp.
 
-**Prerequisites**:
-- Menu access; C-Off data entered in Production **Manpower Plan** / **Manpower Report** via **Mark Attendance**.
+#### On-screen columns
 
-**Areas Affected**:
-- None (read-only)
+Shift, Stage, Employee (with ID), Skill, Attendance status, Window (from → to dates), Times (from–to clock times), Actual h, **C-Off (d)**, **C-Off window** (from–to dates/times), Notes. **Consolidated** tab (when available): pivots **C-Off (d)** by employee and calendar day.
+
+#### Excel export
+
+| Sheet | Contents |
+|-------|----------|
+| **Summary** | Stage selection, From, To, Row count |
+| **Consolidated** | Employee Name; one column per calendar day (**dd-MMM-yyyy**) with **C-Off value** summed for rows whose **window start date** equals that day; **Total C-Off (d)**; final **Total** row |
+| **Details** | Employee ID/Name, Skill, Stage, Shift, Attendance status, Record status, Attendance window from/to, Attendance from/to time, Actual hours, C-Off value (days), C-Off from/to dates/times, Notes, audit dates; **Total** row sums **C-Off value (days)** |
+
+---
 
 <span id="overtime-report"></span>
 
-### Overtime Report
+### OT Report (Overtime Report)
 
 **Path**: `/reports/hr/ot-report`
 
-**Note**: Your sidebar menu may show **OT Report** (seed data) while the screen title reads **Overtime Report**.
+The menu label may be **OT Report**; the page title is **Overtime Report**.
 
-**Description**:  
-Lists **work reporting** detail whose **report from/to window overlaps** the selected range, where **overtime minutes &gt; 0**, and the row has a **worker name** (same spirit as Lost Time Report’s named-worker filter).
+#### Purpose (user)
 
-**Features**:
-- Same **From** / **To** rules as other range reports (max ~93 days, **to** ≤ today).
-- On-screen columns include shift, stage, work order, work code, work name + details, **Worker**, report window, **OT** (time), **OT amount**.
-- **Export Excel** after rows are loaded.
+Work-reporting lines with **overtime minutes &gt; 0**, a **named worker**, status in **draft / pending_approval / approved**, overlapping the date range, optionally filtered by **Stage** (**All** or one stage).
 
-**How to Use**:
+#### Generation logic (technical)
 
-1. Open **Reports > Overtime Report** (or `/reports/hr/ot-report`).
-2. Set **From** and **To** dates.
-3. Click **Generate Report**; use **Export Excel** if needed.
+- Discards rows with null **`overtime_minutes`** or minutes ≤ 0.
+- Overlap on report **`from_date`–`to_date`** vs filter.
+- **Work name** for other-work codes may be replaced by **`other_work_desc`** from work additions matching WO + code.
+- Sort: **`from_date`** desc, **`from_time`** desc, worker name, **`created_dt`** desc.
 
-**Prerequisites**:
-- Menu access; submitted or available reporting data with OT recorded (e.g. via **Draft Report** > **Report OT**).
+#### On-screen views
 
-**Areas Affected**:
-- None (read-only)
+**Consolidated** (default): pivoted OT minutes and amounts by employee and **report from date**, split into **PR OT** vs **Non-PR OT** using work code first letter (**P**, **M**, **C** → PR bucket; anything else → Non-PR).
+
+**Details**: One row per reporting line with WO, work, worker, window, OT minutes, OT amount, statuses.
+
+#### Excel export
+
+| Sheet | Contents |
+|-------|----------|
+| **Summary** | Stage, From, To, Row count |
+| **Consolidated** | Employee Name; for each date: **PR OT Time**, **PR OT Value**, **Non PR OT Time**, **Non PR OT Value**; row totals and grand total row (**PR** vs **non-PR** classification matches export logic: work code starting with P, M, or C → PR) |
+| **Details** | Full line detail plus footer totals for OT minutes and OT amount |
+
+---
 
 <span id="non-standard-overtime-report"></span>
 
@@ -3791,25 +3825,23 @@ Lists **work reporting** detail whose **report from/to window overlaps** the sel
 
 **Path**: `/reports/hr/non-std-ot-report`
 
-**Description**:  
-A focused overtime report for **non-standard work**. It includes work reporting rows whose report window overlaps your date range, have **overtime minutes &gt; 0**, have a **worker name**, and whose **work code does not start with `P`, `M`, or `C`**.
+#### Purpose (user)
 
-**Features**:
-- Same **From** / **To** date validation as other range reports (max ~93 days, **to** ≤ today).
-- Includes OT time and amount with core work context (shift, stage, work order, work code, work name/details, worker, from/to date/time).
-- **Search table** filter and **Export Excel** after generation.
+Same inclusion rules as **OT Report**, but only rows whose **work code** (derived standard or other work code) **does not** start with **P**, **M**, or **C** (case-insensitive).
 
-**How to Use**:
+#### Generation logic (technical)
 
-1. Open **Reports > Non-Standard Overtime Report** (or `/reports/hr/non-std-ot-report`).
-2. Set **From** and **To** dates.
-3. Click **Generate Report**; optionally use search and **Export Excel**.
+Same as OT Report with the additional **non-standard code** filter; **Consolidated** pivot buckets minutes/amount into **Time** and **Amount** per day (no PR vs non-PR split).
 
-**Prerequisites**:
-- Menu access; reporting rows in range with OT and worker name; work code not starting with P/M/C.
+#### Excel export
 
-**Areas Affected**:
-- None (read-only)
+| Sheet | Contents |
+|-------|----------|
+| **Summary** | From, To, Row count |
+| **Consolidated** | Employee Name; per date **Time** (formatted hours) and **Amount**; totals |
+| **Details** | Same column set as OT Details (without PR split); totals row |
+
+---
 
 <span id="manhour-report"></span>
 
@@ -3817,30 +3849,29 @@ A focused overtime report for **non-standard work**. It includes work reporting 
 
 **Path**: `/reports/hr/manhour-report`
 
-**Description**:  
-An HR pivot report for **employee-wise daily manhours** from work reporting. Date columns aggregate `hours_worked_today` as decimal hours. The page supports **Stage** filter (including **All**) and two views:
-- **Consolidated**: grouped by skill
-- **Details**: grouped by employee (with search)
+#### Purpose (user)
 
-**Features**:
-- Stage selector (**All** + configured stages), **From** / **To** dates, **Generate Report**, **Export Excel**.
-- Same date-range validation as other HR range reports (max ~93 days, **to** ≤ today).
-- Details table with per-day hours and totals, plus consolidated skill-level totals.
+**Employee × calendar day** pivot of **`hours_worked_today`** from work reporting (decimal hours), with **Stage** = specific stage or **All**.
 
-**How to Use**:
+#### Generation logic (technical)
 
-1. Open **Reports > Manhour Report** (or `/reports/hr/manhour-report`).
-2. Select **Stage** (or **All**) and set **From** / **To** dates.
-3. Click **Generate Report**.
-4. Switch between **Consolidated** and **Details** as needed.
-5. Use **Export Excel** to download the current report.
+- Rows: **`from_date`** within **[From, To]**; **`worker_id`** present; status **draft / pending_approval / approved**; not deleted.
+- Sums **`hours_worked_today`** per **worker** per **`from_date`** (multiple lines on same day add together).
+- **Stage** filter uses **`prdn_work_planning.stage_code`** (inner join).
 
-**Prerequisites**:
-- Menu access.
-- Work reporting data in range with worker and `hours_worked_today` values.
+#### On-screen tabs
 
-**Areas Affected**:
-- None (read-only)
+**Consolidated**: Hours rolled up by **skill** (and date columns). **Details**: One row per employee with date columns and **Total** hours.
+
+#### Excel export
+
+| Sheet | Contents |
+|-------|----------|
+| **Summary** | Stage, From, To, Row count |
+| **Consolidated** | Skill; one column per date (**dd-MMM-yyyy**) with summed hours; **Total**; **Total** row |
+| **Details** | Employee, Worker ID, Skill; per-date hours; **Total**; footer **Total** row summing each day and grand total |
+
+---
 
 <span id="attendance-report"></span>
 
@@ -3848,25 +3879,22 @@ An HR pivot report for **employee-wise daily manhours** from work reporting. Dat
 
 **Path**: `/reports/hr/attendance-report`
 
-**Description**:  
-A **pivot** view of **reporting** manpower from production **Manpower Report** data over a **From** / **To** range. Each row is a **shift, stage, employee, and skill**; one column per **calendar day** in the range. Each cell shows a short code: **P** (present), **A(I)** (absent informed), **A(U)** (absent uninformed), or **—** when there is no value. The page subtitle in the app is: *Reporting manpower — one letter per calendar day (P / A(I) / A(U); max ~3 months).*
+#### Purpose (user)
 
-**Features**:
-- Same **From** / **To** validation as [Lost Time Report](#lost-time-report) (max ~93 days, **to** ≤ today).
-- **Search** box to filter rows by any column text.
-- **Generate Report** then **Export Excel** (export is available when at least one data row exists).
+Pivot of **reporting manpower** attendance: one row per **Shift**, **Stage**, **Employee**, **Skill**; one column per **calendar day** in range with codes **P**, **A(I)**, **A(U)**, or blank.
 
-**How to Use**:
+#### Generation logic (technical)
 
-1. Open **Reports > Attendance Report** (or **HR** group, depending on how your administrator placed the menu; path is `/reports/hr/attendance-report`).
-2. Set **From** and **To** dates.
-3. Click **Generate Report**; use the search box to narrow results; **Export Excel** if you need a file.
+- Source: **`prdn_reporting_manpower`** with status **draft / pending_approval / approved**; window overlaps **[From, To]**; optional **Stage** filter (**All** or one stage).
+- For each grouped row, for every calendar day inside both the filter range **and** the row’s **`reporting_from_date`–`reporting_to_date`**, the cell shows the short attendance code derived from **`attendance_status`** (same mapping as Manpower Report screens).
 
-**Prerequisites**:
-- Menu access; **Manpower Report** attendance data for the period (so reporting manpower rows exist in range).
+#### On-screen columns
 
-**Areas Affected**:
-- None (read-only)
+Fixed columns: Shift, Stage, Employee, Emp ID, Skill; then one column per date.
+
+#### Excel export
+
+Single sheet **Attendance**: Shift, Stage, Employee, Emp ID, Skill, then one column per date (header **dd-MMM-yyyy**) with the letter code. Filename pattern: `attendance-report_{YYYYMMDD}_{YYYYMMDD}.xlsx`.
 
 ---
 
@@ -3878,7 +3906,8 @@ Many modules support exporting data to Excel or PDF:
 
 - **Excel Export**: Click "Export to Excel" button to download data as Excel file
 - **PDF Export**: Click "Export to PDF" button to generate PDF document
-- **Reports**: **Daily Production Status**, **Lost Time Report**, **Deviation Report**, **C-Off Report**, **Overtime Report**, **Non-Standard Overtime Report**, **Manhour Report**, and **Attendance Report** each offer **Export Excel** after you generate the on-screen report (where rows exist)
+- **Piece Rate**: **Time Period (1 Emp)** and **Stage** provide **Export Excel** when data exists (see [Piece Rate Module](#piece-rate-module))
+- **Reports** (**Production** and **HR**): **Daily Production Status**, **Lost Time Report**, **Deviation Report**, **C-Off Report**, **Overtime Report**, **Non-Standard Overtime Report**, **Manhour Report**, and **Attendance Report** each offer **Export Excel** after you generate the on-screen report (where rows exist); layouts are described in [Reports Module](#reports-module)
 
 ### Search and Filter
 
@@ -4029,44 +4058,44 @@ This section provides quick reference for the most common tasks. For detailed in
 3. Export Excel report
 
 **Daily Production Status (MTD)**:
-1. Reports > Daily Production Status
+1. Reports > Production > Daily Production Status
 2. Set As of date → Generate Report
 3. Review summary, plants, by-stage grid
 4. Export Excel if needed
 
 **Lost Time Report**:
-1. Reports > Lost Time Report
+1. Reports > Production > Lost Time Report
 2. From / To dates (max ~3 months, to ≤ today)
 3. Generate Report → Export Excel if needed
 
 **Deviation Report**:
-1. Reports > Deviation Report
+1. Reports > Production > Deviation Report
 2. From / To dates (same rules as Lost Time)
 3. Generate Report → review Plan / Report context rows → Export Excel if needed
 
 **C-Off Report**:
-1. Reports > C-Off Report
-2. From / To dates (max ~3 months, to ≤ today)
+1. Reports > HR > C Off Report
+2. Select Stage (or All), then From / To dates (max ~3 months, to ≤ today)
 3. Generate Report → Export Excel if needed
 
 **Overtime Report**:
-1. Reports > Overtime Report
-2. From / To dates (same rules)
+1. Reports > HR > OT Report
+2. Select Stage (or All), then From / To dates (same rules)
 3. Generate Report → Export Excel if needed
 
 **Non-Standard Overtime Report**:
-1. Reports > Non-Standard Overtime Report (`/reports/hr/non-std-ot-report`)
-2. From / To dates (max ~3 months, to ≤ today)
+1. Reports > HR > Non Std OT Report (`/reports/hr/non-std-ot-report`)
+2. Select Stage (or All), then From / To dates (max ~3 months, to ≤ today)
 3. Generate Report → optional search → Export Excel if needed
 
 **Manhour Report**:
-1. Reports > Manhour Report (`/reports/hr/manhour-report`)
+1. Reports > HR > Manhour Report (`/reports/hr/manhour-report`)
 2. Select Stage (or All), then set From / To dates
 3. Generate Report → review Consolidated/Details → Export Excel
 
 **Attendance Report**:
-1. Reports > Attendance Report (`/reports/hr/attendance-report`)
-2. From / To dates (max ~3 months, to ≤ today)
+1. Reports > HR > Attendance Report (`/reports/hr/attendance-report`)
+2. Select Stage (or All), then From / To dates (max ~3 months, to ≤ today)
 3. Generate Report → search optional → Export Excel if needed
 
 ### Navigation Quick Reference
@@ -4092,14 +4121,14 @@ This section provides quick reference for the most common tasks. For detailed in
 | Piece Rate (stage Excel) | Piece Rate > Stage | `/piece-rate/stage` |
 | Archive Work Orders | System Admin > Archive Work Order | `/system-admin/archive-wo` |
 | System Admin | System Admin > User Management | `/system-admin/user-management` |
-| Daily Production Status | Reports > Daily Production Status | `/reports/production/daily-production-status` |
-| Lost Time Report | Reports > Lost Time Report | `/reports/production/lost-time-report` |
-| Deviation Report | Reports > Deviation Report | `/reports/production/deviation-report` |
-| C-Off Report | Reports > C-Off Report | `/reports/hr/c-off-report` |
-| Overtime Report | Reports > Overtime Report | `/reports/hr/ot-report` |
-| Non-Standard Overtime Report | Reports > Non-Standard Overtime Report | `/reports/hr/non-std-ot-report` |
-| Manhour Report | Reports > Manhour Report | `/reports/hr/manhour-report` |
-| Attendance Report | Reports > Attendance Report | `/reports/hr/attendance-report` |
+| Daily Production Status | Reports > Production > Daily Production Status | `/reports/production/daily-production-status` |
+| Lost Time Report | Reports > Production > Lost Time Report | `/reports/production/lost-time-report` |
+| Deviation Report | Reports > Production > Deviation Report | `/reports/production/deviation-report` |
+| C-Off Report | Reports > HR > C Off Report | `/reports/hr/c-off-report` |
+| Overtime Report | Reports > HR > OT Report | `/reports/hr/ot-report` |
+| Non-Standard Overtime Report | Reports > HR > Non Std OT Report | `/reports/hr/non-std-ot-report` |
+| Manhour Report | Reports > HR > Manhour Report | `/reports/hr/manhour-report` |
+| Attendance Report | Reports > HR > Attendance Report | `/reports/hr/attendance-report` |
 
 ### Status Reference
 
@@ -4405,34 +4434,34 @@ A: Go to **System Admin > Archive Work Order**, click **Archive work order**, se
 ### Reports
 
 **Q: What is Daily Production Status?**  
-A: **Reports > Daily Production Status** shows a **month-to-date** view from the 1st of the month through your chosen **As of date**: working days, daily entry target from the production plan, plant entry/exit counts, and a by-stage grid of entries/exits per day. See [Daily Production Status](#daily-production-status).
+A: **Reports > Production > Daily Production Status** shows a **month-to-date** view from the 1st of the month through your chosen **As of date**: **working days** (calendar days in that span that are **not** on the **Planning > Holiday List**), daily entry target from the production plan, plant entry/exit counts, and a by-stage grid of entries/exits per day. See [Daily Production Status](#daily-production-status).
 
 **Q: How do I run or export Daily Production Status?**  
-A: Open the report, pick **As of date**, click **Generate Report**, then optionally **Export Excel**. Working days exclude weekends and holidays from **Planning > Holiday List**. See [Daily Production Status](#daily-production-status).
+A: Open the report, pick **As of date**, click **Generate Report**, then optionally **Export Excel**. **Working days completed** counts each calendar day in the period that is **not** listed as a holiday in **Planning > Holiday List** (weekends count unless they are marked as holidays). See [Daily Production Status](#daily-production-status).
 
 **Q: What is the Lost Time Report?**  
-A: **Reports > Lost Time Report** lists lost-time lines from work reports that overlap your **From** / **To** range, for rows that have a **worker name**. Use **Export Excel** for extra columns (worker ID, comments, status, audit). See [Lost Time Report](#lost-time-report).
+A: **Reports > Production > Lost Time Report** lists lost-time lines from work reports that overlap your **From** / **To** range, for rows that have a **worker name**. Use **Export Excel** for extra columns (worker ID, comments, status, audit). See [Lost Time Report](#lost-time-report).
 
 **Q: What is the Deviation Report?**  
-A: **Reports > Deviation Report** shows planning and reporting deviations overlapping your date range. Reporting deviations appear as two lines (**Plan** and **Report**) per event. See [Deviation Report](#deviation-report).
+A: **Reports > Production > Deviation Report** shows planning and reporting deviations overlapping your date range. Reporting deviations appear as two lines (**Plan** and **Report**) per event. See [Deviation Report](#deviation-report).
 
 **Q: Why does the Lost Time or Deviation report say my date range is invalid?**  
 A: **To** cannot be after today, **from** must be on or before **to**, and the span cannot exceed **93 days** (~3 months). Narrow the range and try again.
 
 **Q: What is the C-Off Report?**  
-A: **Reports > C-Off Report** lists planning and reporting manpower rows whose attendance **overlaps** your **From** / **To** range and have C-Off recorded. Use **Generate Report** and **Export Excel** like other HR/production range reports. See [C-Off Report](#c-off-report).
+A: **Reports > HR > C Off Report** lists **reporting** manpower rows (`prdn_reporting_manpower`) whose attendance window **overlaps** your **From** / **To** range and have C-Off recorded (**value &gt; 0** or a **C-Off from date** set). Use **Generate Report** and **Export Excel** like other HR range reports. See [C-Off Report](#c-off-report).
 
 **Q: What is the Overtime Report?**  
-A: **Reports > Overtime Report** lists work reporting lines with **OT minutes &gt; 0** and a **worker name**, where the report window overlaps your date range. See [Overtime Report](#overtime-report).
+A: **Reports > HR > OT Report** lists work reporting lines with **OT minutes &gt; 0** and a **worker name**, where the report window overlaps your date range (choose **Stage** or **All** before generating). See [Overtime Report](#overtime-report).
 
 **Q: What is the Non-Standard Overtime Report?**  
-A: **Reports > Non-Standard Overtime Report** applies the same OT logic as Overtime Report, but only includes rows where **work code does not start with P/M/C**. Useful for isolating non-standard work OT. See [Non-Standard Overtime Report](#non-standard-overtime-report).
+A: **Reports > HR > Non Std OT Report** applies the same OT logic as OT Report, but only includes rows where **work code does not start with P/M/C** (choose **Stage** or **All**). See [Non-Standard Overtime Report](#non-standard-overtime-report).
 
 **Q: What is the Manhour Report (HR)?**  
-A: **Reports > Manhour Report** shows employee-wise daily manhours from work reporting (`hours_worked_today`) over your selected date range, with a **Stage** filter and **Consolidated / Details** views. Use **Export Excel** to download. See [Manhour Report](#manhour-report).
+A: **Reports > HR > Manhour Report** shows employee-wise daily manhours from work reporting (`hours_worked_today`) over your selected date range, with a **Stage** filter (**All** or one stage) and **Consolidated / Details** views. Use **Export Excel** to download. See [Manhour Report](#manhour-report).
 
 **Q: What is the Attendance Report (HR)?**  
-A: **Reports > Attendance Report** builds a **date-range pivot** over **reporting** manpower: each row is shift / stage / employee / skill; each date column shows **P**, **A(I)**, or **A(U)** for that day. Same **From** / **To** limits as other ~93-day HR reports. See [Attendance Report](#attendance-report).
+A: **Reports > HR > Attendance Report** builds a **date-range pivot** over **reporting** manpower: each row is shift / stage / employee / skill; each date column shows **P**, **A(I)**, or **A(U)** for that day (choose **Stage** or **All**). Same **From** / **To** limits as other ~93-day HR reports. See [Attendance Report](#attendance-report).
 
 ---
 
@@ -4826,7 +4855,7 @@ The project includes **SQL maintenance scripts** in the source tree (for **DBAs*
 - **Stage**: A production stage in the manufacturing process
 - **Shift**: Work shift (e.g., General, Morning, Evening)
 - **Lead Time**: Duration a work order stays in a stage
-- **Piece Rate**: Payment based on work completed, calculated from standard time
+- **Piece Rate**: Amount stored on work reporting when work is completed—**standard** work uses skill rates and standard times with a **minute share (POW)** split across workers; **non-standard** work uses salary-derived hourly pay × **1.15** × hours on the line (see [Piece Rate Module](#piece-rate-module))
 - **WIP**: Work In Progress
 - **PWO**: Parent Work Order
 
@@ -4846,8 +4875,8 @@ The project includes **SQL maintenance scripts** in the source tree (for **DBAs*
 
 ---
 
-**Document Version**: 2.8.2  
-**Last Updated**: 1 May 2026  
+**Document Version**: 2.9.0  
+**Last Updated**: 2 May 2026  
 **System Version**: Production Management System v1.0
 
 

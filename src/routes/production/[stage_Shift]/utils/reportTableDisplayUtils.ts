@@ -65,3 +65,69 @@ export function formatRemainingTimeMinutesDisplay(remainingMinutes: number | nul
   if (remainingMinutes === null || remainingMinutes === undefined) return 'N/A';
   return formatTime((Number(remainingMinutes) || 0) / 60);
 }
+
+/**
+ * Standard duration (decimal hours) for one report row: `prdn_work_planning.std_time_hours`,
+ * then enriched VWF minutes, then skill standard (same priority as Plan / Draft Plan).
+ */
+export function reportRowStandardTimeHours(report: any): number | null {
+  if (!report) return null;
+  const p = report.prdn_work_planning;
+  const raw = p?.std_time_hours;
+  if (raw != null && raw !== '' && Number.isFinite(Number(raw))) {
+    return Number(raw);
+  }
+  const vwf = report?.vehicleWorkFlow?.estimated_duration_minutes;
+  if (typeof vwf === 'number' && Number.isFinite(vwf) && vwf > 0) {
+    return vwf / 60;
+  }
+  const skill = report?.skillTimeStandard?.standard_time_minutes;
+  if (typeof skill === 'number' && Number.isFinite(skill) && skill > 0) {
+    return skill / 60;
+  }
+  return null;
+}
+
+/** One grouped-work cell: standard time from first report row (same group shares work). */
+export function formatReportGroupStandardTimeCell(firstReport: any): string {
+  const h = reportRowStandardTimeHours(firstReport);
+  return h != null && Number.isFinite(h) ? formatTime(h) : 'N/A';
+}
+
+export function reportGroupMaxHoursWorkedTillDate(group: { items?: any[] }): number {
+  const items = group.items || [];
+  const vals = items.map((r: any) => Number(r?.hours_worked_till_date) || 0);
+  return vals.length ? Math.max(...vals) : 0;
+}
+
+export function reportGroupMaxHoursWorkedToday(group: { items?: any[] }): number {
+  const items = group.items || [];
+  const vals = items.map((r: any) => Number(r?.hours_worked_today) || 0);
+  return vals.length ? Math.max(...vals) : 0;
+}
+
+export function reportGroupMaxTotalHoursWorkedTillPlusToday(group: { items?: any[] }): number {
+  const items = group.items || [];
+  const vals = items.map(
+    (r: any) => (Number(r?.hours_worked_till_date) || 0) + (Number(r?.hours_worked_today) || 0)
+  );
+  return vals.length ? Math.max(...vals) : 0;
+}
+
+/**
+ * Per grouped work: `std_time` (first row) − max(`hours_worked_till_date`) across rows.
+ * `null` when standard hours cannot be resolved (show N/A).
+ */
+export function reportGroupRemainingHoursStdMinusMaxTill(group: { items?: any[] }): number | null {
+  const items = group.items || [];
+  if (items.length === 0) return null;
+  const stdH = reportRowStandardTimeHours(items[0]);
+  if (stdH == null || !Number.isFinite(stdH)) return null;
+  const maxTill = reportGroupMaxHoursWorkedTillDate(group);
+  return Math.max(0, stdH - maxTill);
+}
+
+export function formatReportGroupRemainingDisplay(group: { items?: any[] }): string {
+  const rem = reportGroupRemainingHoursStdMinusMaxTill(group);
+  return rem == null ? 'N/A' : formatTime(rem);
+}

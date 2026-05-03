@@ -219,7 +219,12 @@ export async function validateEmployeeShiftPlanning(
     // Check if all employees are recorded in planning attendance
     const employeesNotRecorded = (employees || []).filter(emp => !plannedEmpIds.has(emp.emp_id));
     if (employeesNotRecorded.length > 0) {
-      const missingNames = employeesNotRecorded.map(e => `${e.emp_name} (${e.emp_id})`).join(', ');
+      const missingNames = [...employeesNotRecorded]
+        .sort((a, b) =>
+          (a.emp_name || '').localeCompare(b.emp_name || '', undefined, { sensitivity: 'base' })
+        )
+        .map(e => `${e.emp_name} (${e.emp_id})`)
+        .join(', ');
       return {
         isValid: false,
         errors: [
@@ -311,9 +316,14 @@ export async function validateEmployeeShiftPlanning(
     }
     
     if (workersNotPresent.length > 0) {
+      const sortedLines = [...workersNotPresent].sort((a, b) => {
+        const nameA = a.replace(/\s*\([^)]*\)\s*$/, '').trim() || a;
+        const nameB = b.replace(/\s*\([^)]*\)\s*$/, '').trim() || b;
+        return nameA.localeCompare(nameB, undefined, { sensitivity: 'base' });
+      });
       errors.push(
         `Cannot Proceed. All employees with planned work must be marked as present in attendance. ` +
-        `Missing or not marked as present: ${workersNotPresent.join(', ')}`
+        `Missing or not marked as present: ${sortedLines.join(', ')}`
       );
     }
 
@@ -349,8 +359,11 @@ export async function validateEmployeeShiftPlanning(
       };
     }
 
-    // 8. Validate each employee
-    for (const employee of Array.from(allEmployeesToCheck.values())) {
+    // 8. Validate each employee (alphabetical by name — matches Manpower draft ordering in messages)
+    const sortedEmployeesToValidate = Array.from(allEmployeesToCheck.values()).sort((a, b) =>
+      (a.emp_name || '').localeCompare(b.emp_name || '', undefined, { sensitivity: 'base' })
+    );
+    for (const employee of sortedEmployeesToValidate) {
       const empId = employee.emp_id;
       const empName = employee.emp_name;
       const isOriginallyAssigned = presentEmpIds.has(empId);

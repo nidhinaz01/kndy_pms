@@ -58,6 +58,49 @@ function getSkillOrderMap(skillMapping: any): Map<string, number> {
 }
 
 /**
+ * Sort planning rows by work skill order (same rule as Plan tab grouped rows).
+ * Reporting modals should use this so "Standard time" matches the first row of the Plan group.
+ */
+export function sortPlanningItemsBySkillOrder(items: any[]): any[] {
+  if (!items || items.length <= 1) return [...items];
+
+  const copy = [...items];
+  const firstItem = copy[0];
+  const skillMapping = firstItem?.skillMapping || firstItem?.std_work_skill_mapping;
+  const skillOrderMap = getSkillOrderMap(skillMapping);
+
+  if (skillOrderMap.size === 0) return copy;
+
+  copy.sort((a: any, b: any) => {
+    const skillA = a.sc_required || '';
+    const skillB = b.sc_required || '';
+
+    let orderA = skillOrderMap.get(skillA);
+    if (orderA === undefined) {
+      const empSkillA = a.hr_emp?.skill_short;
+      if (empSkillA) {
+        orderA = skillOrderMap.get(empSkillA);
+      }
+    }
+    orderA = orderA ?? 999;
+
+    let orderB = skillOrderMap.get(skillB);
+    if (orderB === undefined) {
+      const empSkillB = b.hr_emp?.skill_short;
+      if (empSkillB) {
+        orderB = skillOrderMap.get(empSkillB);
+      }
+    }
+    orderB = orderB ?? 999;
+
+    if (orderA === orderB) return 0;
+    return orderA - orderB;
+  });
+
+  return copy;
+}
+
+/**
  * Group planned works by work code and sort items by skill order
  */
 export function groupPlannedWorks(plannedWorks: any[]): Record<string, any> {
@@ -99,51 +142,9 @@ export function groupPlannedWorks(plannedWorks: any[]): Record<string, any> {
   }, {});
   
   
-  // Sort items within each group by skill order
   Object.values(groups).forEach((group: any) => {
     if (!group.items || group.items.length === 0) return;
-    
-    // Get skill order from the first item's skillMapping
-    const firstItem = group.items[0];
-    const skillMapping = firstItem?.skillMapping || firstItem?.std_work_skill_mapping;
-    const skillOrderMap = getSkillOrderMap(skillMapping);
-    
-    if (skillOrderMap.size > 0) {
-      // Sort items by their sc_required skill order
-      group.items.sort((a: any, b: any) => {
-        const skillA = a.sc_required || '';
-        const skillB = b.sc_required || '';
-        
-        // Try to get order for skillA
-        let orderA = skillOrderMap.get(skillA);
-        if (orderA === undefined) {
-          // Try to find by matching with skill_short from hr_emp
-          const empSkillA = a.hr_emp?.skill_short;
-          if (empSkillA) {
-            orderA = skillOrderMap.get(empSkillA);
-          }
-        }
-        orderA = orderA ?? 999;
-        
-        // Try to get order for skillB
-        let orderB = skillOrderMap.get(skillB);
-        if (orderB === undefined) {
-          // Try to find by matching with skill_short from hr_emp
-          const empSkillB = b.hr_emp?.skill_short;
-          if (empSkillB) {
-            orderB = skillOrderMap.get(empSkillB);
-          }
-        }
-        orderB = orderB ?? 999;
-        
-        // If same order, maintain original order
-        if (orderA === orderB) {
-          return 0;
-        }
-        
-        return orderA - orderB;
-      });
-    }
+    group.items = sortPlanningItemsBySkillOrder(group.items);
   });
   
   // ---------- Order groups by category (Parent P, Mother M, Child C, Other O), then by workCode, then by earliest from_time ----------

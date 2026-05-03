@@ -1,0 +1,185 @@
+<script lang="ts">
+	import { onMount } from 'svelte';
+	import { goto } from '$app/navigation';
+	import { supabase } from '$lib/supabaseClient';
+	import AppHeader from '$lib/components/common/AppHeader.svelte';
+	import FloatingThemeToggle from '$lib/components/common/FloatingThemeToggle.svelte';
+	import Sidebar from '$lib/components/navigation/Sidebar.svelte';
+	import { fetchUserMenus } from '$lib/services/menuService';
+	import Button from '$lib/components/common/Button.svelte';
+
+	let showSidebar = false;
+	let menus: any[] = [];
+
+	let pieceRateRunning = false;
+	let pieceRateMessage = '';
+	let pieceRateMessageType: 'success' | 'error' | '' = '';
+	let pieceRateLastResult: unknown = null;
+
+	function assertAdminClient(): boolean {
+		try {
+			const savedUserStr = localStorage.getItem('user');
+			if (!savedUserStr) return false;
+			const savedUser = JSON.parse(savedUserStr);
+			const role = savedUser?.role;
+			return typeof role === 'string' && role.toLowerCase() === 'admin';
+		} catch {
+			return false;
+		}
+	}
+
+	onMount(async () => {
+		if (!assertAdminClient()) {
+			goto('/dashboard');
+			return;
+		}
+		try {
+			const username = localStorage.getItem('username');
+			if (username) {
+				menus = await fetchUserMenus(username);
+			}
+		} catch (e) {
+			console.error('db-helpers: menus load failed', e);
+		}
+	});
+
+	function handleSidebarToggle() {
+		showSidebar = !showSidebar;
+	}
+
+	function showPieceRateMessage(text: string, type: 'success' | 'error') {
+		pieceRateMessage = text;
+		pieceRateMessageType = type;
+		setTimeout(() => {
+			pieceRateMessage = '';
+			pieceRateMessageType = '';
+		}, 8000);
+	}
+
+	async function runCalculatePieceRates() {
+		if (pieceRateRunning) return;
+		if (!assertAdminClient()) {
+			goto('/dashboard');
+			return;
+		}
+
+		pieceRateRunning = true;
+		pieceRateMessage = '';
+		pieceRateLastResult = null;
+
+		try {
+			const {
+				data: { session }
+			} = await supabase.auth.getSession();
+			const accessToken = session?.access_token;
+			if (!accessToken) {
+				showPieceRateMessage('No active session. Sign in again.', 'error');
+				return;
+			}
+
+			const res = await fetch('/api/system-admin/db-job', {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json',
+					Authorization: `Bearer ${accessToken}`
+				},
+				body: JSON.stringify({ job: 'calculate_piece_rates' })
+			});
+
+			const payload = await res.json().catch(() => ({}));
+			if (!res.ok) {
+				showPieceRateMessage(payload?.error || `Request failed (${res.status})`, 'error');
+				return;
+			}
+			pieceRateLastResult = payload?.result ?? null;
+			showPieceRateMessage('Piece rate batch completed successfully.', 'success');
+		} catch (e) {
+			console.error(e);
+			showPieceRateMessage((e as Error)?.message || 'Request failed', 'error');
+		} finally {
+			pieceRateRunning = false;
+		}
+	}
+</script>
+
+<svelte:head>
+	<title>Database helpers — System Admin</title>
+</svelte:head>
+
+<!-- Sidebar Overlay -->
+{#if showSidebar}
+	<div class="fixed inset-0 z-50">
+		<button
+			type="button"
+			aria-label="Close sidebar overlay"
+			class="fixed inset-0 bg-black bg-opacity-40 z-40"
+			on:click={handleSidebarToggle}
+			tabindex="0"
+			on:keydown={(e) => (e.key === 'Enter' || e.key === ' ') && handleSidebarToggle()}
+			style="cursor: pointer; border: none; width: 100%; height: 100%; position: fixed; left: 0; top: 0; background-color: rgba(0,0,0,0.4);"
+		></button>
+		<div class="fixed left-0 top-0 h-full w-64 z-50 theme-bg-primary shadow-lg">
+			<Sidebar {menus} />
+		</div>
+	</div>
+{/if}
+
+<div class="flex flex-col h-full w-full theme-bg-secondary transition-colors duration-200" style="min-height: 100vh;">
+	<AppHeader title="Database helpers" onSidebarToggle={handleSidebarToggle} />
+	<FloatingThemeToggle />
+
+	{#if pieceRateMessage}
+		<div
+			class={`mx-4 mt-4 p-4 rounded-lg text-sm ${
+				pieceRateMessageType === 'success'
+					? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
+					: 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
+			}`}
+			role="status"
+		>
+			{pieceRateMessage}
+		</div>
+	{/if}
+
+	<div class="flex-1 p-4 md:p-8 max-w-4xl mx-auto w-full">
+		<h1 class="text-2xl font-semibold theme-text-primary mb-2">Database helpers</h1>
+		<p class="text-sm theme-text-secondary mb-8">
+			Run on-demand jobs that match scheduled database tasks. Only users with the <strong>admin</strong> role can use this
+			page. Actions are audited.
+		</p>
+
+		<section class="theme-bg-primary border theme-border rounded-lg p-6 mb-8 shadow-lg">
+			<h2 class="text-lg font-medium theme-text-primary mb-2">Calculate piece rate</h2>
+			<p class="text-sm theme-text-secondary mb-4">
+				Runs <code class="text-xs rounded px-1 py-0.5 theme-bg-secondary theme-border border"
+					>public.calculate_piece_rates()</code
+				>
+				— the same routine as the nightly pg_cron job (<span class="whitespace-nowrap">00:00</span>). Processes approved reports
+				with <code class="text-xs">pr_calculated_dt IS NULL</code> per your deployed procedure.
+			</p>
+			<p class="text-xs theme-text-secondary mb-4">
+				Wait for the current run to finish before clicking again. Heavy batches should not be started twice in parallel.
+			</p>
+			<Button variant="primary" disabled={pieceRateRunning} on:click={runCalculatePieceRates}>
+				{pieceRateRunning ? 'Running…' : 'Run calculate piece rates'}
+			</Button>
+
+			{#if pieceRateLastResult !== null}
+				<div class="mt-4">
+					<p class="text-xs font-medium theme-text-secondary mb-1">Last result (JSON)</p>
+					<pre
+						class="text-xs overflow-x-auto max-h-64 overflow-y-auto p-3 rounded border theme-border theme-bg-secondary theme-text-primary font-mono"
+					>{JSON.stringify(pieceRateLastResult, null, 2)}</pre>
+				</div>
+			{/if}
+		</section>
+
+		<section class="theme-bg-primary border theme-border rounded-lg p-6 shadow-lg opacity-90">
+			<h2 class="text-lg font-medium theme-text-primary mb-2">More jobs</h2>
+			<p class="text-sm theme-text-secondary">
+				Additional cron-aligned actions can be added here as separate buttons, each calling the same API with a different
+				<code class="text-xs">job</code> id once the server handler supports them.
+			</p>
+		</section>
+	</div>
+</div>

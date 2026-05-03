@@ -1,6 +1,7 @@
 import { supabase } from '$lib/supabaseClient';
 import { fetchActiveLostTimeReasons } from '$lib/api/lostTimeReasons';
 import { getDetailedTimeBreakdownForDerivativeWork } from '$lib/api/stdSkillTimeStandards';
+import { getEmbeddedStandardTimeMinutes } from '$lib/utils/standardTimeFromWork';
 import type { LostTimeReason } from '$lib/api/lostTimeReasons';
 import type { MultiSkillReportFormData } from '$lib/types/multiSkillReport';
 import { getEffectiveRowTimes } from '$lib/utils/planWorkUtils';
@@ -127,6 +128,11 @@ export async function loadStandardTime(selectedWorks: any[]): Promise<number> {
   if (!selectedWorks || selectedWorks.length === 0) return 0;
   
   const firstWork = selectedWorks[0];
+  const embedded = getEmbeddedStandardTimeMinutes(firstWork);
+  if (embedded !== null) {
+    return embedded;
+  }
+
   const derivedWorkCode = firstWork?.derived_sw_code || 
                          firstWork?.std_work_type_details?.derived_sw_code ||
                          firstWork?.std_work_type_details?.sw_code;

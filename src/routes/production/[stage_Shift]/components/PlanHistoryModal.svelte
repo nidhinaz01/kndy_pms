@@ -1,8 +1,8 @@
 <script lang="ts">
   import { X, History } from 'lucide-svelte';
-  import { onMount } from 'svelte';
   import { supabase } from '$lib/supabaseClient';
   import { theme } from '$lib/stores/theme';
+  import { formatDateLocal, formatDateTimeLocal } from '$lib/utils/formatDate';
 
   export let isOpen: boolean = false;
   export let stageCode: string = '';
@@ -53,21 +53,6 @@
     }
   }
 
-  function formatDateTime(dateStr: string | null): string {
-    if (!dateStr) return 'N/A';
-    try {
-      return new Date(dateStr).toLocaleString('en-GB', {
-        day: '2-digit',
-        month: 'short',
-        year: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit'
-      });
-    } catch {
-      return dateStr;
-    }
-  }
-
   function getStatusBadge(status: string) {
     switch (status) {
       case 'pending_approval':
@@ -108,7 +93,7 @@
             <div>
               <h2 class="text-2xl font-semibold theme-text-primary">Plan History</h2>
               <p class="text-sm theme-text-secondary mt-1">
-                Submission history for {stageCode} on {planningDate ? new Date(planningDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : ''}
+                Submission history for {stageCode} on {planningDate ? formatDateLocal(planningDate) : ''}
               </p>
             </div>
           </div>
@@ -147,7 +132,7 @@
                       </span>
                     </div>
                     <span class="text-xs theme-text-secondary">
-                      {formatDateTime(submission.submitted_dt)}
+                      {formatDateTimeLocal(submission.submitted_dt)}
                     </span>
                   </div>
 
@@ -158,7 +143,7 @@
                     </div>
                     <div>
                       <span class="font-medium theme-text-primary">Submitted on:</span>
-                      <span class="ml-2 theme-text-secondary">{formatDateTime(submission.submitted_dt)}</span>
+                      <span class="ml-2 theme-text-secondary">{formatDateTimeLocal(submission.submitted_dt)}</span>
                     </div>
                     {#if submission.reviewed_dt}
                       <div>
@@ -167,7 +152,7 @@
                       </div>
                       <div>
                         <span class="font-medium theme-text-primary">Reviewed on:</span>
-                        <span class="ml-2 theme-text-secondary">{formatDateTime(submission.reviewed_dt)}</span>
+                        <span class="ml-2 theme-text-secondary">{formatDateTimeLocal(submission.reviewed_dt)}</span>
                       </div>
                     {/if}
                   </div>

@@ -150,6 +150,7 @@
           planned_hours: plannedHours,
           time_worked_till_date: timeWorkedTillDate,
           remaining_time: remainingTime,
+          std_time_hours: firstPlannedWork.derived_sw_code ? (firstPlannedWork.std_time_hours ?? null) : null,
           status: existingStatus as 'draft' | 'approved' | 'pending_approval' | 'rejected', // Same status as the existing planned work
           notes: `Trainee: ${trainee.emp_name}`,
           wsm_id: null

@@ -1,7 +1,5 @@
 import { supabase } from '$lib/supabaseClient';
 import type { ReportWorkFormData } from '$lib/types/reportWork';
-import { calculatePieceRateForPlanning } from './pieceRateCalculationService';
-
 function normalizeSkill(skill: string | null | undefined): string {
   return String(skill || '').trim().toUpperCase();
 }
@@ -29,6 +27,9 @@ export async function saveWorkReport(
       }));
     }
     
+    const cumulativeWorked =
+      (Number(formData.hoursWorkedTillDate) || 0) + (Number(formData.hoursWorkedToday) || 0);
+
     const insertData = {
       planning_id: plannedWork.id,
       worker_id: formData.selectedWorkerId,
@@ -36,7 +37,7 @@ export async function saveWorkReport(
       from_time: formData.fromTime,
       to_date: formData.toDate,
       to_time: formData.toTime,
-      hours_worked_till_date: formData.completionStatus === 'NC' ? formData.hoursWorkedTillDate + formData.hoursWorkedToday : 0,
+      hours_worked_till_date: cumulativeWorked,
       hours_worked_today: formData.hoursWorkedToday,
       completion_status: formData.completionStatus,
       lt_minutes_total: formData.ltMinutes,
@@ -92,15 +93,6 @@ export async function saveWorkReport(
       }
     }
 
-    // Calculate piece rate if work is completed
-    if (formData.completionStatus === 'C') {
-      const pieceRateResult = await calculatePieceRateForPlanning(plannedWork.id);
-      if (!pieceRateResult.success) {
-        console.warn('Piece rate calculation failed:', pieceRateResult.error);
-        // Don't fail the save, just log the warning
-      }
-    }
-
     return { success: true, data };
   } catch (error) {
     return { success: false, error: (error as Error)?.message || 'Unknown error' };
@@ -120,11 +112,14 @@ export async function updatePlanningStatus(
     // Don't update planning status to 'submitted' anymore - reports are saved as draft
     // Status will be updated when the reporting submission is approved
     // Keep the time tracking updates
+    const cumulativeWorked =
+      (Number(formData.hoursWorkedTillDate) || 0) + (Number(formData.hoursWorkedToday) || 0);
+
     const { error } = await supabase
       .from('prdn_work_planning')
       .update({
-        time_worked_till_date: formData.completionStatus === 'NC' ? formData.hoursWorkedTillDate + formData.hoursWorkedToday : 0,
-        remaining_time: Math.max(0, plannedHours - (formData.hoursWorkedTillDate + formData.hoursWorkedToday)),
+        time_worked_till_date: cumulativeWorked,
+        remaining_time: Math.max(0, plannedHours - cumulativeWorked),
         modified_by: currentUser,
         modified_dt: now
       })

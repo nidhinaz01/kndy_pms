@@ -4,8 +4,8 @@ import type { LostTimeReason } from '$lib/api/lostTimeReasons';
 import { getEffectiveRowTimes } from '$lib/utils/planWorkUtils';
 import { netHoursWorkedForReportingRow } from '$lib/utils/multiSkillReportUtils';
 import { multiSkillHasAtLeastOneAssignedWorker } from '$lib/utils/multiSkillReportValidation';
-import { calculatePieceRateForPlanning } from './pieceRateCalculationService';
 import { getWorkDisplayCode } from '$lib/utils/workDisplayUtils';
+import { getVehicleWorkFlowStandardTimeHours } from '$lib/utils/standardTimeFromWork';
 
 function normalizeSkill(skill: string | null | undefined): string {
   return String(skill || '').trim().toUpperCase();
@@ -127,6 +127,7 @@ export async function saveUnplannedWorkReports(
     const otherWorkCode = isNonStandardWork
       ? (selectedWork.other_work_code || selectedWork.sw_code || null)
       : null;
+    const stdTimeHoursUnplanned = isNonStandardWork ? null : getVehicleWorkFlowStandardTimeHours(selectedWork);
 
     // For carry-over works: fetch cumulative time worked till date (previous dates only)
     // for the selected workers for this specific work code + WO.
@@ -187,8 +188,10 @@ export async function saveUnplannedWorkReports(
           const wid = r.worker_id;
           if (!wid || timeWorkedTillDateByWorker[wid] !== undefined) continue;
 
-          const totalHours = (Number(r.hours_worked_till_date) || 0) + (Number(r.hours_worked_today) || 0);
-          timeWorkedTillDateByWorker[wid] = r.completion_status === 'NC' ? totalHours : 0;
+          const till = Number(r.hours_worked_till_date) || 0;
+          const today = Number(r.hours_worked_today) || 0;
+          // Cumulative through that report: till is authoritative once backfilled; legacy Completed used till=0 and hours in today only
+          timeWorkedTillDateByWorker[wid] = till > 0 ? till : till + today;
         }
       } catch (e) {
         console.warn('Error fetching timeWorkedTillDateByWorker for unplanned work:', e);
@@ -229,8 +232,9 @@ export async function saveUnplannedWorkReports(
         to_date: eff.toDate,
         to_time: eff.toTime,
         planned_hours: rowHours,
-        time_worked_till_date: formData.completionStatus === 'NC' ? totalHoursWorked : 0,
+        time_worked_till_date: totalHoursWorked,
         remaining_time: Math.max(0, rowHours - totalHoursWorked),
+        std_time_hours: stdTimeHoursUnplanned,
         status: 'approved' as const, // Approved since work is being reported
         notes: 'Unplanned work - created for reporting',
         wsm_id: wsmId,
@@ -284,8 +288,8 @@ export async function saveUnplannedWorkReports(
         from_time: eff.fromTime,
         to_date: eff.toDate,
         to_time: eff.toTime,
-        // Store till-date before this report (exclude today's hours)
-        hours_worked_till_date: hoursWorkedTillDate,
+        // Cumulative hours through this report (prior + this session)
+        hours_worked_till_date: totalHoursWorked,
         hours_worked_today: rowHours,
         completion_status: formData.completionStatus,
         lt_minutes_total: formData.ltMinutes,
@@ -366,8 +370,9 @@ export async function saveUnplannedWorkReports(
           to_date: eff.toDate,
           to_time: eff.toTime,
           planned_hours: rowHours,
-          time_worked_till_date: formData.completionStatus === 'NC' ? totalHoursWorked : 0,
+          time_worked_till_date: totalHoursWorked,
           remaining_time: Math.max(0, rowHours - totalHoursWorked),
+          std_time_hours: stdTimeHoursUnplanned,
           status: 'approved' as const,
           notes: `Trainee: ${trainee.emp_name} - Added during unplanned work reporting`,
           wsm_id: null,
@@ -386,7 +391,7 @@ export async function saveUnplannedWorkReports(
           from_time: eff.fromTime,
           to_date: eff.toDate,
           to_time: eff.toTime,
-          hours_worked_till_date: hoursWorkedTillDate,
+          hours_worked_till_date: totalHoursWorked,
           hours_worked_today: rowHours,
           completion_status: formData.completionStatus,
           lt_minutes_total: formData.ltMinutes,
@@ -427,20 +432,6 @@ export async function saveUnplannedWorkReports(
           console.error(`Error creating deviation for trainee ${trainee.emp_name}:`, deviationError);
           return { success: false, error: `Failed to create deviation for trainee ${trainee.emp_name}` };
         }
-      }
-    }
-    
-    // Calculate piece rate for created planning records
-    if (createdPlanningRecords.length > 0) {
-      try {
-        for (const planRecord of createdPlanningRecords) {
-          if (planRecord.id) {
-            await calculatePieceRateForPlanning(planRecord.id);
-          }
-        }
-      } catch (error) {
-        console.error('Error calculating piece rate:', error);
-        // Don't fail the save if piece rate calculation fails
       }
     }
     

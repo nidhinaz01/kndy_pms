@@ -14,7 +14,13 @@
   import {
     formatDateDdMmYy,
     formatTimeWithoutSeconds,
-    formatRemainingTimeMinutesDisplay,
+    formatReportGroupStandardTimeCell,
+    formatReportGroupRemainingDisplay,
+    reportRowStandardTimeHours,
+    reportGroupMaxHoursWorkedTillDate,
+    reportGroupMaxHoursWorkedToday,
+    reportGroupMaxTotalHoursWorkedTillPlusToday,
+    reportGroupRemainingHoursStdMinusMaxTill,
     getGroupedSkillsRequiredForReports,
     planningScRequiredForReportRow
   } from '../utils/reportTableDisplayUtils';
@@ -74,10 +80,18 @@
       sortable_fromTime: group.items?.[0]?.from_time || '',
       sortable_toDate: group.items?.[0]?.to_date || '',
       sortable_toTime: group.items?.[0]?.to_time || '',
-      sortable_hoursWorked: group.items?.[0]?.hours_worked_today || 0,
-      sortable_totalHoursWorked: (group.items?.[0]?.hours_worked_till_date || 0) + (group.items?.[0]?.hours_worked_today || 0),
-      sortable_otHours: (group.items?.[0]?.overtime_minutes || 0) / 60,
-      sortable_ltHours: (group.items?.[0]?.lt_minutes_total || 0) / 60,
+      sortable_timeWorkedTillDate: reportGroupMaxHoursWorkedTillDate(group),
+      sortable_hoursWorked: reportGroupMaxHoursWorkedToday(group),
+      sortable_totalHoursWorked: reportGroupMaxTotalHoursWorkedTillPlusToday(group),
+      sortable_remainingTime: reportGroupRemainingHoursStdMinusMaxTill(group) ?? 0,
+      sortable_otHours: (() => {
+        const vals = (group.items || []).map((r: any) => (Number(r?.overtime_minutes) || 0) / 60);
+        return vals.length ? Math.max(...vals) : 0;
+      })(),
+      sortable_ltHours: (() => {
+        const vals = (group.items || []).map((r: any) => (Number(r?.lt_minutes_total) || 0) / 60);
+        return vals.length ? Math.max(...vals) : 0;
+      })(),
       sortable_reportedOn: group.items?.[0]?.created_dt || ''
     }));
     
@@ -733,16 +747,18 @@
             <th class="px-6 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider" style="width: 120px;">Status</th>
             <th class="px-6 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider">Skill</th>
             <th class="px-6 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider" style="width: 180px;">Worker (Skill)</th>
-            <th class="px-6 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider whitespace-nowrap" style="min-width: 140px;">Time Worked Till Date</th>
+            <SortableHeader column="sortable_timeWorkedTillDate" {sortConfig} onSort={handleSort} label="Time Worked Till Date" headerClass="whitespace-nowrap min-w-[140px]" />
             <SortableHeader column="sortable_fromDate" {sortConfig} onSort={handleSort} label="From Date" headerClass="w-[100px]" />
             <SortableHeader column="sortable_fromTime" {sortConfig} onSort={handleSort} label="From Time" headerClass="w-[90px]" />
             <SortableHeader column="sortable_toDate" {sortConfig} onSort={handleSort} label="To Date" headerClass="w-[100px]" />
             <SortableHeader column="sortable_toTime" {sortConfig} onSort={handleSort} label="To Time" headerClass="w-[90px]" />
             <SortableHeader column="sortable_hoursWorked" {sortConfig} onSort={handleSort} label="Hours Worked" headerClass="w-[140px]" />
             <SortableHeader column="sortable_totalHoursWorked" {sortConfig} onSort={handleSort} label="Total Hours Worked" headerClass="w-[140px]" />
+            <SortableHeader column="sortable_remainingTime" {sortConfig} onSort={handleSort} label="Remaining Time" headerClass="w-[120px]" />
             <SortableHeader column="sortable_otHours" {sortConfig} onSort={handleSort} label="OT Hours" headerClass="w-[120px]" />
             <SortableHeader column="sortable_ltHours" {sortConfig} onSort={handleSort} label="Lost Time" headerClass="w-[120px]" />
-            <th class="px-6 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider" style="width: 200px;">Reason</th>
+            <th class="px-6 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider whitespace-nowrap min-w-[42rem]">Reason</th>
+            <th class="px-6 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider whitespace-nowrap min-w-[42rem]">Deviations</th>
             <SortableHeader column="sortable_reportedOn" {sortConfig} onSort={handleSort} label="Reported On" headerClass="w-[150px]" />
             <th class="px-6 py-3 text-left text-xs font-medium theme-text-secondary uppercase tracking-wider" style="width: 150px;">Actions</th>
           </tr>
@@ -840,14 +856,7 @@
               </td>
               <td class="px-6 py-4 whitespace-nowrap text-sm {typedGroup.hasLostTime ? 'text-gray-800' : 'theme-text-primary'}">
                 {#if typedGroup.items && typedGroup.items.length > 0}
-                  {@const firstItem = typedGroup.items[0]}
-                  {#if firstItem?.vehicleWorkFlow?.estimated_duration_minutes}
-                    {formatTime(firstItem.vehicleWorkFlow.estimated_duration_minutes / 60)}
-                  {:else if firstItem?.skillTimeStandard?.standard_time_minutes}
-                    {formatTime(firstItem.skillTimeStandard.standard_time_minutes / 60)}
-                  {:else}
-                    N/A
-                  {/if}
+                  {formatReportGroupStandardTimeCell(typedGroup.items[0])}
                 {:else}
                   N/A
                 {/if}
@@ -891,7 +900,7 @@
                 <div class="flex flex-col gap-0.5">
                   {#each typedGroup.items as report}
                     <div class="text-xs font-medium whitespace-nowrap">
-                      {formatTime(report.hours_worked_till_date || 0)}
+                      {formatTime(Number(report.hours_worked_till_date) || 0)}
                     </div>
                   {/each}
                 </div>
@@ -927,31 +936,32 @@
               <td class="px-6 py-4 text-sm {typedGroup.hasLostTime ? 'text-gray-800' : 'theme-text-primary'}">
                 <div class="flex flex-col gap-0.5">
                   {#each typedGroup.items as report}
-                    <div class="text-xs">
-                      <div class="font-medium">
-                        {formatTime(report.hours_worked_today || 0)}
-                      </div>
-                      {#if report.skillTimeStandard}
-                        <div class="text-xs {report.lt_minutes_total > 0 ? 'text-gray-600' : 'theme-text-secondary'}">
-                          Std: {formatTime(report.skillTimeStandard.standard_time_minutes / 60)}
-                        </div>
-                        <div class="text-xs {report.lt_minutes_total > 0 ? 'text-gray-600' : 'theme-text-secondary'}">
-                          Rem: {formatRemainingTimeMinutesDisplay(report.remainingTimeMinutes)}
-                        </div>
-                      {/if}
+                    <div class="text-xs font-medium whitespace-nowrap">
+                      {formatTime(Number(report.hours_worked_today) || 0)}
                     </div>
                   {/each}
-                    </div>
-                  </td>
+                </div>
+              </td>
               <td class="px-6 py-4 text-sm {typedGroup.hasLostTime ? 'text-gray-800' : 'theme-text-primary'}">
                 <div class="flex flex-col gap-0.5">
                   {#each typedGroup.items as report}
                     <div class="text-xs font-medium">
-                    {formatTime((report.hours_worked_till_date || 0) + (report.hours_worked_today || 0))}
+                    {formatTime(
+                      (Number(report.hours_worked_till_date) || 0) + (Number(report.hours_worked_today) || 0)
+                    )}
                     </div>
                   {/each}
                 </div>
                   </td>
+              <td class="px-6 py-4 text-sm {typedGroup.hasLostTime ? 'text-gray-800' : 'theme-text-primary'}">
+                <div class="flex flex-col gap-0.5">
+                  {#each typedGroup.items as report}
+                    <div class="text-xs font-medium whitespace-nowrap">
+                      {formatReportGroupRemainingDisplay(typedGroup)}
+                    </div>
+                  {/each}
+                </div>
+              </td>
               <td class="px-6 py-4 text-sm {typedGroup.hasLostTime ? 'text-gray-800' : 'theme-text-primary'}">
                 <div class="flex flex-col gap-0.5">
                   {#each typedGroup.items as report}
@@ -982,32 +992,44 @@
                   {/each}
                 </div>
                   </td>
-              <td class="px-6 py-4 text-sm {typedGroup.hasLostTime ? 'text-gray-800' : 'theme-text-primary'}">
+              <td
+                class="px-6 py-4 text-sm max-w-none {typedGroup.hasLostTime ? 'text-gray-800' : 'theme-text-primary'} min-w-[42rem]"
+              >
                 <div class="flex flex-col gap-0.5">
                   {#each typedGroup.items as report}
                     <div class="text-xs space-y-1">
-                      {#if report.deviations && report.deviations.length > 0}
-                        {@const deviation = report.deviations[0]}
-                        <div class="text-orange-600 dark:text-orange-400">
-                          <span class="font-medium">{formatDeviationTypeLabel(deviation.deviation_type)}</span>
-                          {#if deviation.reason?.trim()}
-                            <div class="mt-0.5 whitespace-normal">{deviation.reason.trim()}</div>
-                          {/if}
-                        </div>
-                      {/if}
                       {#if report.lt_details && Array.isArray(report.lt_details) && report.lt_details.length > 0}
-                        <div class="truncate theme-text-primary" title={formatLostTimeDetails(report.lt_details)}>
+                        <div class="whitespace-nowrap theme-text-primary">
                           {formatLostTimeDetails(report.lt_details)}
                         </div>
                       {:else if report.lt_minutes_total > 0}
                         <span class="theme-text-secondary">N/A</span>
-                      {:else if !(report.deviations && report.deviations.length > 0)}
+                      {:else}
                         <span class="theme-text-secondary">-</span>
                       {/if}
                     </div>
                   {/each}
                 </div>
-                  </td>
+              </td>
+              <td
+                class="px-6 py-4 text-sm max-w-none {typedGroup.hasLostTime ? 'text-gray-800' : 'theme-text-primary'} min-w-[42rem]"
+              >
+                <div class="flex flex-col gap-1">
+                  {#each typedGroup.items as report}
+                    <div class="text-xs space-y-2">
+                      {#if report.deviations && report.deviations.length > 0}
+                        {#each report.deviations as deviation}
+                          <div class="text-orange-600 dark:text-orange-400 whitespace-nowrap">
+                            <span class="font-medium">{formatDeviationTypeLabel(deviation.deviation_type)}</span>{#if deviation.reason?.trim()}<span class="ml-1">{deviation.reason.trim()}</span>{/if}
+                          </div>
+                        {/each}
+                      {:else}
+                        <span class="theme-text-secondary">-</span>
+                      {/if}
+                    </div>
+                  {/each}
+                </div>
+              </td>
               <td class="px-6 py-4 text-sm {typedGroup.hasLostTime ? 'text-gray-800' : 'theme-text-primary'}">
                 <div class="flex flex-col gap-0.5">
                   {#each typedGroup.items as report}
@@ -1047,7 +1069,47 @@
     <div class="mt-6 px-6 py-4 theme-bg-secondary border-t theme-border">
       <div class="flex flex-wrap gap-4 text-sm">
         <div class="theme-text-secondary">
-          <span class="font-medium">Total Draft Reports:</span> {Object.keys(filteredGroupedReportWorks).length}
+          <span class="font-medium">Total works:</span> {Object.keys(filteredGroupedReportWorks).length}
+        </div>
+        <div class="theme-text-secondary">
+          <span class="font-medium">Total report rows:</span> {allDraftReports.length}
+        </div>
+        <div class="theme-text-secondary">
+          <span class="font-medium">Total standard hours:</span> {formatTime(
+            Object.values(filteredGroupedReportWorks).reduce((sum, g: any) => {
+              const h = reportRowStandardTimeHours(g.items?.[0]);
+              return sum + (h != null && Number.isFinite(h) ? h : 0);
+            }, 0)
+          )}
+        </div>
+        <div class="theme-text-secondary">
+          <span class="font-medium">Total time worked (till date):</span> {formatTime(
+            allDraftReports.reduce((sum, r) => sum + (Number(r.hours_worked_till_date) || 0), 0)
+          )}
+        </div>
+        <div class="theme-text-secondary">
+          <span class="font-medium">Total hours worked today:</span> {formatTime(
+            allDraftReports.reduce((sum, r) => sum + (Number(r.hours_worked_today) || 0), 0)
+          )}
+        </div>
+        <div class="theme-text-secondary">
+          <span class="font-medium">Total hours (till + today):</span> {formatTime(
+            allDraftReports.reduce(
+              (sum, r) =>
+                sum +
+                (Number(r.hours_worked_till_date) || 0) +
+                (Number(r.hours_worked_today) || 0),
+              0
+            )
+          )}
+        </div>
+        <div class="theme-text-secondary">
+          <span class="font-medium">Total remaining:</span> {formatTime(
+            Object.values(filteredGroupedReportWorks).reduce((sum, g: any) => {
+              const rem = reportGroupRemainingHoursStdMinusMaxTill(g);
+              return sum + (rem != null && Number.isFinite(rem) ? rem : 0);
+            }, 0)
+          )}
         </div>
         <div class="theme-text-secondary">
           <span class="font-medium">Completed:</span> {allDraftReports.filter(r => r.completion_status === 'C').length}
@@ -1056,7 +1118,9 @@
           <span class="font-medium">Not Completed:</span> {allDraftReports.filter(r => r.completion_status === 'NC').length}
         </div>
         <div class="theme-text-secondary">
-          <span class="font-medium">Total Lost Time:</span> {allDraftReports.reduce((sum, r) => sum + (r.lt_minutes_total || 0), 0)} minutes
+          <span class="font-medium">Total lost time:</span> {formatTime(
+            allDraftReports.reduce((sum, r) => sum + (Number(r.lt_minutes_total) || 0), 0) / 60
+          )}
         </div>
       </div>
     </div>

@@ -1,8 +1,9 @@
 <script lang="ts">
   import { supabase } from '$lib/supabaseClient';
-  import type { Worker, SelectedWorker, RowTimeOverride, ShiftInfo } from '$lib/types/planWork';
+  import type { Worker, SelectedWorker, RowTimeOverride, ShiftInfo, PlanningSlotDeviation } from '$lib/types/planWork';
   import { getSkillShort, getIndividualSkills, getWorkerSlotKey } from '$lib/utils/planWorkUtils';
   import PlanWorkRowCustomTimes from './PlanWorkRowCustomTimes.svelte';
+  import PlanningSlotDeviationFields from './PlanningSlotDeviationFields.svelte';
 
   export let work: any = null;
   export let availableWorkers: Worker[] = [];
@@ -22,6 +23,8 @@
   export let onTraineeReasonChange: (reason: string) => void = () => {};
   export let onSkillMappingChange: (index: number) => void = () => {};
   export let excludePlanIds: number[] = []; // Plan IDs to exclude from conflict checks (for edit mode)
+  export let planningSlotDeviations: Record<string, PlanningSlotDeviation> = {};
+  export let onPlanningDeviationChange: (slotKey: string, next: PlanningSlotDeviation | null) => void = () => {};
 
   // Track which workers are already assigned to other work plans at the same time
   let workersAssignedToOtherPlans: Set<string> = new Set();
@@ -188,8 +191,9 @@
                         </label>
                         <select
                           id="worker-{skill.sc_name}-{individualSkill}-{skillIndex}"
-                          class="w-full px-3 py-2 border theme-border rounded-lg theme-bg-primary theme-text-primary focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                          class="w-full px-3 py-2 border theme-border rounded-lg theme-bg-primary theme-text-primary focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-60"
                           value={selectedWorkerForThisSkill?.emp_id || ''}
+                          disabled={!!planningSlotDeviations[currentSkillKey]?.noWorker}
                           on:change={(e) => onWorkerChange(e, currentSkillKey)}
                         >
                           <option value="">Choose a worker for {individualSkill}...</option>
@@ -232,6 +236,11 @@
                           globalToTime={toTime}
                           onChange={onRowCustomTimesChange}
                         />
+                        <PlanningSlotDeviationFields
+                          idSuffix={currentSkillKey}
+                          deviation={planningSlotDeviations[currentSkillKey]}
+                          onDeviationChange={(next) => onPlanningDeviationChange(currentSkillKey, next)}
+                        />
                       </div>
                     {/each}
                   </div>
@@ -249,8 +258,9 @@
                   </label>
                   <select
                     id="worker-{skill.sc_name}"
-                    class="w-full px-3 py-2 border theme-border rounded-lg theme-bg-primary theme-text-primary focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    class="w-full px-3 py-2 border theme-border rounded-lg theme-bg-primary theme-text-primary focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-60"
                     value={selectedWorkerForThisSkill?.emp_id || ''}
+                    disabled={!!planningSlotDeviations[workerKey]?.noWorker}
                     on:change={(e) => onWorkerChange(e, workerKey)}
                   >
                     <option value="">Choose a worker for {skillShort || skill.sc_name}...</option>
@@ -275,6 +285,11 @@
                     globalFromTime={fromTime}
                     globalToTime={toTime}
                     onChange={onRowCustomTimesChange}
+                  />
+                  <PlanningSlotDeviationFields
+                    idSuffix={workerKey}
+                    deviation={planningSlotDeviations[workerKey]}
+                    onDeviationChange={(next) => onPlanningDeviationChange(workerKey, next)}
                   />
                 </div>
               {/if}
@@ -303,8 +318,9 @@
                       </label>
                       <select
                         id="worker-single-{individualSkill}-{skillIndex}"
-                        class="w-full px-3 py-2 border theme-border rounded-lg theme-bg-primary theme-text-primary focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        class="w-full px-3 py-2 border theme-border rounded-lg theme-bg-primary theme-text-primary focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-60"
                         value={selectedWorkerForThisSkill?.emp_id || ''}
+                        disabled={!!planningSlotDeviations[currentSkillKey]?.noWorker}
                         on:change={(e) => onWorkerChange(e, currentSkillKey)}
                       >
                         <option value="">Choose a worker for {individualSkill}...</option>
@@ -347,6 +363,11 @@
                         globalToTime={toTime}
                         onChange={onRowCustomTimesChange}
                       />
+                      <PlanningSlotDeviationFields
+                        idSuffix={currentSkillKey}
+                        deviation={planningSlotDeviations[currentSkillKey]}
+                        onDeviationChange={(next) => onPlanningDeviationChange(currentSkillKey, next)}
+                      />
                     </div>
                   {/each}
                 </div>
@@ -363,8 +384,9 @@
                 </label>
                 <select
                   id="worker-single-skill"
-                  class="w-full px-3 py-2 border theme-border rounded-lg theme-bg-primary theme-text-primary focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  class="w-full px-3 py-2 border theme-border rounded-lg theme-bg-primary theme-text-primary focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-60"
                   value={selectedWorkerForThisSkill?.emp_id || ''}
+                  disabled={!!planningSlotDeviations[workerKey]?.noWorker}
                   on:change={(e) => onWorkerChange(e, workerKey)}
                 >
                   <option value="">Choose a worker for {skillShort || skill.sc_name}...</option>
@@ -390,6 +412,11 @@
                   globalToTime={toTime}
                   onChange={onRowCustomTimesChange}
                 />
+                <PlanningSlotDeviationFields
+                  idSuffix={workerKey}
+                  deviation={planningSlotDeviations[workerKey]}
+                  onDeviationChange={(next) => onPlanningDeviationChange(workerKey, next)}
+                />
               </div>
             {/if}
           </div>
@@ -405,7 +432,9 @@
     </label>
     <select
       id="worker-select"
-      class="w-full px-3 py-2 border theme-border rounded-lg theme-bg-primary theme-text-primary focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+      class="w-full px-3 py-2 border theme-border rounded-lg theme-bg-primary theme-text-primary focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-60"
+      value={selectedWorkers[getWorkerSlotKey('GEN', 0)]?.emp_id || ''}
+      disabled={!!planningSlotDeviations[getWorkerSlotKey('GEN', 0)]?.noWorker}
       on:change={(e) => onWorkerChange(e, getWorkerSlotKey('GEN', 0))}
     >
       <option value="">Choose a worker...</option>
@@ -422,6 +451,11 @@
       globalFromTime={fromTime}
       globalToTime={toTime}
       onChange={onRowCustomTimesChange}
+    />
+    <PlanningSlotDeviationFields
+      idSuffix={getWorkerSlotKey('GEN', 0)}
+      deviation={planningSlotDeviations[getWorkerSlotKey('GEN', 0)]}
+      onDeviationChange={(next) => onPlanningDeviationChange(getWorkerSlotKey('GEN', 0), next)}
     />
   </div>
 {/if}

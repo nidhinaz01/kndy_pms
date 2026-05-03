@@ -6,12 +6,17 @@ import { supabase } from '$lib/supabaseClient';
 import { getCurrentUsername, getCurrentTimestamp } from '$lib/utils/userUtils';
 import { calculateBreakTimeInMinutes } from '$lib/utils/breakTimeUtils';
 import type { ManpowerCOffSave, ManpowerOTSave } from './productionTypes';
-import { getShiftHourLimitHours, validateManpowerOtCoffBalance } from '$lib/utils/shiftHourLimitUtils';
+import {
+  getShiftHourLimitHours,
+  MANPOWER_REPORT_NOTES_FULL_SHIFT_EPS,
+  validateManpowerOtCoffBalance
+} from '$lib/utils/shiftHourLimitUtils';
 import {
   attendanceClearsPlanReportFields,
   attendanceIsPresent,
   type ManpowerAttendanceStatus
 } from '$lib/utils/manpowerAttendanceStatus';
+import { validateHolidayManpowerOtCoff } from '$lib/utils/holidayAttendancePolicy';
 
 /**
  * Row date span for manpower attendance — same as planning_from/to / reporting_from/to.
@@ -119,7 +124,7 @@ async function validatePresentNetOtCoff(
 /**
  * Helper function to calculate full shift hours (shift duration minus breaks)
  */
-async function getFullShiftHours(shiftCode: string): Promise<{ fullShiftHours: number; shiftStartTime: string; shiftEndTime: string; error?: string }> {
+export async function getFullShiftHours(shiftCode: string): Promise<{ fullShiftHours: number; shiftStartTime: string; shiftEndTime: string; error?: string }> {
   try {
     // Get shift information
     const { data: shiftData, error: shiftError } = await supabase
@@ -196,7 +201,8 @@ export async function savePlannedAttendance(
   attendanceFromDate?: string | null,
   attendanceToDate?: string | null,
   cOff?: ManpowerCOffSave | null,
-  ot?: ManpowerOTSave | null
+  ot?: ManpowerOTSave | null,
+  holidayAttendance?: boolean
 ): Promise<{ success: boolean; error?: string }> {
   console.log('🔍 [savePlannedAttendance] Called with:', {
     empId,
@@ -246,18 +252,22 @@ export async function savePlannedAttendance(
         };
       }
 
-      // Validate: if planned_hours < full shift, notes is required
-      const shiftInfo = await getFullShiftHours(shiftCode);
-      if (plannedHours < shiftInfo.fullShiftHours) {
-        if (!notes || !notes.trim()) {
-          return { 
-            success: false, 
-            error: 'Reason is required for partial attendance (planned hours less than full shift)' 
-          };
+      // Validate: if planned_hours < full shift, notes is required (non-holiday only)
+      if (!holidayAttendance) {
+        const shiftInfo = await getFullShiftHours(shiftCode);
+        if (plannedHours < shiftInfo.fullShiftHours) {
+          if (!notes || !notes.trim()) {
+            return {
+              success: false,
+              error: 'Reason is required for partial attendance (planned hours less than full shift)'
+            };
+          }
         }
       }
 
-      const bal = await validatePresentNetOtCoff(attendanceStatus, plannedHours, cOff, ot);
+      const bal = holidayAttendance
+        ? validateHolidayManpowerOtCoff(plannedHours, cOff, ot)
+        : await validatePresentNetOtCoff(attendanceStatus, plannedHours, cOff, ot);
       if (!bal.ok) {
         return { success: false, error: bal.message };
       }
@@ -579,7 +589,8 @@ export async function saveReportedManpower(
   attendanceFromDate?: string | null,
   attendanceToDate?: string | null,
   cOff?: ManpowerCOffSave | null,
-  ot?: ManpowerOTSave | null
+  ot?: ManpowerOTSave | null,
+  holidayAttendance?: boolean
 ): Promise<{ success: boolean; error?: string }> {
   try {
     const currentUser = getCurrentUsername();
@@ -620,50 +631,25 @@ export async function saveReportedManpower(
         };
       }
 
-      // Get planned hours from planning (if exists)
-      let plannedHours: number | null = null;
-      try {
-        const { data: plannedAttendance } = await supabase
-          .from('prdn_planning_manpower')
-          .select('planned_hours')
-          .eq('emp_id', empId)
-          .eq('stage_code', stageCode)
-          .eq('shift_code', shiftCode)
-          .lte('planning_from_date', reportingDate)
-          .gte('planning_to_date', reportingDate)
-          .eq('attendance_status', 'present')
-          .eq('is_deleted', false)
-          .order('id', { ascending: false })
-          .limit(1)
-          .maybeSingle();
-        
-        plannedHours = plannedAttendance?.planned_hours || null;
-      } catch (error) {
-        console.warn('Could not fetch planned hours:', error);
-      }
+      if (!holidayAttendance) {
+        const shiftInfo = await getFullShiftHours(shiftCode);
+        const fullShiftHours = shiftInfo.fullShiftHours;
 
-      // Get full shift hours
-      const shiftInfo = await getFullShiftHours(shiftCode);
-      const fullShiftHours = shiftInfo.fullShiftHours;
-
-      // Validate: if actual_hours < planned_hours OR actual_hours < full_shift, notes is required
-      if (plannedHours !== null && actualHours < plannedHours) {
-        if (!notes || !notes.trim()) {
-          return { 
-            success: false, 
-            error: 'Reason is required for early out (actual hours less than planned hours)' 
-          };
-        }
-      } else if (actualHours < fullShiftHours) {
-        if (!notes || !notes.trim()) {
-          return { 
-            success: false, 
-            error: 'Reason is required for partial attendance (actual hours less than full shift)' 
-          };
+        // Reporting: require notes only when actual net hours are below nominal full shift —
+        // not when actual differs from plan-only planned_hours (users correct overstated plans).
+        if (actualHours < fullShiftHours - MANPOWER_REPORT_NOTES_FULL_SHIFT_EPS) {
+          if (!notes || !notes.trim()) {
+            return {
+              success: false,
+              error: 'Reason is required for partial attendance (actual hours less than full shift)'
+            };
+          }
         }
       }
 
-      const bal = await validatePresentNetOtCoff(attendanceStatus, actualHours, cOff, ot);
+      const bal = holidayAttendance
+        ? validateHolidayManpowerOtCoff(actualHours, cOff, ot)
+        : await validatePresentNetOtCoff(attendanceStatus, actualHours, cOff, ot);
       if (!bal.ok) {
         return { success: false, error: bal.message };
       }

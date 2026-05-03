@@ -65,8 +65,15 @@
       sortable_toDate: group.items?.[0]?.to_date || '',
       sortable_toTime: group.items?.[0]?.to_time || '',
       sortable_plannedHours: group.items?.[0]?.planned_hours || 0,
-      sortable_timeWorkedTillDate: group.items?.[0]?.time_worked_till_date || 0,
-      sortable_remainingTime: group.items?.[0]?.remainingTimeMinutes || 0
+      sortable_timeWorkedTillDate: (() => {
+        const items = group.items || [];
+        const tills = items.map((i: any) => Number(i?.time_worked_till_date) || 0);
+        return tills.length ? Math.max(...tills) : 0;
+      })(),
+      sortable_remainingTime: (group.items || []).reduce(
+        (s: number, i: any) => s + (Number(i?.remaining_time) || 0),
+        0
+      )
     }));
     
     return sortTableData(enriched, sortConfig);
@@ -214,6 +221,13 @@
     hasBlockingIssues;
   $: canEdit = !hasSubmission || isRejected || isReverted; // Can edit if no submission, rejected, or reverted
 
+  /** Submitted / Resubmitted / Approved: no pre-submit issues UI; validation uses draft rows only. */
+  $: hideDraftPlanIssuesSection = isPendingApproval || isApproved;
+
+  $: if (hideDraftPlanIssuesSection) {
+    showIssuesModal = false;
+  }
+
   async function loadValidationIssues(requestKey: string) {
     const requestStartedFor = requestKey;
     isValidationLoading = true;
@@ -256,6 +270,10 @@
     if (nextKey !== lastValidationRequestKey) {
       lastValidationRequestKey = nextKey;
       if (!stageCode || !shiftCode || !dateKey || isLoading) {
+        validationErrors = [];
+        validationWarnings = [];
+        isValidationLoading = false;
+      } else if (hideDraftPlanIssuesSection) {
         validationErrors = [];
         validationWarnings = [];
         isValidationLoading = false;
@@ -384,6 +402,57 @@
     }
     return 'N/A';
   }
+
+  /** Grouped row standard-time label: DB `std_time_hours` first, then VWF, then skill. */
+  function draftPlanStandardTimeCell(firstItem: any): string {
+    if (!firstItem) return 'N/A';
+    const raw = firstItem.std_time_hours;
+    if (raw != null && raw !== '' && Number.isFinite(Number(raw))) {
+      return formatTime(Number(raw));
+    }
+    const vwf = firstItem?.vehicleWorkFlow?.estimated_duration_minutes;
+    if (typeof vwf === 'number' && Number.isFinite(vwf) && vwf > 0) {
+      return formatTime(vwf / 60);
+    }
+    const skill = firstItem?.skillTimeStandard?.standard_time_minutes;
+    if (typeof skill === 'number' && Number.isFinite(skill) && skill > 0) {
+      return formatTime(skill / 60);
+    }
+    return 'N/A';
+  }
+
+  /** First row planned hours for footer total: `std_time_hours`, VWF, slot minus breaks, `planned_hours`, skill. */
+  function draftFirstItemTotalPlannedHoursForSummary(item: any): number {
+    if (!item) return 0;
+    const raw = item.std_time_hours;
+    if (raw != null && raw !== '' && Number.isFinite(Number(raw))) {
+      return Math.max(0, Number(raw));
+    }
+    const vwfMin = item?.vehicleWorkFlow?.estimated_duration_minutes;
+    if (typeof vwfMin === 'number' && Number.isFinite(vwfMin) && vwfMin > 0) {
+      return vwfMin / 60;
+    }
+    if (item.from_time && item.to_time) {
+      try {
+        const from = new Date(`2000-01-01T${item.from_time}`);
+        const to = new Date(`2000-01-01T${item.to_time}`);
+        if (to < from) to.setDate(to.getDate() + 1);
+        const totalHours = (to.getTime() - from.getTime()) / (1000 * 60 * 60);
+        const breakMinutes = calculateBreakTimeInRange(item.from_time, item.to_time, shiftBreakTimes);
+        return Math.max(0, totalHours - breakMinutes / 60);
+      } catch {
+        /* fall through */
+      }
+    }
+    if (item.planned_hours != null && item.planned_hours !== '' && Number.isFinite(Number(item.planned_hours))) {
+      return Math.max(0, Number(item.planned_hours));
+    }
+    const skill = item?.skillTimeStandard?.standard_time_minutes;
+    if (typeof skill === 'number' && Number.isFinite(skill) && skill > 0) {
+      return skill / 60;
+    }
+    return 0;
+  }
 </script>
 
 <div class="theme-bg-primary rounded-lg shadow border theme-border">
@@ -442,34 +511,36 @@
         class="w-full px-4 py-2 border theme-border rounded-lg theme-bg-primary theme-text-primary focus:ring-2 focus:ring-blue-500 focus:border-transparent"
       />
     </div>
-    <div class="mt-4">
-      {#if isValidationLoading}
-        <div class="rounded-lg border theme-border px-4 py-3 theme-bg-secondary">
-          <p class="text-sm theme-text-secondary">Checking plan issues...</p>
-        </div>
-      {:else if blockingIssues.length > 0}
-        <button
-          type="button"
-          class="w-full rounded-lg border border-red-300 dark:border-red-700 bg-red-50 dark:bg-red-900/10 px-4 py-3 text-left"
-          on:click={openIssuesModal}
-        >
-          <div class="flex items-center justify-between gap-2">
-            <p class="text-sm font-semibold text-red-700 dark:text-red-300">
-              Resolve all issues before submitting plan
-            </p>
-            <span class="text-xs text-red-700 dark:text-red-300">
-              {blockingIssues.length} issue{blockingIssues.length === 1 ? '' : 's'}
-            </span>
+    {#if !hideDraftPlanIssuesSection}
+      <div class="mt-4">
+        {#if isValidationLoading}
+          <div class="rounded-lg border theme-border px-4 py-3 theme-bg-secondary">
+            <p class="text-sm theme-text-secondary">Checking plan issues...</p>
           </div>
-        </button>
-      {:else}
-        <div class="rounded-lg border border-green-300 dark:border-green-700 bg-green-50 dark:bg-green-900/10 px-4 py-3">
-          <p class="text-sm text-green-700 dark:text-green-300">
-            No blocking issues found. Plan can be submitted.
-          </p>
-        </div>
-      {/if}
-    </div>
+        {:else if blockingIssues.length > 0}
+          <button
+            type="button"
+            class="w-full rounded-lg border border-red-300 dark:border-red-700 bg-red-50 dark:bg-red-900/10 px-4 py-3 text-left"
+            on:click={openIssuesModal}
+          >
+            <div class="flex items-center justify-between gap-2">
+              <p class="text-sm font-semibold text-red-700 dark:text-red-300">
+                Resolve all issues before submitting plan
+              </p>
+              <span class="text-xs text-red-700 dark:text-red-300">
+                {blockingIssues.length} issue{blockingIssues.length === 1 ? '' : 's'}
+              </span>
+            </div>
+          </button>
+        {:else}
+          <div class="rounded-lg border border-green-300 dark:border-green-700 bg-green-50 dark:bg-green-900/10 px-4 py-3">
+            <p class="text-sm text-green-700 dark:text-green-300">
+              No blocking issues found. Plan can be submitted.
+            </p>
+          </div>
+        {/if}
+      </div>
+    {/if}
   </div>
   
   <!-- Read-only notice -->
@@ -664,14 +735,7 @@
               </td>
               <td class="px-6 py-4 whitespace-nowrap text-sm theme-text-primary">
                 {#if typedGroup.items && typedGroup.items.length > 0}
-                  {@const firstItem = typedGroup.items[0]}
-                  {#if firstItem?.vehicleWorkFlow?.estimated_duration_minutes}
-                    {formatTime(firstItem.vehicleWorkFlow.estimated_duration_minutes / 60)}
-                  {:else if firstItem?.skillTimeStandard?.standard_time_minutes}
-                    {formatTime(firstItem.skillTimeStandard.standard_time_minutes / 60)}
-                  {:else}
-                    N/A
-                  {/if}
+                  {draftPlanStandardTimeCell(typedGroup.items[0])}
                 {:else}
                   N/A
                 {/if}
@@ -756,7 +820,7 @@
                 <div class="space-y-1">
                   {#each typedGroup.items as plannedWork}
                       <div class="font-medium">
-                        {plannedWork.time_worked_till_date ? formatTime(plannedWork.time_worked_till_date) : '0h 0m'}
+                        {formatTime(Number(plannedWork.time_worked_till_date) || 0)}
                       </div>
                   {/each}
                     </div>
@@ -808,32 +872,8 @@
         </div>
         <div class="theme-text-secondary">
           <span class="font-medium">Total Planned Hours:</span> {formatTime(Object.values(filteredGroupedPlannedWorks).reduce((sum, group) => {
-            // For each unique work, get the duration from the first item
-            // Use vehicle work flow duration if available, otherwise calculate from time range
             if (group.items && group.items.length > 0) {
-              const firstItem = group.items[0];
-              
-              // Try to get duration from vehicle work flow first
-              if (firstItem?.vehicleWorkFlow?.estimated_duration_minutes) {
-                return sum + (firstItem.vehicleWorkFlow.estimated_duration_minutes / 60);
-              }
-              
-              // Otherwise, calculate from the first item's time range
-              if (firstItem.from_time && firstItem.to_time) {
-                const from = new Date(`2000-01-01T${firstItem.from_time}`);
-                const to = new Date(`2000-01-01T${firstItem.to_time}`);
-                if (to < from) to.setDate(to.getDate() + 1);
-                const totalHours = (to.getTime() - from.getTime()) / (1000 * 60 * 60);
-                const breakMinutes = calculateBreakTimeInRange(firstItem.from_time, firstItem.to_time, shiftBreakTimes);
-                const breakHours = breakMinutes / 60;
-                const plannedHours = totalHours - breakHours;
-                return sum + Math.max(0, plannedHours);
-              }
-              
-              // Fallback to planned_hours if available
-              if (firstItem.planned_hours) {
-                return sum + firstItem.planned_hours;
-              }
+              return sum + draftFirstItemTotalPlannedHoursForSummary(group.items[0]);
             }
             return sum;
           }, 0))}

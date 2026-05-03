@@ -357,6 +357,71 @@ export function getWorkerSlotKey(skillShort: string, index: number): string {
   return `${normalizedSkill}-${normalizedIndex}`;
 }
 
+/** Each skill slot has a worker OR "no worker" deviation with reason (aligned with multi-skill reporting). */
+export function planSkillSlotsResolved(formData: PlanWorkFormData, work: any): boolean {
+  if (!work?.skill_mappings?.length) {
+    const key = getWorkerSlotKey('GEN', 0);
+    const w = formData.selectedWorkers[key];
+    const d = formData.planningSlotDeviations?.[key];
+    return !!(w?.emp_id) || !!(d?.noWorker && d.reason?.trim());
+  }
+  const idx = formData.selectedSkillMappingIndex >= 0 ? formData.selectedSkillMappingIndex : 0;
+  const mapping = work.skill_mappings[idx];
+  if (!mapping) return false;
+  const skills = getIndividualSkills(mapping);
+  return skills.every((skillShort, index) => {
+    const key = getWorkerSlotKey(skillShort, index);
+    const w = formData.selectedWorkers[key];
+    const d = formData.planningSlotDeviations?.[key];
+    return !!(w?.emp_id) || !!(d?.noWorker && d.reason?.trim());
+  });
+}
+
+/** Not every competency may be deviation-only; at least one real worker (same idea as reporting). */
+export function planSkillHasAtLeastOneAssignedWorker(formData: PlanWorkFormData, work: any): boolean {
+  if (!work?.skill_mappings?.length) {
+    return !!(formData.selectedWorkers[getWorkerSlotKey('GEN', 0)]?.emp_id);
+  }
+  const idx = formData.selectedSkillMappingIndex >= 0 ? formData.selectedSkillMappingIndex : 0;
+  const mapping = work.skill_mappings[idx];
+  if (!mapping) return false;
+  const skills = getIndividualSkills(mapping);
+  return skills.some((skillShort, index) => {
+    const key = getWorkerSlotKey(skillShort, index);
+    return !!(formData.selectedWorkers[key]?.emp_id);
+  });
+}
+
+/**
+ * Match saved draft rows to canonical slot keys (US-0, T-1, …) for edit/re-save.
+ * Ignores trainee notes-rows.
+ */
+export function buildExistingPlansBySlotKey(
+  existingDraftPlans: any[],
+  selectedSkillMapping: any
+): Map<string, any> {
+  const map = new Map<string, any>();
+  if (!existingDraftPlans?.length || !selectedSkillMapping) return map;
+  const plans = existingDraftPlans.filter((p: any) => {
+    const n = p?.notes;
+    return !(typeof n === 'string' && n.trim().startsWith('Trainee:'));
+  });
+  const individualSkills = getIndividualSkills(selectedSkillMapping);
+  const consumed = new Set<number>();
+  individualSkills.forEach((skillShort, index) => {
+    const slotKey = getWorkerSlotKey(skillShort, index);
+    const pi = plans.findIndex(
+      (p: any, i: number) =>
+        !consumed.has(i) && String(p.sc_required || '').trim() === String(skillShort).trim()
+    );
+    if (pi >= 0) {
+      consumed.add(pi);
+      map.set(slotKey, plans[pi]);
+    }
+  });
+  return map;
+}
+
 /**
  * Stable identity for a Works-tab row / Plan Work session.
  * Includes WO line, standard-work id, and work code so two competencies on the same WO

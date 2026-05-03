@@ -4,8 +4,7 @@ import type { LostTimeReason } from '$lib/api/lostTimeReasons';
 import { getEffectiveRowTimes } from '$lib/utils/planWorkUtils';
 import { netHoursWorkedForReportingRow } from '$lib/utils/multiSkillReportUtils';
 import { multiSkillHasAtLeastOneAssignedWorker } from '$lib/utils/multiSkillReportValidation';
-import { calculatePieceRateForPlanning } from './pieceRateCalculationService';
-
+import { getVehicleWorkFlowStandardTimeHours } from '$lib/utils/standardTimeFromWork';
 function isTraineePlanningRow(work: any): boolean {
   const n = work.notes ?? work.prdn_work_planning?.notes;
   return typeof n === 'string' && n.trim().startsWith('Trainee:');
@@ -277,23 +276,6 @@ export async function saveMultiSkillReports(
     // Combine updated and newly inserted reports
     const savedReports = [...updatedReports, ...(insertResult.data || [])];
     
-    // Calculate piece rate for all planning_ids if any report is completed
-    const completedPlanningIds = new Set<number>();
-    savedReports.forEach((report: any) => {
-      if (report.completion_status === 'C') {
-        completedPlanningIds.add(report.planning_id);
-      }
-    });
-
-    // Calculate piece rate for each completed planning
-    for (const planningId of completedPlanningIds) {
-      const pieceRateResult = await calculatePieceRateForPlanning(planningId);
-      if (!pieceRateResult.success) {
-        console.warn(`Piece rate calculation failed for planning ${planningId}:`, pieceRateResult.error);
-        // Don't fail the save, just log the warning
-      }
-    }
-    
     // Create deviation records for skills with deviations
     const deviationsToCreate: Array<{
       reporting_id: number;
@@ -389,7 +371,13 @@ export async function saveMultiSkillReports(
       if (!stageCode || !woDetailsId) {
         return { success: false, error: 'Missing required work information for trainee planning.' };
       }
-      
+
+      const traineeStdTimeHours = !derivedSwCode
+        ? null
+        : (firstWork.std_time_hours ??
+            getVehicleWorkFlowStandardTimeHours(firstWork) ??
+            null);
+
       for (let ti = 0; ti < formData.selectedTrainees.length; ti++) {
         const trainee = formData.selectedTrainees[ti];
         const eff = getEffectiveRowTimes(`trainee-${ti}`, formData);
@@ -451,8 +439,9 @@ export async function saveMultiSkillReports(
           to_date: eff.toDate,
           to_time: eff.toTime,
           planned_hours: rowHours,
-          time_worked_till_date: 0,
+          time_worked_till_date: rowHours,
           remaining_time: rowHours,
+          std_time_hours: traineeStdTimeHours,
           status: 'approved' as const,
           notes: `Trainee: ${trainee.emp_name} - Added during reporting`,
           wsm_id: null
@@ -467,7 +456,7 @@ export async function saveMultiSkillReports(
           from_time: eff.fromTime,
           to_date: eff.toDate,
           to_time: eff.toTime,
-          hours_worked_till_date: 0,
+          hours_worked_till_date: rowHours,
           hours_worked_today: rowHours,
           completion_status: formData.completionStatus,
           lt_minutes_total: 0,
@@ -572,7 +561,7 @@ export async function updatePlanningStatus(
       const { error } = await supabase
         .from('prdn_work_planning')
         .update({
-          time_worked_till_date: report.completion_status === 'NC' ? totalHoursWorked : 0,
+          time_worked_till_date: totalHoursWorked,
           remaining_time: remainingTime,
           modified_by: currentUser,
           modified_dt: now

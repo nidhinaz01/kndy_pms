@@ -18,6 +18,25 @@
   import { groupReportWorks } from '../[stage_Shift]/utils/planTabUtils';
   import { prefersExternalPdfOpen } from '$lib/utils/pdfViewerDevice';
   import { exportReportReviewExcel } from './utils/exportReportReviewExcel';
+  import { getEmbeddedStandardTimeMinutes } from '$lib/utils/standardTimeFromWork';
+
+  function worksReportRemainingMinutes(
+    report: any,
+    vehicleWorkFlow: any | null,
+    skillTimeStandard: any | null
+  ): number | null {
+    const std = getEmbeddedStandardTimeMinutes({
+      ...report,
+      ...report.prdn_work_planning,
+      vehicleWorkFlow,
+      skillTimeStandard
+    });
+    if (std == null) return null;
+    return Math.max(
+      0,
+      std - ((report.hours_worked_till_date || 0) + (report.hours_worked_today || 0)) * 60
+    );
+  }
 
   let showSidebar = false;
   let menus: any[] = [];
@@ -445,7 +464,13 @@
           }
 
           if (!matchingWsm) {
-            return { ...report, skillTimeStandard: null, skillMapping: null, vehicleWorkFlow: vehicleWorkFlow };
+            return {
+              ...report,
+              skillTimeStandard: null,
+              skillMapping: null,
+              vehicleWorkFlow: vehicleWorkFlow,
+              remainingTimeMinutes: worksReportRemainingMinutes(report, vehicleWorkFlow, null)
+            };
           }
 
           // Get skill time standard
@@ -464,12 +489,11 @@
             console.error('Error fetching skill time standard:', error);
           }
           
-          // Calculate remaining time
-          let remainingTimeMinutes = null;
-          if (skillTimeStandard && skillTimeStandard.standard_time_minutes) {
-            const totalWorkedMinutes = ((report.hours_worked_till_date || 0) + (report.hours_worked_today || 0)) * 60;
-            remainingTimeMinutes = Math.max(0, skillTimeStandard.standard_time_minutes - totalWorkedMinutes);
-          }
+          const remainingTimeMinutes = worksReportRemainingMinutes(
+            report,
+            vehicleWorkFlow,
+            skillTimeStandard
+          );
 
           return {
             ...report,

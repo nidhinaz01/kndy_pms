@@ -17,6 +17,8 @@ export interface ManpowerTableState {
   showJourneyModal: boolean;
   showWorksModal: boolean;
   showBulkAttendanceModal: boolean;
+  /** When true, Manpower Plan uses holiday bulk modal instead of standard bulk modal */
+  showHolidayBulkAttendanceModal: boolean;
   selectedEmployee: ProductionEmployee | null;
   bulkAttendanceStatus: ManpowerAttendanceStatus;
   bulkNotes: string;
@@ -53,6 +55,7 @@ export const initialManpowerTableState: ManpowerTableState = {
   showJourneyModal: false,
   showWorksModal: false,
   showBulkAttendanceModal: false,
+  showHolidayBulkAttendanceModal: false,
   selectedEmployee: null,
   bulkAttendanceStatus: 'present',
   bulkNotes: '',

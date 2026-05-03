@@ -125,10 +125,14 @@ export async function fetchProductionWorks(stage: string, selectedDate: string):
           to_date,
           to_time,
           prdn_work_planning!inner(
+            id,
             derived_sw_code,
             other_work_code,
             stage_code,
             wo_details_id,
+            wsm_id,
+            sc_required,
+            std_time_hours,
             hr_emp!inner(skill_short)
           )
         `;

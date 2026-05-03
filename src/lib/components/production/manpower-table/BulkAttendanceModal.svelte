@@ -6,7 +6,12 @@
   import { calculateBreakTimeInMinutes } from '$lib/utils/breakTimeUtils';
   import { computeCOffToEndWithBreaks } from '$lib/utils/cOffWindowUtils';
   import { validateCOffWithinAttendanceWindow } from '$lib/utils/attendanceCOffSpanUtils';
-  import { getShiftHourLimitHours, validateManpowerOtCoffBalance } from '$lib/utils/shiftHourLimitUtils';
+  import {
+    getShiftHourLimitHours,
+    MANPOWER_COFF_OT_BALANCE_EPS,
+    MANPOWER_REPORT_NOTES_FULL_SHIFT_EPS,
+    validateManpowerOtCoffBalance
+  } from '$lib/utils/shiftHourLimitUtils';
   import {
     attendanceClearsPlanReportFields,
     attendanceIsPresent,
@@ -51,6 +56,13 @@
   let isLoadingShiftInfo = false;
   let shiftHourLimitHours: number = 8;
 
+  /** Only reset bound props / load shift once per open — avoids Svelte 5 bind feedback loops */
+  let bulkShiftLoadedForOpen = false;
+
+  $: if (!showModal) {
+    bulkShiftLoadedForOpen = false;
+  }
+
   $: if (attendanceClearsPlanReportFields(bulkAttendanceStatus)) {
     bulkCOffValue = 0;
     bulkCOffFromDate = '';
@@ -76,7 +88,8 @@
   $: bulkOtNum = bulkOtNumeric(bulkOtHours);
   $: bulkShowOtDateTimeFields = attendanceIsPresent(bulkAttendanceStatus) && bulkOtNum > 0;
 
-  $: if (attendanceIsPresent(bulkAttendanceStatus)) {
+  /** Only while modal is open — avoids bind churn with parent state when modal is closed (Svelte 5 depth errors). */
+  $: if (showModal && attendanceIsPresent(bulkAttendanceStatus)) {
     if (bulkOtNum > 0) {
       const d = bulkDayStr();
       if (d) {
@@ -104,9 +117,31 @@
     bulkCOffToTime = toTime;
   }
 
-  // Calculate if notes is required
+  // Calculate if notes is required (compare net hours to nominal full shift only)
   $: isNotesRequired =
-    attendanceIsPresent(bulkAttendanceStatus) && plannedHours !== null && plannedHours < fullShiftHours;
+    attendanceIsPresent(bulkAttendanceStatus) &&
+    plannedHours !== null &&
+    plannedHours < fullShiftHours - MANPOWER_REPORT_NOTES_FULL_SHIFT_EPS;
+
+  /** When net hours ≤ shift hour limit, C‑Off/OT must be zero — run imperatively (not `$:`) to avoid bind feedback loops. */
+  function maybeClearBulkOtCoffWhenNetAtOrBelowLimit() {
+    if (!attendanceIsPresent(bulkAttendanceStatus)) return;
+    if (plannedHours == null || !Number.isFinite(plannedHours)) return;
+    if (!Number.isFinite(shiftHourLimitHours)) return;
+    if (plannedHours - shiftHourLimitHours > MANPOWER_COFF_OT_BALANCE_EPS) return;
+    if (bulkCOffValue <= 0 && bulkOtNumeric(bulkOtHours) <= 0) return;
+    bulkCOffValue = 0;
+    bulkCOffFromDate = '';
+    bulkCOffFromTime = '';
+    bulkCOffToDate = '';
+    bulkCOffToTime = '';
+    bulkOtHours = 0;
+    bulkOtFromDate = '';
+    bulkOtFromTime = '';
+    bulkOtToDate = '';
+    bulkOtToTime = '';
+  }
+
   $: notesLabel = isNotesRequired
     ? 'Reason (Required for partial attendance):'
     : 'Notes (Optional):';
@@ -187,6 +222,7 @@
       if (bulkCOffValue > 0 && bulkCOffFromDate?.trim() && bulkCOffFromTime?.trim()) {
         syncBulkCOffToEndFromStart();
       }
+      maybeClearBulkOtCoffWhenNetAtOrBelowLimit();
     }
   }
 
@@ -209,19 +245,21 @@
       const breakMinutes = calculateBreakTimeInMinutes(fromTime, toTime, shiftBreaks);
 
       plannedHours = Math.max(0, (durationMinutes - breakMinutes) / 60);
+      maybeClearBulkOtCoffWhenNetAtOrBelowLimit();
     } catch (error) {
       console.error('Error calculating hours:', error);
       plannedHours = null;
     }
   }
 
-  // Watch time changes to recalculate hours
-  $: if (fromTime && toTime && attendanceIsPresent(bulkAttendanceStatus)) {
+  // Watch time changes to recalculate hours (only when modal is open — closed modal still had bound times → feedback loop)
+  $: if (showModal && fromTime && toTime && attendanceIsPresent(bulkAttendanceStatus)) {
     calculateHoursFromTimes();
   }
 
-  // Reset and load shift info when modal opens
-  $: if (showModal && shiftCode) {
+  // Reset and load shift info once when modal opens (not on every reactive flush while open)
+  $: if (showModal && shiftCode && !bulkShiftLoadedForOpen) {
+    bulkShiftLoadedForOpen = true;
     fromTime = '';
     toTime = '';
     plannedHours = null;

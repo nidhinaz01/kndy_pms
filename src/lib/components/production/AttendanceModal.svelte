@@ -6,7 +6,12 @@
   import { calculateBreakTimeInMinutes } from '$lib/utils/breakTimeUtils';
   import { computeCOffToEndWithBreaks } from '$lib/utils/cOffWindowUtils';
   import { validateCOffWithinAttendanceWindow } from '$lib/utils/attendanceCOffSpanUtils';
-  import { getShiftHourLimitHours, validateManpowerOtCoffBalance } from '$lib/utils/shiftHourLimitUtils';
+  import {
+    getShiftHourLimitHours,
+    MANPOWER_COFF_OT_BALANCE_EPS,
+    MANPOWER_REPORT_NOTES_FULL_SHIFT_EPS,
+    validateManpowerOtCoffBalance
+  } from '$lib/utils/shiftHourLimitUtils';
   import {
     attendanceClearsPlanReportFields,
     attendanceIsPresent,
@@ -68,14 +73,13 @@
   let isLoadingShiftInfo = false;
 
   // Calculate if notes is required
-  // For planning: if plannedHours < fullShiftHours
-  // For reporting: if actualHours < plannedHours OR actualHours < fullShiftHours
+  // Planning: plannedHours below nominal full shift
+  // Reporting: actualHours below nominal full shift only (ignore plan-only planned_hours — users fix overstated plans)
   $: currentHours = isPlanningMode ? plannedHours : actualHours;
-  $: isNotesRequired = attendanceIsPresent(attendanceStatus) && currentHours !== null && (
-    isPlanningMode 
-      ? currentHours < fullShiftHours
-      : (currentHours < (employee?.planned_hours ?? fullShiftHours) || currentHours < fullShiftHours)
-  );
+  $: isNotesRequired =
+    attendanceIsPresent(attendanceStatus) &&
+    currentHours !== null &&
+    currentHours < fullShiftHours - MANPOWER_REPORT_NOTES_FULL_SHIFT_EPS;
   $: notesLabel = isNotesRequired 
     ? 'Reason (Required for partial attendance):' 
     : 'Notes (Optional):';
@@ -134,6 +138,29 @@
     otToTime = '';
     attendanceFromDate = '';
     attendanceToDate = '';
+  }
+
+  // Reporting: when net actual hours are at or below the shift hour limit, C‑Off/OT must be zero (clear carry-over from plan)
+  // (use otHoursNumeric(otHours) not otHoursNum here to avoid a Svelte 5 cyclical $: dependency)
+  $: if (
+    !isPlanningMode &&
+    attendanceIsPresent(attendanceStatus) &&
+    actualHours != null &&
+    Number.isFinite(actualHours) &&
+    Number.isFinite(shiftHourLimitHours) &&
+    actualHours - shiftHourLimitHours <= MANPOWER_COFF_OT_BALANCE_EPS &&
+    (cOffValue > 0 || otHoursNumeric(otHours) > 0)
+  ) {
+    cOffValue = 0;
+    cOffFromDate = '';
+    cOffFromTime = '';
+    cOffToDate = '';
+    cOffToTime = '';
+    otHours = 0;
+    otFromDate = '';
+    otFromTime = '';
+    otToDate = '';
+    otToTime = '';
   }
 
   $: if (showModal && employee && attendanceIsPresent(attendanceStatus) && selectedDate) {
@@ -510,11 +537,11 @@
 
     // Validate notes if required
     if (isNotesRequired && !notes.trim()) {
-      if (isPlanningMode) {
-        alert('Reason is required for partial attendance (hours less than full shift)');
-      } else {
-        alert('Reason is required for early out (actual hours less than planned hours or full shift)');
-      }
+      alert(
+        isPlanningMode
+          ? 'Reason is required for partial attendance (hours less than full shift)'
+          : 'Reason is required for partial attendance (actual hours less than full shift)'
+      );
       return;
     }
 

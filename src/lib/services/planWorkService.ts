@@ -1,7 +1,50 @@
 import { supabase } from '$lib/supabaseClient';
 import type { Worker, WorkContinuation, ShiftInfo } from '$lib/types/planWork';
+import { attendanceIsAbsent } from '$lib/utils/manpowerAttendanceStatus';
+import { getEmbeddedStandardTimeMinutes } from '$lib/utils/standardTimeFromWork';
 
 const PAGE_SIZE = 1000;
+
+/**
+ * Employees marked absent (informed/uninformed, or legacy `absent`) in Manpower Draft for this
+ * stage/shift/date. Not listed here => treat as present or not yet marked — both stay selectable in Plan Work.
+ */
+export async function getEmpIdsAbsentInPlanningManpowerDraft(
+  stageCode: string,
+  shiftCode: string,
+  planningDate: string
+): Promise<Set<string>> {
+  if (!stageCode || !shiftCode || !planningDate) return new Set();
+
+  try {
+    const { data, error } = await supabase
+      .from('prdn_planning_manpower')
+      .select('emp_id, attendance_status')
+      .eq('stage_code', stageCode)
+      .eq('shift_code', shiftCode)
+      .lte('planning_from_date', planningDate)
+      .gte('planning_to_date', planningDate)
+      .eq('status', 'draft')
+      .eq('is_deleted', false);
+
+    if (error) {
+      console.error('getEmpIdsAbsentInPlanningManpowerDraft:', error);
+      return new Set();
+    }
+
+    const absent = new Set<string>();
+    for (const row of data || []) {
+      const id = row?.emp_id != null ? String(row.emp_id) : '';
+      if (id && attendanceIsAbsent(row.attendance_status)) {
+        absent.add(id);
+      }
+    }
+    return absent;
+  } catch (e) {
+    console.error('getEmpIdsAbsentInPlanningManpowerDraft:', e);
+    return new Set();
+  }
+}
 
 export async function loadWorkers(stageCode: string): Promise<Worker[]> {
   if (!stageCode) return [];
@@ -124,7 +167,7 @@ export async function loadWorkContinuation(
       return sum + (report.hours_worked_till_date || 0);
     }, 0);
 
-    const estimatedDurationMinutes = work.std_vehicle_work_flow?.estimated_duration_minutes || 0;
+    const estimatedDurationMinutes = getEmbeddedStandardTimeMinutes(work) ?? 0;
     const estimatedDurationHours = estimatedDurationMinutes / 60;
     const remainingTime = Math.max(0, estimatedDurationHours - timeWorkedTillDate);
 

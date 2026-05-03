@@ -1,4 +1,5 @@
 import { supabase } from '$lib/supabaseClient';
+import { getEmbeddedStandardTimeMinutes } from '$lib/utils/standardTimeFromWork';
 
 /**
  * Shared utility for batch enriching work/plan/report data
@@ -234,6 +235,41 @@ export async function batchFetchEnrichmentData(
 }
 
 /**
+ * Remaining minutes = embedded standard (vehicleWorkFlow first, same as Plan / Report modal) minus worked hours.
+ */
+function computeRemainingTimeMinutesEnriched(
+  item: any,
+  planningRecord: any,
+  vehicleWorkFlow: any | null,
+  skillTimeStandard: any | null
+): number {
+  const merged = {
+    ...item,
+    ...planningRecord,
+    vehicleWorkFlow: vehicleWorkFlow ?? item.vehicleWorkFlow,
+    skillTimeStandard:
+      skillTimeStandard ?? item.skillTimeStandard ?? planningRecord?.skill_time_standard,
+    std_vehicle_work_flow:
+      vehicleWorkFlow ?? item.std_vehicle_work_flow ?? planningRecord?.std_vehicle_work_flow,
+    skill_time_standards: item.skill_time_standards ?? planningRecord?.skill_time_standards,
+    skill_time_standard: item.skill_time_standard ?? planningRecord?.skill_time_standard
+  };
+  const standardMins = getEmbeddedStandardTimeMinutes(merged);
+  if (standardMins == null) return 0;
+
+  const hoursTill =
+    item.hours_worked_till_date ??
+    planningRecord?.hours_worked_till_date ??
+    item.time_worked_till_date ??
+    planningRecord?.time_worked_till_date;
+  if (hoursTill === undefined || hoursTill === null) return 0;
+
+  const hoursToday = item.hours_worked_today ?? planningRecord?.hours_worked_today ?? 0;
+  const workedHours = (Number(hoursTill) || 0) + (Number(hoursToday) || 0);
+  return Math.max(0, standardMins - workedHours * 60);
+}
+
+/**
  * Enrich a single work/plan/report item using pre-fetched batch data
  */
 export function enrichItem(
@@ -289,7 +325,8 @@ export function enrichItem(
       skillTimeStandard: null,
       skillMapping: null,
       vehicleWorkFlow: vehicleWorkFlow,
-      workAdditionData: workAdditionData
+      workAdditionData: workAdditionData,
+      remainingTimeMinutes: computeRemainingTimeMinutesEnriched(item, planningRecord, vehicleWorkFlow, null)
     };
   }
 
@@ -299,7 +336,8 @@ export function enrichItem(
       skillTimeStandard: null,
       skillMapping: null,
       vehicleWorkFlow: vehicleWorkFlow,
-      workAdditionData: workAdditionData
+      workAdditionData: workAdditionData,
+      remainingTimeMinutes: computeRemainingTimeMinutesEnriched(item, planningRecord, vehicleWorkFlow, null)
     };
   }
 
@@ -326,7 +364,8 @@ export function enrichItem(
       skillTimeStandard: null,
       skillMapping: null,
       vehicleWorkFlow: vehicleWorkFlow,
-      workAdditionData: workAdditionData
+      workAdditionData: workAdditionData,
+      remainingTimeMinutes: computeRemainingTimeMinutesEnriched(item, planningRecord, vehicleWorkFlow, null)
     };
   }
 
@@ -338,13 +377,12 @@ export function enrichItem(
   const planningWsm = planningRecord.std_work_skill_mapping;
   const finalSkillMapping = planningWsm || matchingWsm;
 
-  // Calculate remaining time (if applicable)
-  let remainingTimeMinutes = 0;
-  if (skillTimeStandard && item.hours_worked_till_date !== undefined) {
-    const hoursWorkedTillDate = item.hours_worked_till_date || 0;
-    const hoursWorkedToday = item.hours_worked_today || 0;
-    remainingTimeMinutes = Math.max(0, skillTimeStandard.standard_time_minutes - ((hoursWorkedTillDate + hoursWorkedToday) * 60));
-  }
+  const remainingTimeMinutes = computeRemainingTimeMinutesEnriched(
+    item,
+    planningRecord,
+    vehicleWorkFlow,
+    skillTimeStandard
+  );
 
   return {
     ...item,

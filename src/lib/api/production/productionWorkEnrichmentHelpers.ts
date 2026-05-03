@@ -1,5 +1,9 @@
 import type { ProductionWork } from './productionTypes';
 import { getWorkDisplayCode } from '$lib/utils/workDisplayUtils';
+import {
+  getEmbeddedStandardTimeMinutes,
+  getVehicleWorkFlowStandardTimeHours
+} from '$lib/utils/standardTimeFromWork';
 
 export function createLookupMaps(
   workTypesData: any[],
@@ -261,6 +265,31 @@ export function enrichWorksWithData(
   return allEnrichedWorks;
 }
 
+function resolveWorksDurationHours(work: ProductionWork, hasReports: boolean, reportingData: any[]): number {
+  const vwfHours =
+    getVehicleWorkFlowStandardTimeHours(work) ??
+    (() => {
+      const m = getEmbeddedStandardTimeMinutes(work as any);
+      return m != null && m > 0 ? Math.round((m / 60) * 100) / 100 : 0;
+    })();
+
+  if (!hasReports) {
+    return vwfHours;
+  }
+
+  const stdFromPlans = reportingData
+    .map((r) => r.prdn_work_planning?.std_time_hours)
+    .filter((v) => v != null && v !== '' && Number.isFinite(Number(v)));
+  if (stdFromPlans.length === 0) {
+    return vwfHours;
+  }
+  return Math.round(Math.max(...stdFromPlans.map((v) => Number(v))) * 100) / 100;
+}
+
+/**
+ * Works tab metrics (decimal hours). `time_taken` = max across competencies of max
+ * `hours_worked_till_date` per competency (no sum across skills). `remaining_time` = max(0, duration − time_taken).
+ */
 export function enrichWorksWithTimeData(
   allEnrichedWorks: ProductionWork[],
   reportingDataMap: Map<string, any[]>
@@ -271,25 +300,39 @@ export function enrichWorksWithTimeData(
 
     const key = `${workCode}_${work.wo_details_id}`;
     const reportingData = reportingDataMap.get(key) || [];
+    const hasReports = reportingData.length > 0;
 
-    const hoursWorkedTodayValues = reportingData.map(report => report.hours_worked_today || 0).filter(h => h > 0);
-    const averageTimeWorked = hoursWorkedTodayValues.length > 0 
-      ? hoursWorkedTodayValues.reduce((sum, hours) => sum + hours, 0) / hoursWorkedTodayValues.length
-      : 0;
+    const tillByCompetency = new Map<string, number>();
+    for (const report of reportingData) {
+      const p = report.prdn_work_planning;
+      const label = String(p?.sc_required || p?.hr_emp?.skill_short || 'Unknown').trim() || 'Unknown';
+      const till = Number(report.hours_worked_till_date) || 0;
+      const prev = tillByCompetency.get(label) ?? 0;
+      if (till > prev) tillByCompetency.set(label, till);
+    }
 
-    const skillTimeBreakdown = reportingData.reduce((breakdown, report) => {
-      const skillShort = report.prdn_work_planning?.hr_emp?.skill_short;
-      if (!skillShort) return breakdown;
-      
-      const skillTime = (report.hours_worked_till_date || 0) + (report.hours_worked_today || 0);
-      breakdown[skillShort] = (breakdown[skillShort] || 0) + skillTime;
-      return breakdown;
-    }, {} as { [skill: string]: number });
+    const competencyVals = [...tillByCompetency.values()];
+    const timeTakenHours =
+      competencyVals.length > 0 ? Math.round(Math.max(...competencyVals) * 100) / 100 : 0;
+
+    const skillTimeBreakdown: { [skill: string]: number } = {};
+    tillByCompetency.forEach((hours, skill) => {
+      skillTimeBreakdown[skill] = hours;
+    });
+
+    const worksDurationHours = resolveWorksDurationHours(work, hasReports, reportingData);
+    const remainingTime = Math.max(0, Math.round((worksDurationHours - timeTakenHours) * 100) / 100);
+    const timeExceeded = worksDurationHours > 0 && timeTakenHours > worksDurationHours;
 
     return {
       ...work,
-      time_taken: averageTimeWorked,
-      skill_time_breakdown: skillTimeBreakdown
+      time_taken: timeTakenHours,
+      skill_time_breakdown: skillTimeBreakdown,
+      works_duration_hours: worksDurationHours,
+      remaining_time: remainingTime,
+      time_exceeded: timeExceeded,
+      duration: worksDurationHours,
+      __worksMetricsComputed: true
     };
   });
 }

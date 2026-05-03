@@ -53,8 +53,15 @@
       sortable_toDate: group.items?.[0]?.to_date || '',
       sortable_toTime: group.items?.[0]?.to_time || '',
       sortable_plannedHours: group.items?.[0]?.planned_hours || 0,
-      sortable_timeWorkedTillDate: group.items?.[0]?.time_worked_till_date || 0,
-      sortable_remainingTime: group.items?.[0]?.remainingTimeMinutes || 0
+      sortable_timeWorkedTillDate: (() => {
+        const items = group.items || [];
+        const tills = items.map((i: any) => Number(i?.time_worked_till_date) || 0);
+        return tills.length ? Math.max(...tills) : 0;
+      })(),
+      sortable_remainingTime: (group.items || []).reduce(
+        (s: number, i: any) => s + (Number(i?.remaining_time) || 0),
+        0
+      )
     }));
     
     return sortTableData(enriched, sortConfig);
@@ -189,6 +196,57 @@
     const parts = timePart.split(':');
     if (parts.length < 2) return value;
     return `${parts[0]}:${parts[1]}`;
+  }
+
+  /** Grouped row standard-time label: DB `std_time_hours` first, then VWF, then skill. */
+  function planTabStandardTimeCell(firstItem: any): string {
+    if (!firstItem) return 'N/A';
+    const raw = firstItem.std_time_hours;
+    if (raw != null && raw !== '' && Number.isFinite(Number(raw))) {
+      return formatTime(Number(raw));
+    }
+    const vwf = firstItem?.vehicleWorkFlow?.estimated_duration_minutes;
+    if (typeof vwf === 'number' && Number.isFinite(vwf) && vwf > 0) {
+      return formatTime(vwf / 60);
+    }
+    const skill = firstItem?.skillTimeStandard?.standard_time_minutes;
+    if (typeof skill === 'number' && Number.isFinite(skill) && skill > 0) {
+      return formatTime(skill / 60);
+    }
+    return 'N/A';
+  }
+
+  /** Per planning row: hours for footer total — `std_time_hours`, VWF, slot minus breaks, `planned_hours`, skill. */
+  function planRowPlannedHoursForFooter(item: any): number {
+    if (!item) return 0;
+    const raw = item.std_time_hours;
+    if (raw != null && raw !== '' && Number.isFinite(Number(raw))) {
+      return Math.max(0, Number(raw));
+    }
+    const vwfMin = item?.vehicleWorkFlow?.estimated_duration_minutes;
+    if (typeof vwfMin === 'number' && Number.isFinite(vwfMin) && vwfMin > 0) {
+      return vwfMin / 60;
+    }
+    if (item.from_time && item.to_time) {
+      try {
+        const from = new Date(`2000-01-01T${item.from_time}`);
+        const to = new Date(`2000-01-01T${item.to_time}`);
+        if (to < from) to.setDate(to.getDate() + 1);
+        const totalHours = (to.getTime() - from.getTime()) / (1000 * 60 * 60);
+        const breakMinutes = calculateBreakTimeInRange(item.from_time, item.to_time, shiftBreakTimes);
+        return Math.max(0, totalHours - breakMinutes / 60);
+      } catch {
+        /* fall through */
+      }
+    }
+    if (item.planned_hours != null && item.planned_hours !== '' && Number.isFinite(Number(item.planned_hours))) {
+      return Math.max(0, Number(item.planned_hours));
+    }
+    const skill = item?.skillTimeStandard?.standard_time_minutes;
+    if (typeof skill === 'number' && Number.isFinite(skill) && skill > 0) {
+      return skill / 60;
+    }
+    return 0;
   }
 </script>
 
@@ -403,14 +461,7 @@
               </td>
               <td class="px-6 py-4 whitespace-nowrap text-sm theme-text-primary">
                 {#if typedGroup.items && typedGroup.items.length > 0}
-                  {@const firstItem = typedGroup.items[0]}
-                  {#if firstItem?.vehicleWorkFlow?.estimated_duration_minutes}
-                    {formatTime(firstItem.vehicleWorkFlow.estimated_duration_minutes / 60)}
-                  {:else if firstItem?.skillTimeStandard?.standard_time_minutes}
-                    {formatTime(firstItem.skillTimeStandard.standard_time_minutes / 60)}
-                  {:else}
-                    N/A
-                  {/if}
+                  {planTabStandardTimeCell(typedGroup.items[0])}
                 {:else}
                   N/A
                 {/if}
@@ -504,7 +555,7 @@
                 <div class="space-y-1">
                   {#each typedGroup.items as plannedWork}
                       <div class="font-medium">
-                        {plannedWork.time_worked_till_date ? formatTime(plannedWork.time_worked_till_date) : '0h 0m'}
+                        {formatTime(Number(plannedWork.time_worked_till_date) || 0)}
                       </div>
                   {/each}
                     </div>
@@ -561,27 +612,9 @@
           <span class="font-medium">Total Planned Works:</span> {totalPlans}
         </div>
         <div class="theme-text-secondary">
-          <span class="font-medium">Total Planned Hours:</span> {plannedWorksWithStatus.reduce((sum, work) => {
-            let plannedHours = work.planned_hours || 0;
-            if (plannedHours === 0 && work.from_time && work.to_time) {
-              const from = new Date(`2000-01-01T${work.from_time}`);
-              const to = new Date(`2000-01-01T${work.to_time}`);
-              if (to < from) to.setDate(to.getDate() + 1);
-              const totalHours = (to.getTime() - from.getTime()) / (1000 * 60 * 60);
-              const breakMinutes = calculateBreakTimeInRange(work.from_time, work.to_time, shiftBreakTimes);
-              const breakHours = breakMinutes / 60;
-              plannedHours = totalHours - breakHours;
-            } else if (plannedHours > 0 && work.from_time && work.to_time) {
-              const from = new Date(`2000-01-01T${work.from_time}`);
-              const to = new Date(`2000-01-01T${work.to_time}`);
-              if (to < from) to.setDate(to.getDate() + 1);
-              const totalHours = (to.getTime() - from.getTime()) / (1000 * 60 * 60);
-              const breakMinutes = calculateBreakTimeInRange(work.from_time, work.to_time, shiftBreakTimes);
-              const breakHours = breakMinutes / 60;
-              plannedHours = totalHours - breakHours;
-            }
-            return sum + Math.max(0, plannedHours);
-          }, 0).toFixed(1)}h
+          <span class="font-medium">Total Planned Hours:</span> {formatTime(
+            plannedWorksWithStatus.reduce((sum, work) => sum + planRowPlannedHoursForFooter(work), 0)
+          )}
         </div>
         <div class="theme-text-secondary">
           <span class="font-medium">Total Time Worked:</span> {formatTime(plannedWorksWithStatus.reduce((sum, work) => sum + (work.time_worked_till_date || 0), 0))}

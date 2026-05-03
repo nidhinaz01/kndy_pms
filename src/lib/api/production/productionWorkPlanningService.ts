@@ -11,6 +11,7 @@ export async function createWorkPlanning(planningData: CreateWorkPlanningData, c
         ...planningData,
         time_worked_till_date: planningData.time_worked_till_date || 0,
         remaining_time: planningData.remaining_time ?? 0,
+        std_time_hours: planningData.std_time_hours ?? null,
         status: planningData.status || 'planned',
         created_by: createdBy,
         created_dt: now,

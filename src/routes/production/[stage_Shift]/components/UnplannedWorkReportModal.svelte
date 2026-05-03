@@ -21,6 +21,7 @@
   import { supabase } from '$lib/supabaseClient';
   import { attendanceIsPresent } from '$lib/utils/manpowerAttendanceStatus';
   import { getWorkDisplayCode } from '$lib/utils/workDisplayUtils';
+  import { sortPlanningItemsBySkillOrder } from '../utils/planTabUtils';
   import { fetchSkillShorts } from '$lib/api/employee-api/employeeDropdownService';
   import WorkDetailsDisplay from '$lib/components/production/multi-skill-report/WorkDetailsDisplay.svelte';
   import EmployeeAssignment from '$lib/components/production/multi-skill-report/EmployeeAssignment.svelte';
@@ -77,6 +78,24 @@
   let nsPendingSkillShort = '';
   let nsRowSeq = 0;
 
+  /** Per-skill standard time from enriched work; matches Plan (vehicle is on the work, set below). */
+  function pickSkillTimeStandardForVirtualSkill(work: any, skillShort: string) {
+    const vals = work?.skill_time_standards?.values;
+    if (Array.isArray(vals) && vals.length) {
+      const match = vals.find(
+        (v: any) =>
+          String(v.skill_short || '').toLowerCase() === String(skillShort || '').toLowerCase()
+      );
+      if (match && typeof match.standard_time_minutes === 'number') {
+        return { standard_time_minutes: match.standard_time_minutes };
+      }
+    }
+    if (work?.skillTimeStandard?.standard_time_minutes != null) {
+      return work.skillTimeStandard;
+    }
+    return null;
+  }
+
   function createNsVirtualWorkRow(
     sw: any,
     repDate: string,
@@ -106,7 +125,10 @@
       from_date: repDate || '',
       from_time: '08:00',
       to_date: repDate || '',
-      to_time: '17:00'
+      to_time: '17:00',
+      vehicleWorkFlow: sw.vehicleWorkFlow ?? sw.std_vehicle_work_flow,
+      std_vehicle_work_flow: sw.std_vehicle_work_flow ?? sw.vehicleWorkFlow,
+      skillTimeStandard: pickSkillTimeStandardForVirtualSkill(sw, skillShort)
     };
   }
 
@@ -358,8 +380,9 @@
         if (!wid) continue;
         if (map[wid] !== undefined) continue;
 
-        const totalHours = (Number(r.hours_worked_till_date) || 0) + (Number(r.hours_worked_today) || 0);
-        map[wid] = r.completion_status === 'NC' ? totalHours : 0;
+        const till = Number(r.hours_worked_till_date) || 0;
+        const today = Number(r.hours_worked_today) || 0;
+        map[wid] = till > 0 ? till : till + today;
       }
 
       timeWorkedTillDateByWorker = map;
@@ -566,7 +589,10 @@
           from_date: reportingDate || '',
           from_time: '08:00',
           to_date: reportingDate || '',
-          to_time: '17:00'
+          to_time: '17:00',
+          vehicleWorkFlow: selectedWork.vehicleWorkFlow ?? selectedWork.std_vehicle_work_flow,
+          std_vehicle_work_flow: selectedWork.std_vehicle_work_flow ?? selectedWork.vehicleWorkFlow,
+          skillTimeStandard: selectedWork.skillTimeStandard ?? null
         }];
       }
 
@@ -658,7 +684,10 @@
         from_date: reportingDate || '',
         from_time: '08:00',
         to_date: reportingDate || '',
-        to_time: '17:00'
+        to_time: '17:00',
+        vehicleWorkFlow: selectedWork.vehicleWorkFlow ?? selectedWork.std_vehicle_work_flow,
+        std_vehicle_work_flow: selectedWork.std_vehicle_work_flow ?? selectedWork.vehicleWorkFlow,
+        skillTimeStandard: pickSkillTimeStandardForVirtualSkill(selectedWork, skillShort)
       };
     });
   }
@@ -731,9 +760,9 @@
 
   async function loadStandardTimeData() {
     if (!selectedWork || virtualWorks.length === 0) return;
-    console.log('⏱️ Loading standard time for virtualWorks:', virtualWorks.length, 'first work:', virtualWorks[0]);
-    // Create virtual works array for loadStandardTime
-    state.standardTimeMinutes = await loadStandardTime(virtualWorks);
+    const ordered = sortPlanningItemsBySkillOrder(virtualWorks);
+    console.log('⏱️ Loading standard time for virtualWorks:', ordered.length, 'first work:', ordered[0]);
+    state.standardTimeMinutes = await loadStandardTime(ordered);
     console.log('⏱️ Standard time loaded:', state.standardTimeMinutes, 'minutes');
   }
 

@@ -7,6 +7,13 @@ export interface ValidationResult {
   warnings: string[];
 }
 
+/** Sort key: text before first ": " (employee name on validation lines). */
+function reportingErrorSortKey(line: string): string {
+  const idx = line.indexOf(': ');
+  if (idx === -1) return line;
+  return line.slice(0, idx).trim();
+}
+
 /**
  * Calculate duration in minutes between two time strings (HH:MM or HH:MM:SS; seconds ignored)
  */
@@ -275,6 +282,10 @@ export async function validateEmployeeShiftReporting(
         );
       }
     });
+
+    errors.sort((a, b) =>
+      reportingErrorSortKey(a).localeCompare(reportingErrorSortKey(b), undefined, { sensitivity: 'base' })
+    );
 
     return {
       isValid: errors.length === 0,

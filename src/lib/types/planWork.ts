@@ -53,8 +53,16 @@ export interface RowTimeFormLike {
   rowTimeOverrides?: Record<string, RowTimeOverride>;
 }
 
+/** Per skill slot (e.g. US-0, T-1): optional "no worker" deviation like multi-skill reporting. */
+export interface PlanningSlotDeviation {
+  noWorker: boolean;
+  reason: string;
+}
+
 export interface PlanWorkFormData {
   selectedWorkers: { [skill: string]: SelectedWorker | null };
+  /** Key = getWorkerSlotKey(skill, index). When noWorker, worker may be unset for that slot. */
+  planningSlotDeviations: Record<string, PlanningSlotDeviation>;
   selectedTrainees: SelectedWorker[];
   traineeDeviationReason: string;
   fromDate: string;
@@ -82,6 +90,7 @@ export interface PlanWorkWarnings {
 
 export const initialPlanWorkFormData: PlanWorkFormData = {
   selectedWorkers: {},
+  planningSlotDeviations: {},
   selectedTrainees: [],
   traineeDeviationReason: '',
   fromDate: '',

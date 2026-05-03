@@ -3,13 +3,41 @@
   import Button from '$lib/components/common/Button.svelte';
   import { X } from 'lucide-svelte';
   import { supabase } from '$lib/supabaseClient';
-  import { calculateNetPlannedHours, autoCalculateEndTime, getIndividualSkills, getSkillShort, generateTimeSlots, getEffectiveRowTimes, getCanonicalPlanWorkKey, getWorkerSlotKey } from '$lib/utils/planWorkUtils';
+  import {
+    calculateNetPlannedHours,
+    autoCalculateEndTime,
+    getIndividualSkills,
+    getSkillShort,
+    generateTimeSlots,
+    getEffectiveRowTimes,
+    getCanonicalPlanWorkKey,
+    getWorkerSlotKey,
+    buildExistingPlansBySlotKey,
+    planSkillSlotsResolved,
+    planSkillHasAtLeastOneAssignedWorker
+  } from '$lib/utils/planWorkUtils';
   import { formatTime } from '$lib/utils/timeFormatUtils';
   import { checkTimeOverlap, checkTimeExcess, checkSkillMismatch } from '$lib/utils/planWorkValidation';
-  import { loadWorkers, loadWorkContinuation, loadExistingPlans, loadShiftInfo, checkAlternativeSkillCombinations } from '$lib/services/planWorkService';
+  import {
+    loadWorkers,
+    loadWorkContinuation,
+    loadExistingPlans,
+    loadShiftInfo,
+    checkAlternativeSkillCombinations,
+    getEmpIdsAbsentInPlanningManpowerDraft
+  } from '$lib/services/planWorkService';
   import { saveWorkPlanning } from '$lib/services/planWorkSaveService';
   import { checkWorkerConflicts, type WorkerAssignmentInterval } from '$lib/services/planWorkConflictService';
-  import type { Worker, SelectedWorker, WorkContinuation, ShiftInfo, PlanWorkWarnings, PlanWorkFormData, RowTimeOverride } from '$lib/types/planWork';
+  import type {
+    Worker,
+    SelectedWorker,
+    WorkContinuation,
+    ShiftInfo,
+    PlanWorkWarnings,
+    PlanWorkFormData,
+    RowTimeOverride,
+    PlanningSlotDeviation
+  } from '$lib/types/planWork';
   import { initialPlanWorkFormData, initialWarnings } from '$lib/types/planWork';
   import WorkDetailsDisplay from './plan-work/WorkDetailsDisplay.svelte';
   import WorkerSelection from './plan-work/WorkerSelection.svelte';
@@ -30,6 +58,8 @@
 
   // Modal state
   let isLoading = false;
+  /** Prevents overlapping save attempts (double-click / rapid taps). Same validation; no second concurrent run. */
+  let isSaving = false;
   let currentStep: 1 | 2 = 1; // Step 1: Time Selection, Step 2: Worker Selection
   let availableWorkers: Worker[] = [];
   let filteredAvailableWorkers: Worker[] = []; // Workers filtered by time availability
@@ -46,6 +76,7 @@
   let lastAutoCalculatedToTime: string | null = null;
   let originalDurationMinutes: number | null = null; // Track original duration when editing
   let savedSelectedWorkers: { [skill: string]: SelectedWorker | null } = {}; // Fix 4: Save workers when going back
+  let savedPlanningSlotDeviations: Record<string, PlanningSlotDeviation> = {};
   let userHasSelectedFromTime = false; // Track if user has manually selected fromTime
   let traineeAdditionPlanIds = new Set<number>();
   let traineeAdditionReasonByPlanId = new Map<number, string>();
@@ -88,6 +119,7 @@
       formData = {
         ...formData,
         selectedWorkers: {},
+        planningSlotDeviations: {},
         selectedTrainees: [],
         traineeDeviationReason: '',
         rowTimeOverrides: {}
@@ -111,7 +143,14 @@
         formData.toDate = selectedDate;
       }
       // Force a reactive update by creating a new object
-      formData = { ...formData, selectedWorkers: buildWorkerSlotMap(work, -1), selectedTrainees: [], traineeDeviationReason: '', rowTimeOverrides: {} };
+      formData = {
+        ...formData,
+        selectedWorkers: buildWorkerSlotMap(work, -1),
+        planningSlotDeviations: {},
+        selectedTrainees: [],
+        traineeDeviationReason: '',
+        rowTimeOverrides: {}
+      };
       filteredAvailableWorkers = [];
       savedSelectedWorkers = {};
       hasPrefilledWorkers = false;
@@ -151,13 +190,13 @@
       const isEditMode = work?.existingDraftPlans && Array.isArray(work.existingDraftPlans) && work.existingDraftPlans.length > 0;
       
       if (isEditMode) {
-        void loadTraineeAdditionMetadata(work.existingDraftPlans).then(() => {
+        void loadTraineeAdditionMetadata(work.existingDraftPlans).then(async () => {
           if (!isOpen || !work?.existingDraftPlans) return;
-          prefillFormFromExistingPlans(work.existingDraftPlans, true);
+          await prefillFormFromExistingPlans(work.existingDraftPlans, true);
         });
         // Pre-fill form with existing plan data (will be called again after workers load)
         // Don't prefill workers yet - wait for availableWorkers to load
-        prefillFormFromExistingPlans(work.existingDraftPlans, false);
+        void prefillFormFromExistingPlans(work.existingDraftPlans, false);
       } else {
         // Reset form and step for new planning
         // CRITICAL: Never reset formData.fromTime if user has manually selected it
@@ -174,6 +213,7 @@
             fromDate: savedFromDate,
             toDate: savedToDate,
             selectedWorkers: buildWorkerSlotMap(work, -1),
+            planningSlotDeviations: {},
             selectedTrainees: [],
             traineeDeviationReason: ''
           };
@@ -187,6 +227,7 @@
             fromTime: savedFromTime,
             toTime: savedToTime,
             selectedWorkers: buildWorkerSlotMap(work, -1),
+            planningSlotDeviations: {},
             selectedTrainees: [],
             traineeDeviationReason: ''
           };
@@ -219,9 +260,11 @@
   let hasPrefilledWorkers = false;
   $: if (work?.existingDraftPlans && Array.isArray(work.existingDraftPlans) && work.existingDraftPlans.length > 0 
       && availableWorkers.length > 0 && isOpen && !hasPrefilledWorkers) {
-    // Workers are now loaded, pre-fill them
-    prefillFormFromExistingPlans(work.existingDraftPlans, true);
     hasPrefilledWorkers = true;
+    void prefillFormFromExistingPlans(work.existingDraftPlans, true).catch((err) => {
+      console.error('prefillFormFromExistingPlans failed:', err);
+      hasPrefilledWorkers = false;
+    });
   }
   
   // Reset flag when modal closes or work changes
@@ -229,6 +272,7 @@
     previousIsOpen = false;
     hasPrefilledWorkers = false;
     savedSelectedWorkers = {}; // Fix 4: Clear saved workers when modal closes or work changes
+    savedPlanningSlotDeviations = {};
     // Next open must not think we are still on the last work (avoids skipped reset when keys collide)
     previousWorkId = null;
     traineeAdditionPlanIds = new Set<number>();
@@ -281,7 +325,7 @@
     return typeof n === 'string' && n.trim().startsWith('Trainee:');
   }
 
-  function prefillFormFromExistingPlans(existingPlans: any[], fillWorkers: boolean = true) {
+  async function prefillFormFromExistingPlans(existingPlans: any[], fillWorkers: boolean = true) {
     if (!existingPlans || existingPlans.length === 0) return;
 
     const mappingPlans = existingPlans.filter((p: any) => !isAdditionalTraineePlan(p));
@@ -518,9 +562,61 @@
         }
       });
     }
-    
+
+    const planningDeviations: Record<string, PlanningSlotDeviation> = {};
     if (fillWorkers) {
+      const nullWorkerPlanIds = mappingPlans
+        .filter((p: any) => !p.worker_id)
+        .map((p: any) => getPlanNumericId(p))
+        .filter((id: number | null): id is number => id !== null);
+
+      const reasonByPlanId = new Map<number, string>();
+      if (nullWorkerPlanIds.length > 0) {
+        const { data: nwRows, error: nwErr } = await supabase
+          .from('prdn_work_planning_deviations')
+          .select('planning_id, reason')
+          .eq('deviation_type', 'no_worker')
+          .eq('is_deleted', false)
+          .eq('is_active', true)
+          .in('planning_id', nullWorkerPlanIds);
+
+        if (nwErr) {
+          console.warn('Unable to load no-worker planning deviations:', nwErr);
+        }
+        for (const row of nwRows || []) {
+          const planningId = Number(row?.planning_id);
+          if (!Number.isFinite(planningId)) continue;
+          if (typeof row?.reason === 'string' && row.reason.trim()) {
+            reasonByPlanId.set(planningId, row.reason.trim());
+          }
+        }
+      }
+
+      if (selectedMapping) {
+        const slotMap = buildExistingPlansBySlotKey(mappingPlans, selectedMapping);
+        for (const [slotKey, plan] of slotMap) {
+          if (!plan.worker_id) {
+            const pid = getPlanNumericId(plan);
+            planningDeviations[slotKey] = {
+              noWorker: true,
+              reason: pid !== null ? reasonByPlanId.get(pid) || '' : ''
+            };
+          }
+        }
+      } else if (!work?.skill_mappings?.length && mappingPlans.length > 0) {
+        const plan = mappingPlans[0];
+        if (plan && !plan.worker_id) {
+          const slotKey = getWorkerSlotKey(plan.sc_required || 'GEN', 0);
+          const pid = getPlanNumericId(plan);
+          planningDeviations[slotKey] = {
+            noWorker: true,
+            reason: pid !== null ? reasonByPlanId.get(pid) || '' : ''
+          };
+        }
+      }
+
       formData.selectedWorkers = selectedWorkers;
+      formData.planningSlotDeviations = planningDeviations;
 
       const sortedTraineePlans = [...additionalTraineePlans].sort((a: any, b: any) => {
         const idA = Number(a.id ?? a.planning_id ?? 0);
@@ -567,19 +663,31 @@
         const gFrom = norm(formData.fromTime);
         const gTo = norm(formData.toTime);
         const overrides: Record<string, RowTimeOverride> = {};
-        for (const [key, sw] of Object.entries(selectedWorkers)) {
-          if (!sw || !(sw as SelectedWorker).emp_id) continue;
-          const skillShort = key.includes('-') ? key.split('-')[0] : key;
-          const plan = mappingPlans.find((p: any) => {
-            const wid = p.worker_id || p.hr_emp?.emp_id;
-            const sc = p.sc_required || p.hr_emp?.skill_short;
-            return wid === (sw as SelectedWorker).emp_id && sc === skillShort;
-          });
-          if (!plan?.from_time || !plan?.to_time) continue;
-          const pf = norm(plan.from_time);
-          const pt = norm(plan.to_time);
-          if (pf !== gFrom || pt !== gTo) {
-            overrides[key] = { useCustom: true, fromTime: pf, toTime: pt };
+        if (selectedMapping) {
+          const slotToPlan = buildExistingPlansBySlotKey(mappingPlans, selectedMapping);
+          for (const [slotKey, plan] of slotToPlan) {
+            if (!plan?.from_time || !plan?.to_time) continue;
+            const pf = norm(plan.from_time);
+            const pt = norm(plan.to_time);
+            if (pf !== gFrom || pt !== gTo) {
+              overrides[slotKey] = { useCustom: true, fromTime: pf, toTime: pt };
+            }
+          }
+        } else {
+          for (const [key, sw] of Object.entries(selectedWorkers)) {
+            if (!sw || !(sw as SelectedWorker).emp_id) continue;
+            const skillShort = key.includes('-') ? key.split('-')[0] : key;
+            const plan = mappingPlans.find((p: any) => {
+              const wid = p.worker_id || p.hr_emp?.emp_id;
+              const sc = p.sc_required || p.hr_emp?.skill_short;
+              return wid === (sw as SelectedWorker).emp_id && sc === skillShort;
+            });
+            if (!plan?.from_time || !plan?.to_time) continue;
+            const pf = norm(plan.from_time);
+            const pt = norm(plan.to_time);
+            if (pf !== gFrom || pt !== gTo) {
+              overrides[key] = { useCustom: true, fromTime: pf, toTime: pt };
+            }
           }
         }
         sortedTraineePlans.forEach((plan: any, ti: number) => {
@@ -619,6 +727,7 @@
   $: if (formData.selectedSkillMappingIndex !== previousSelectedSkillMappingIndex && previousSelectedSkillMappingIndex >= 0) {
     console.log('Clearing workers due to skill mapping change');
     formData.selectedWorkers = buildWorkerSlotMap(work, formData.selectedSkillMappingIndex);
+    formData.planningSlotDeviations = {};
     formData.rowTimeOverrides = {};
     previousSelectedSkillMappingIndex = formData.selectedSkillMappingIndex;
   } else if (formData.selectedSkillMappingIndex >= 0) {
@@ -890,6 +999,24 @@
     return availableWorkers.find(w => w.emp_id === empId);
   }
 
+  function handlePlanningDeviationChange(slotKey: string, next: PlanningSlotDeviation | null) {
+    const merged = { ...formData.planningSlotDeviations };
+    if (!next || !next.noWorker) {
+      delete merged[slotKey];
+    } else {
+      merged[slotKey] = next;
+    }
+    const workers = { ...formData.selectedWorkers };
+    if (next?.noWorker) {
+      delete workers[slotKey];
+    }
+    formData.planningSlotDeviations = merged;
+    formData.selectedWorkers = workers;
+    formData = { ...formData };
+    checkSkillMismatchValidation();
+    checkTimeOverlapValidation();
+  }
+
   function handleWorkerChange(event: Event, skillKey: string) {
     const target = event.target as HTMLSelectElement;
     const workerId = target.value;
@@ -917,6 +1044,9 @@
           // Reset the select to empty
           target.value = '';
           delete formData.selectedWorkers[skillKey];
+          const devDup = { ...formData.planningSlotDeviations };
+          delete devDup[skillKey];
+          formData.planningSlotDeviations = devDup;
           checkSkillMismatchValidation();
           checkTimeOverlapValidation();
           return;
@@ -925,6 +1055,9 @@
       
       // Worker is not already assigned, proceed with assignment
       formData.selectedWorkers[skillKey] = selectedWorker || null;
+      const devNext = { ...formData.planningSlotDeviations };
+      delete devNext[skillKey];
+      formData.planningSlotDeviations = devNext;
     } else {
       // No worker selected, remove the entry entirely
       delete formData.selectedWorkers[skillKey];
@@ -937,6 +1070,7 @@
   function handleSkillMappingChange(index: number) {
     formData.selectedSkillMappingIndex = index;
     formData.selectedWorkers = buildWorkerSlotMap(work, index);
+    formData.planningSlotDeviations = {};
     formData.rowTimeOverrides = {};
   }
 
@@ -1146,92 +1280,103 @@
   }
 
   async function handleSave() {
-    // Use dates from formData if available, otherwise fall back to selectedDate
-    const fromDate = formData.fromDate || selectedDate;
-    const toDate = formData.toDate || selectedDate;
-    
-    // Validate trainee reason if trainees are selected
-    if (formData.selectedTrainees && formData.selectedTrainees.length > 0) {
-      if (!formData.traineeDeviationReason || !formData.traineeDeviationReason.trim()) {
-        alert('Please provide a reason for adding trainees.');
-        return;
-      }
-    }
-
-    for (const [key, o] of Object.entries(formData.rowTimeOverrides || {})) {
-      if (o?.useCustom && (!o.fromTime?.trim() || !o.toTime?.trim())) {
-        alert(`Please complete custom from/to times for "${key}" or turn off custom times.`);
-        return;
-      }
-    }
-    
-    // First check if planning is blocked due to approved submission
-    // Check both fromDate and toDate to ensure planning is allowed for the date range
-    if (shiftCode && fromDate) {
-      const { isPlanningBlockedForStageShiftDate } = await import('$lib/api/production/productionWorkValidationService');
-      const blockCheck = await isPlanningBlockedForStageShiftDate(stageCode, shiftCode, fromDate);
-      if (blockCheck.isBlocked) {
-        alert(blockCheck.reason || 'Planning is blocked for this stage-shift-date combination.');
-        return;
-      }
-      
-      // Also check toDate if it's different from fromDate
-      if (toDate && toDate !== fromDate) {
-        const toDateBlockCheck = await isPlanningBlockedForStageShiftDate(stageCode, shiftCode, toDate);
-        if (toDateBlockCheck.isBlocked) {
-          alert(toDateBlockCheck.reason || 'Planning is blocked for the end date of this work.');
-          return;
-        }
-      }
-    }
-
-    if (warnings.hasAlternativePlanningConflict) {
-      alert(warnings.alternativeConflictDetails);
-      return;
-    }
-
-    const hasConflict = await checkWorkerConflictsValidation();
-    if (hasConflict) {
-      return;
-    }
-
-    if (warnings.showSkillMismatchWarning) {
-      const proceed = confirm(`${warnings.skillMismatchDetails}\n\nDo you want to proceed anyway?`);
-      if (!proceed) return;
-    }
-
-    if (warnings.showTimeOverlapWarning) {
-      const proceed = confirm(`${warnings.timeOverlapDetails}\n\nDo you want to proceed anyway?`);
-      if (!proceed) return;
-    }
-
-    if (warnings.showTimeExcessWarning) {
-      const proceed = confirm(`${warnings.timeExcessDetails}\n\nDo you want to proceed anyway?`);
-      if (!proceed) return;
-    }
-
+    if (isSaving) return;
+    isSaving = true;
     try {
       // Use dates from formData if available, otherwise fall back to selectedDate
       const fromDate = formData.fromDate || selectedDate;
       const toDate = formData.toDate || selectedDate;
-      
-      console.log('💾 Saving plan with dates:', { fromDate, toDate, fromTime: formData.fromTime, toTime: formData.toTime });
-      
-      const result = await saveWorkPlanning(
-        work,
-        formData,
-        workContinuation,
-        stageCode,
-        shiftCode,
-        fromDate,
-        toDate
-      );
-      
-      dispatch('save', result);
-      handleClose();
-    } catch (error) {
-      console.error('Error creating work planning:', error);
-      alert('Error creating work planning: ' + ((error as Error)?.message || 'Unknown error'));
+
+      // Validate trainee reason if trainees are selected
+      if (formData.selectedTrainees && formData.selectedTrainees.length > 0) {
+        if (!formData.traineeDeviationReason || !formData.traineeDeviationReason.trim()) {
+          alert('Please provide a reason for adding trainees.');
+          return;
+        }
+      }
+
+      for (const [key, o] of Object.entries(formData.rowTimeOverrides || {})) {
+        if (o?.useCustom && (!o.fromTime?.trim() || !o.toTime?.trim())) {
+          alert(`Please complete custom from/to times for "${key}" or turn off custom times.`);
+          return;
+        }
+      }
+
+      // First check if planning is blocked due to approved submission
+      // Check both fromDate and toDate to ensure planning is allowed for the date range
+      if (shiftCode && fromDate) {
+        const { isPlanningBlockedForStageShiftDate } = await import('$lib/api/production/productionWorkValidationService');
+        const blockCheck = await isPlanningBlockedForStageShiftDate(stageCode, shiftCode, fromDate);
+        if (blockCheck.isBlocked) {
+          alert(blockCheck.reason || 'Planning is blocked for this stage-shift-date combination.');
+          return;
+        }
+
+        // Also check toDate if it's different from fromDate
+        if (toDate && toDate !== fromDate) {
+          const toDateBlockCheck = await isPlanningBlockedForStageShiftDate(stageCode, shiftCode, toDate);
+          if (toDateBlockCheck.isBlocked) {
+            alert(toDateBlockCheck.reason || 'Planning is blocked for the end date of this work.');
+            return;
+          }
+        }
+      }
+
+      if (warnings.hasAlternativePlanningConflict) {
+        alert(warnings.alternativeConflictDetails);
+        return;
+      }
+
+      const hasConflict = await checkWorkerConflictsValidation();
+      if (hasConflict) {
+        return;
+      }
+
+      if (warnings.showSkillMismatchWarning) {
+        const proceed = confirm(`${warnings.skillMismatchDetails}\n\nDo you want to proceed anyway?`);
+        if (!proceed) return;
+      }
+
+      if (warnings.showTimeOverlapWarning) {
+        const proceed = confirm(`${warnings.timeOverlapDetails}\n\nDo you want to proceed anyway?`);
+        if (!proceed) return;
+      }
+
+      if (warnings.showTimeExcessWarning) {
+        const proceed = confirm(`${warnings.timeExcessDetails}\n\nDo you want to proceed anyway?`);
+        if (!proceed) return;
+      }
+
+      try {
+        // Use dates from formData if available, otherwise fall back to selectedDate
+        const saveFromDate = formData.fromDate || selectedDate;
+        const saveToDate = formData.toDate || selectedDate;
+
+        console.log('💾 Saving plan with dates:', {
+          fromDate: saveFromDate,
+          toDate: saveToDate,
+          fromTime: formData.fromTime,
+          toTime: formData.toTime
+        });
+
+        const result = await saveWorkPlanning(
+          work,
+          formData,
+          workContinuation,
+          stageCode,
+          shiftCode,
+          saveFromDate,
+          saveToDate
+        );
+
+        dispatch('save', result);
+        handleClose();
+      } catch (error) {
+        console.error('Error creating work planning:', error);
+        alert('Error creating work planning: ' + ((error as Error)?.message || 'Unknown error'));
+      }
+    } finally {
+      isSaving = false;
     }
   }
 
@@ -1266,14 +1411,19 @@
 
   // Filter workers based on time availability when moving to step 2
   async function filterWorkersByTimeAvailability() {
+    const absentInDraftManpower =
+      selectedDate && shiftCode
+        ? await getEmpIdsAbsentInPlanningManpowerDraft(stageCode, shiftCode, selectedDate)
+        : new Set<string>();
+    const dropAbsent = (list: Worker[]) =>
+      list.filter((w) => w.emp_id && !absentInDraftManpower.has(String(w.emp_id)));
+
     if (!selectedDate || !formData.fromTime || !formData.toTime) {
-      // Sort workers alphabetically
-      filteredAvailableWorkers = [...availableWorkers].sort((a, b) => {
+      filteredAvailableWorkers = dropAbsent([...availableWorkers]).sort((a, b) => {
         const nameA = (a.emp_name || '').toLowerCase();
         const nameB = (b.emp_name || '').toLowerCase();
         return nameA.localeCompare(nameB);
       });
-      // Ensure selected workers are included
       ensureSelectedWorkersInAvailable();
       return;
     }
@@ -1293,7 +1443,8 @@
         adjustedToMinutes += 24 * 60; // Handle overnight
       }
       
-      const workerIds = availableWorkers.map(w => w.emp_id);
+      const availableSansAbsent = dropAbsent(availableWorkers);
+      const workerIds = availableSansAbsent.map(w => w.emp_id);
       
       // First, get workers reassigned TO this stage during the selected time period
       const { data: reassignmentsTo, error: reassignToError } = await supabase
@@ -1333,8 +1484,9 @@
         }
       });
 
-      // Combine original workers with reassigned workers
-      const allWorkers = [...availableWorkers, ...reassignedWorkers];
+      const reassignedSansAbsent = dropAbsent(reassignedWorkers);
+      // Combine original workers with reassigned workers (exclude draft manpower absent)
+      const allWorkers = [...availableSansAbsent, ...reassignedSansAbsent];
       const allWorkerIds = allWorkers.map(w => w.emp_id);
       
       // Check existing work plans for all workers at the same time
@@ -1425,12 +1577,17 @@
       console.log(`✅ Filtered workers: ${filteredAvailableWorkers.length} available out of ${allWorkers.length} total (${reassignedWorkers.length} reassigned to stage)`);
     } catch (error) {
       console.error('Error filtering workers by time availability:', error);
-      // Sort workers alphabetically even on error
-      filteredAvailableWorkers = [...availableWorkers].sort((a, b) => {
-        const nameA = (a.emp_name || '').toLowerCase();
-        const nameB = (b.emp_name || '').toLowerCase();
-        return nameA.localeCompare(nameB);
-      });
+      const absentFallback =
+        selectedDate && shiftCode
+          ? await getEmpIdsAbsentInPlanningManpowerDraft(stageCode, shiftCode, selectedDate)
+          : new Set<string>();
+      filteredAvailableWorkers = [...availableWorkers]
+        .filter((w) => w.emp_id && !absentFallback.has(String(w.emp_id)))
+        .sort((a, b) => {
+          const nameA = (a.emp_name || '').toLowerCase();
+          const nameB = (b.emp_name || '').toLowerCase();
+          return nameA.localeCompare(nameB);
+        });
       ensureSelectedWorkersInAvailable();
     }
   }
@@ -1504,6 +1661,10 @@
       formData.selectedWorkers = { ...savedSelectedWorkers };
       savedSelectedWorkers = {}; // Clear saved workers after restoring
     }
+    if (Object.keys(savedPlanningSlotDeviations).length > 0) {
+      formData.planningSlotDeviations = { ...savedPlanningSlotDeviations };
+      savedPlanningSlotDeviations = {};
+    }
     
     // Ensure selected workers are in the available list (in case they were filtered out)
     ensureSelectedWorkersInAvailable();
@@ -1516,9 +1677,11 @@
   function goBackToTimeSelection() {
     // Fix 4: Save current worker selections before clearing them
     savedSelectedWorkers = { ...formData.selectedWorkers };
+    savedPlanningSlotDeviations = { ...formData.planningSlotDeviations };
     currentStep = 1;
     // Clear worker selections when going back
     formData.selectedWorkers = {};
+    formData.planningSlotDeviations = {};
   }
 </script>
 
@@ -1629,6 +1792,8 @@
                     {work}
                     availableWorkers={filteredAvailableWorkers}
                     selectedWorkers={formData.selectedWorkers}
+                    planningSlotDeviations={formData.planningSlotDeviations}
+                    onPlanningDeviationChange={handlePlanningDeviationChange}
                     selectedTrainees={formData.selectedTrainees}
                     traineeDeviationReason={formData.traineeDeviationReason}
                     selectedSkillMappingIndex={formData.selectedSkillMappingIndex}
@@ -1655,13 +1820,13 @@
         <div class="px-6 py-4 border-t theme-border flex justify-between">
           <div>
             {#if currentStep === 2}
-              <Button variant="secondary" on:click={goBackToTimeSelection}>
+              <Button variant="secondary" on:click={goBackToTimeSelection} disabled={isSaving}>
                 ← Back to Time Selection
               </Button>
             {/if}
           </div>
           <div class="flex space-x-3">
-          <Button variant="secondary" on:click={handleClose}>
+          <Button variant="secondary" on:click={handleClose} disabled={isSaving}>
             Cancel
           </Button>
             {#if currentStep === 1}
@@ -1677,11 +1842,13 @@
           variant="primary" 
           on:click={handleSave} 
           disabled={
-            Object.values(formData.selectedWorkers).filter(Boolean).length === 0 ||
+            isSaving ||
+            !planSkillSlotsResolved(formData, work) ||
+            !planSkillHasAtLeastOneAssignedWorker(formData, work) ||
             (formData.selectedTrainees.length > 0 && !formData.traineeDeviationReason.trim())
           }
         >
-            Save Plan
+            {isSaving ? 'Saving…' : 'Save Plan'}
           </Button>
             {/if}
           </div>

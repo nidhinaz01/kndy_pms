@@ -2,9 +2,12 @@
   import type { WorkContinuation } from '$lib/types/planWork';
   import { formatTime, getSkillShort } from '$lib/utils/planWorkUtils';
   import { getWorkDisplayCode, getWorkDisplayName } from '$lib/utils/workDisplayUtils';
+  import { getEmbeddedStandardTimeMinutes } from '$lib/utils/standardTimeFromWork';
 
   export let work: any = null;
   export let workContinuation: WorkContinuation;
+
+  $: standardTimeMinutes = work ? getEmbeddedStandardTimeMinutes(work) : null;
 </script>
 
 <!-- Work Details -->
@@ -38,16 +41,8 @@
     <div>
       <span class="theme-text-secondary">Standard Time:</span> 
       <span class="theme-text-primary">
-        {#if work?.std_vehicle_work_flow?.estimated_duration_minutes}
-          {formatTime(work.std_vehicle_work_flow.estimated_duration_minutes / 60)}
-        {:else if work?.skill_time_standards}
-          {#if work.skill_time_standards.isUniform && work.skill_time_standards.values.length > 0}
-            {formatTime(work.skill_time_standards.values[0].standard_time_minutes / 60)}
-          {:else if work.skill_time_standards.values.length > 0}
-            {formatTime(Math.max(...work.skill_time_standards.values.map((v: any) => v.standard_time_minutes)) / 60)}
-          {:else}
-            N/A
-          {/if}
+        {#if standardTimeMinutes !== null}
+          {formatTime(standardTimeMinutes / 60)}
         {:else}
           N/A
         {/if}

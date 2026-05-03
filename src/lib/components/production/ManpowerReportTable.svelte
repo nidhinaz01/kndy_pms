@@ -16,6 +16,11 @@
   import ManpowerReportTableBody from './manpower-report-table/ManpowerReportTableBody.svelte';
   import ManpowerReportTableSummary from './manpower-report-table/ManpowerReportTableSummary.svelte';
   import BulkAttendanceModal from './manpower-table/BulkAttendanceModal.svelte';
+  import HolidayAttendanceModal from './HolidayAttendanceModal.svelte';
+  import HolidayBulkAttendanceModal from './HolidayBulkAttendanceModal.svelte';
+  import { isDatePlanHoliday } from '$lib/utils/holidayAttendancePolicy';
+  import { getFullShiftHours } from '$lib/api/production/manpowerPlanningReportingService';
+  import { MANPOWER_REPORT_NOTES_FULL_SHIFT_EPS } from '$lib/utils/shiftHourLimitUtils';
 
   export let data: ProductionEmployee[] = [];
   export let isLoading: boolean = false;
@@ -25,6 +30,22 @@
   export let stageCode: string = '';
 
   const dispatch = createEventDispatcher();
+
+  let selectedDateIsHoliday = false;
+  let lastHolidayLookupDate: string | undefined;
+
+  /** Only when the date string changes — avoids duplicate async work + repeated invalidation from `selectedDateIsHoliday`. */
+  $: {
+    const d = selectedDate;
+    if (d !== lastHolidayLookupDate) {
+      lastHolidayLookupDate = d;
+      isDatePlanHoliday(d).then((isH) => {
+        selectedDateIsHoliday = isH;
+      });
+    }
+  }
+
+  let useHolidayAttendanceModal = false;
 
   let filters: ManpowerTableFilters = { ...initialManpowerTableFilters };
   let state: ManpowerTableState = { ...initialManpowerTableState };
@@ -91,7 +112,11 @@
       alert('Please select at least one employee to mark attendance.');
       return;
     }
-    state.showBulkAttendanceModal = true;
+    if (selectedDateIsHoliday) {
+      state.showHolidayBulkAttendanceModal = true;
+    } else {
+      state.showBulkAttendanceModal = true;
+    }
     state.bulkAttendanceStatus = 'present';
     state.bulkNotes = '';
     state.bulkFromTime = '';
@@ -110,17 +135,27 @@
     state.bulkOtToTime = '';
   }
 
-  function handleBulkAttendanceSubmit() {
+  async function handleBulkAttendanceSubmit() {
     if (state.selectedEmployees.size === 0) {
       alert('No employees selected.');
       return;
     }
 
-    // Validate notes if required for partial attendance
-    if (state.bulkAttendanceStatus === 'present' && state.bulkPlannedHours !== null && state.bulkPlannedHours < 8) {
-      if (!state.bulkNotes.trim()) {
-        alert('Reason is required for partial attendance (hours less than full shift)');
-        return;
+    if (!selectedDateIsHoliday && state.bulkAttendanceStatus === 'present' && state.bulkPlannedHours !== null) {
+      let fullShiftHours = 8;
+      if (shiftCode) {
+        try {
+          const shiftInfo = await getFullShiftHours(shiftCode);
+          fullShiftHours = shiftInfo.fullShiftHours;
+        } catch {
+          /* keep fallback */
+        }
+      }
+      if (state.bulkPlannedHours < fullShiftHours - MANPOWER_REPORT_NOTES_FULL_SHIFT_EPS) {
+        if (!state.bulkNotes.trim()) {
+          alert('Reason is required for partial attendance (hours less than full shift)');
+          return;
+        }
       }
     }
     state.isBulkSubmitting = true;
@@ -135,7 +170,8 @@
       date: selectedDate,
       status: state.bulkAttendanceStatus,
       shiftCode: shiftCode,
-      notes: state.bulkNotes.trim() || undefined
+      notes: state.bulkNotes.trim() || undefined,
+      holidayAttendance: selectedDateIsHoliday
     };
 
     // Add time/hours fields only for present employees
@@ -184,11 +220,13 @@
     state.bulkOtToDate = '';
     state.bulkOtToTime = '';
     state.showBulkAttendanceModal = false;
+    state.showHolidayBulkAttendanceModal = false;
     state.isBulkSubmitting = false;
   }
 
   function closeBulkAttendanceModal() {
     state.showBulkAttendanceModal = false;
+    state.showHolidayBulkAttendanceModal = false;
     state.bulkAttendanceStatus = 'present';
     state.bulkNotes = '';
     state.bulkFromTime = '';
@@ -210,6 +248,7 @@
     // Find the latest employee data from the table (in case it was refreshed)
     const latestEmployee = data.find(e => e.emp_id === employee.emp_id) || employee;
     state.selectedEmployee = { ...latestEmployee };
+    useHolidayAttendanceModal = selectedDateIsHoliday;
     state.showAttendanceModal = true;
   }
 
@@ -278,6 +317,7 @@
   function closeAttendanceModal() {
     state.showAttendanceModal = false;
     state.selectedEmployee = null;
+    useHolidayAttendanceModal = false;
   }
 
   function closeReassignmentModal() {
@@ -360,14 +400,25 @@
     </div>
   {/if}
 
-  <AttendanceModal
-    showModal={state.showAttendanceModal}
-    employee={state.selectedEmployee}
-    {selectedDate}
-    isPlanningMode={false}
-    on:attendanceMarked={handleAttendanceMarked}
-    on:close={closeAttendanceModal}
-  />
+  {#if useHolidayAttendanceModal}
+    <HolidayAttendanceModal
+      showModal={state.showAttendanceModal}
+      employee={state.selectedEmployee}
+      {selectedDate}
+      isPlanningMode={false}
+      on:attendanceMarked={handleAttendanceMarked}
+      on:close={closeAttendanceModal}
+    />
+  {:else}
+    <AttendanceModal
+      showModal={state.showAttendanceModal}
+      employee={state.selectedEmployee}
+      {selectedDate}
+      isPlanningMode={false}
+      on:attendanceMarked={handleAttendanceMarked}
+      on:close={closeAttendanceModal}
+    />
+  {/if}
 
   <StageReassignmentModal
     showModal={state.showReassignmentModal}
@@ -402,6 +453,34 @@
     {selectedCount}
     {selectedDate}
     {shiftCode}
+    bulkAttendanceStatus={state.bulkAttendanceStatus}
+    bulkNotes={state.bulkNotes}
+    bind:fromTime={state.bulkFromTime}
+    bind:toTime={state.bulkToTime}
+    bind:plannedHours={state.bulkPlannedHours}
+    bind:bulkCOffValue={state.bulkCOffValue}
+    bind:bulkCOffFromDate={state.bulkCOffFromDate}
+    bind:bulkCOffFromTime={state.bulkCOffFromTime}
+    bind:bulkCOffToDate={state.bulkCOffToDate}
+    bind:bulkCOffToTime={state.bulkCOffToTime}
+    bind:bulkOtHours={state.bulkOtHours}
+    bind:bulkOtFromDate={state.bulkOtFromDate}
+    bind:bulkOtFromTime={state.bulkOtFromTime}
+    bind:bulkOtToDate={state.bulkOtToDate}
+    bind:bulkOtToTime={state.bulkOtToTime}
+    isSubmitting={state.isBulkSubmitting}
+    onStatusChange={(status) => state.bulkAttendanceStatus = status}
+    onNotesChange={(notes) => state.bulkNotes = notes}
+    onSubmit={handleBulkAttendanceSubmit}
+    onClose={closeBulkAttendanceModal}
+  />
+
+  <HolidayBulkAttendanceModal
+    showModal={state.showHolidayBulkAttendanceModal}
+    {selectedCount}
+    {selectedDate}
+    {shiftCode}
+    reportingMode={true}
     bulkAttendanceStatus={state.bulkAttendanceStatus}
     bulkNotes={state.bulkNotes}
     bind:fromTime={state.bulkFromTime}

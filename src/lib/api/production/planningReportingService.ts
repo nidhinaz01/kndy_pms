@@ -531,6 +531,32 @@ export async function getDraftWorkReports(
 }
 
 /**
+ * Count of non-deleted work reporting rows for stage / shift / reporting date (any `status`).
+ * Plan Review uses this to block reverting an approved plan when any such row exists (Draft Report scope).
+ */
+export async function countDraftWorkReportsForStageShiftDate(
+  stageCode: string,
+  reportingDate: string,
+  shiftCode: string
+): Promise<number> {
+  const dateStr =
+    typeof reportingDate === 'string' ? reportingDate.split('T')[0] : String(reportingDate || '').split('T')[0];
+  const shift = (shiftCode || '').trim();
+  if (!stageCode?.trim() || !shift || !dateStr) return 0;
+
+  const { count, error } = await supabase
+    .from('prdn_work_reporting')
+    .select('id, prdn_work_planning!inner(stage_code, shift_code)', { count: 'exact', head: true })
+    .eq('prdn_work_planning.stage_code', stageCode)
+    .eq('prdn_work_planning.shift_code', shift)
+    .eq('from_date', dateStr)
+    .eq('is_deleted', false);
+
+  if (error) throw error;
+  return count ?? 0;
+}
+
+/**
  * Get draft manpower reports for a stage and date
  */
 export async function getDraftManpowerReports(

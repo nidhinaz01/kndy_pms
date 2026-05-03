@@ -1,6 +1,7 @@
 import type { WorksTableFilters, WorkStatus } from '$lib/types/worksTable';
 import { formatTimeFromMinutes } from './timeFormatUtils';
 import { getWorkDisplayCode, getWorkDisplayName } from './workDisplayUtils';
+import { getEmbeddedStandardTimeMinutes } from '$lib/utils/standardTimeFromWork';
 
 export function parseTimeToHours(timeStr: string | number): number {
   if (typeof timeStr === 'number') return timeStr;
@@ -127,28 +128,26 @@ export function applyFilters(
 }
 
 export function enrichWorkData(work: any): any {
-  // Use vehicle work flow duration if available, otherwise try skill time standards
-  let duration = work.std_vehicle_work_flow?.estimated_duration_minutes || 0;
-  
-  // If no vehicle work flow duration, try to get from skill time standards
-  if (!duration && work.skill_time_standards) {
-    if (work.skill_time_standards.isUniform && work.skill_time_standards.values.length > 0) {
-      // All values are the same, use the first one
-      duration = work.skill_time_standards.values[0].standard_time_minutes;
-    } else if (work.skill_time_standards.values.length > 0) {
-      // Different values, use the maximum (or could use sum depending on requirement)
-      duration = Math.max(...work.skill_time_standards.values.map((v: any) => v.standard_time_minutes));
-    }
+  if (work.__worksMetricsComputed) {
+    const dh = Number(work.works_duration_hours) || 0;
+    const tt = Number(work.time_taken) || 0;
+    return {
+      ...work,
+      duration: dh,
+      time_exceeded: dh > 0 && tt > dh
+    };
   }
-  
+
+  const duration = getEmbeddedStandardTimeMinutes(work) ?? 0;
   const durationHours = duration / 60;
   const timeTakenHours = work.time_taken || 0;
   const remainingTime = Math.max(0, durationHours - timeTakenHours);
-  
+
   return {
     ...work,
     remaining_time: remainingTime,
-    time_exceeded: timeTakenHours > durationHours
+    time_exceeded: timeTakenHours > durationHours,
+    duration: durationHours
   };
 }
 

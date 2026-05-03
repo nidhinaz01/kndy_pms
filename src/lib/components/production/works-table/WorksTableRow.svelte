@@ -1,17 +1,10 @@
 <script lang="ts">
   import Button from '$lib/components/common/Button.svelte';
-  import { formatTime, getWorkId } from '$lib/utils/worksTableUtils';
+  import { getWorkId } from '$lib/utils/worksTableUtils';
+  import { formatTimeVerbose } from '$lib/utils/timeFormatUtils';
   import { getWorkDisplayCode, getWorkDisplayName } from '$lib/utils/workDisplayUtils';
   import type { WorkPlanningStatus, WorkStatus } from '$lib/types/worksTable';
   const WORK_NAME_PREVIEW_LENGTH = 30;
-
-  // Format minutes to "x Hr y Min" format
-  function formatTimeVerbose(minutes: number): string {
-    if (!minutes) return '0 Hr 0 Min';
-    const hours = Math.floor(minutes / 60);
-    const mins = minutes % 60;
-    return `${hours} Hr ${mins} Min`;
-  }
 
   export let work: any;
   export let isSelected: boolean = false;
@@ -146,18 +139,21 @@
     {/if}
   </td>
   <td class="px-6 py-4 whitespace-nowrap text-sm {isSelected ? 'text-gray-900 dark:text-gray-100' : 'theme-text-primary'}">
-    {#if work.std_vehicle_work_flow?.estimated_duration_minutes}
-      {formatTimeVerbose(work.std_vehicle_work_flow.estimated_duration_minutes)}
+    {#if work.__worksMetricsComputed && work.works_duration_hours != null && work.works_duration_hours !== undefined}
+      {formatTimeVerbose(Number(work.works_duration_hours) || 0)}
+    {:else if work.std_vehicle_work_flow?.estimated_duration_minutes}
+      {formatTimeVerbose((Number(work.std_vehicle_work_flow.estimated_duration_minutes) || 0) / 60)}
     {:else if work.skill_time_standards}
       {#if work.skill_time_standards.isUniform}
-        <!-- All values are the same, show single value -->
-        {formatTimeVerbose(work.skill_time_standards.values[0].standard_time_minutes)}
+        <div>
+          {formatTimeVerbose((Number(work.skill_time_standards.values[0].standard_time_minutes) || 0) / 60)}
+        </div>
       {:else}
-        <!-- Different values, show them separately -->
         <div class="space-y-1">
           {#each work.skill_time_standards.values as sts}
             <div class="text-xs">
-              <span class="font-medium">{sts.skill_short}:</span> {formatTimeVerbose(sts.standard_time_minutes)}
+              <span class="font-medium">{sts.skill_short}:</span>
+              {formatTimeVerbose((Number(sts.standard_time_minutes) || 0) / 60)}
             </div>
           {/each}
         </div>
@@ -169,14 +165,14 @@
   <td class="px-6 py-4 whitespace-nowrap text-sm {isSelected ? (work.time_exceeded ? 'text-gray-900 dark:text-gray-900 font-bold' : 'text-gray-900 dark:text-gray-100') : (work.time_exceeded ? 'text-gray-900 dark:text-gray-900 font-bold' : 'theme-text-primary')}">
     <div>
       <div class="font-medium">
-        {work.time_taken ? formatTime(work.time_taken * 60) : '0h 0m'}
+        {formatTimeVerbose(Number(work.time_taken) || 0)}
       </div>
       {#if work.skill_time_breakdown && Object.keys(work.skill_time_breakdown).length > 0}
         <div class="text-xs theme-text-secondary mt-1">
           {#each Object.entries(work.skill_time_breakdown) as [skill, time]}
             <div class="flex justify-between">
               <span>{skill}:</span>
-              <span>{formatTime((time as number) * 60)}</span>
+              <span>{formatTimeVerbose(Number(time) || 0)}</span>
             </div>
           {/each}
         </div>
@@ -184,7 +180,9 @@
     </div>
   </td>
   <td class="px-6 py-4 whitespace-nowrap text-sm {isSelected ? (work.time_exceeded ? 'text-gray-900 dark:text-gray-900 font-bold' : 'text-gray-900 dark:text-gray-100') : (work.time_exceeded ? 'text-gray-900 dark:text-gray-900 font-bold' : 'theme-text-primary')}">
-    {work.remaining_time ? formatTime(work.remaining_time * 60) : 'N/A'}
+    {work.remaining_time != null && work.remaining_time !== undefined
+      ? formatTimeVerbose(Number(work.remaining_time) || 0)
+      : 'N/A'}
     {#if work.time_exceeded}
       <span class="ml-2 text-xs px-2 py-1 rounded-full bg-red-200 text-red-900 dark:bg-red-700 dark:text-red-100 font-bold">
         ⚠️ Exceeded

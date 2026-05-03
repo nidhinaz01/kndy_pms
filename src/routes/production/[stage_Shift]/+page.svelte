@@ -465,6 +465,17 @@
       return;
     }
 
+    const replanDateStr = replanTargetDate.split('T')[0];
+    const routeErr = eventHandlers.getInvalidPlanWorkRouteContextMessage({
+      stageCode,
+      shiftCode,
+      selectedDate: replanDateStr
+    });
+    if (routeErr) {
+      alert(routeErr);
+      return;
+    }
+
     const sourceKey = getPlanGroupKey(replanSourceGroup);
     replanBusyKey = sourceKey;
     activeReplanSession = {

@@ -11,11 +11,14 @@ import {
   validateCOffWithinAttendanceWindow
 } from '$lib/utils/attendanceCOffSpanUtils';
 import { getShiftHourLimitHours, validateManpowerOtCoffBalance } from '$lib/utils/shiftHourLimitUtils';
+import { validateHolidayManpowerOtCoff } from '$lib/utils/holidayAttendancePolicy';
 import {
   attendanceIsPresent,
   type ManpowerAttendanceStatus
 } from '$lib/utils/manpowerAttendanceStatus';
 import { getWorkDisplayCode } from '$lib/utils/workDisplayUtils';
+import { sortPlanningItemsBySkillOrder } from '../utils/planTabUtils';
+import { getStageReassignmentDeleteBlockMessage } from '$lib/services/stageReassignmentDeleteGuard';
 
 /**
  * Update work status when skill competencies are deleted
@@ -138,6 +141,62 @@ export interface EventHandlerContext {
   loadReportData: () => Promise<void>;
 }
 
+const PLAN_WORK_STAGE_PLACEHOLDER = '{stageCode}';
+
+/**
+ * Validate stage, shift, and selected date before opening Plan Work, reporting, or related modals.
+ * `featureLabel` appears in the message (e.g. "Plan Work", "Reporting", "Report Work").
+ */
+export function getInvalidProductionPageContextMessage(
+  ctx: { stageCode: string; shiftCode: string; selectedDate: string },
+  featureLabel = 'Plan Work'
+): string | null {
+  const sc = String(ctx.stageCode ?? '').trim();
+  const sh = String(ctx.shiftCode ?? '').trim();
+  const d = String(ctx.selectedDate ?? '').trim();
+
+  if (!sc || sc === PLAN_WORK_STAGE_PLACEHOLDER) {
+    return (
+      `Cannot open ${featureLabel}: the production stage is missing or invalid.\n\n` +
+      'Use the Production menu and open a stage–shift page so the address includes both (for example …/production/P1S2-GEN).'
+    );
+  }
+  if (!sh) {
+    return (
+      `Cannot open ${featureLabel}: the shift is missing.\n\n` +
+      'Open Production from a URL that includes the shift code after the stage.'
+    );
+  }
+  if (!d) {
+    return (
+      `Cannot open ${featureLabel}: no date is selected.\n\n` +
+      'Choose a date with the date picker at the top of this page, then try again.'
+    );
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) {
+    return (
+      `Cannot open ${featureLabel}: the selected date is not valid.\n\n` +
+      'Choose a date using the date picker on this page.'
+    );
+  }
+  if (Number.isNaN(Date.parse(d))) {
+    return (
+      `Cannot open ${featureLabel}: the selected date is not valid.\n\n` +
+      'Choose a date using the date picker on this page.'
+    );
+  }
+  return null;
+}
+
+/** @deprecated Use {@link getInvalidProductionPageContextMessage} with label `Plan Work`. */
+export function getInvalidPlanWorkRouteContextMessage(ctx: {
+  stageCode: string;
+  shiftCode: string;
+  selectedDate: string;
+}): string | null {
+  return getInvalidProductionPageContextMessage(ctx, 'Plan Work');
+}
+
 /**
  * Handle add work action
  */
@@ -242,6 +301,19 @@ export async function handleBulkRemoveWorksCompleted(context: EventHandlerContex
  * Handle plan work
  */
 export function handlePlanWork(context: EventHandlerContext, event: CustomEvent) {
+  const routeErr = getInvalidProductionPageContextMessage(
+    {
+      stageCode: context.stageCode,
+      shiftCode: context.shiftCode,
+      selectedDate: context.selectedDate
+    },
+    'Plan Work'
+  );
+  if (routeErr) {
+    alert(routeErr);
+    return;
+  }
+
   // Fix 1 & 4: Create a fresh copy of the work object to prevent cache buildup
   // This ensures we don't reuse object references that might have stale data
   const originalWork = event.detail.work;
@@ -287,6 +359,19 @@ export async function handlePlanSave(context: EventHandlerContext) {
  */
 export async function handleReportWork(context: EventHandlerContext, event: CustomEvent) {
   const { works, group } = event.detail;
+
+  const routeErr = getInvalidProductionPageContextMessage(
+    {
+      stageCode: context.stageCode,
+      shiftCode: context.shiftCode,
+      selectedDate: context.selectedDate
+    },
+    'Reporting'
+  );
+  if (routeErr) {
+    alert(routeErr);
+    return;
+  }
   
   if (!works || !Array.isArray(works) || works.length === 0) {
     alert('No works to report');
@@ -323,15 +408,11 @@ export async function handleReportWork(context: EventHandlerContext, event: Cust
 
   // Fix 1 & 4: Create fresh copies of work objects to prevent cache buildup
   const freshWorks = works.map(work => ({ ...work }));
-  
-  // Sort works by skill name (like handleMultiReport does)
-  const sortedWorks = freshWorks.sort((a, b) => {
-    const scNameA = a.std_work_skill_mapping?.sc_name || a.sc_required || '';
-    const scNameB = b.std_work_skill_mapping?.sc_name || b.sc_required || '';
-    return scNameA.localeCompare(scNameB);
-  });
 
-  context.setSelectedWorksForMultiReport(sortedWorks);
+  // Same skill order as Plan tab grouped rows (Standard Time column uses items[0])
+  const orderedWorks = sortPlanningItemsBySkillOrder(freshWorks);
+
+  context.setSelectedWorksForMultiReport(orderedWorks);
   context.setShowMultiReportModal(true);
 }
 
@@ -486,6 +567,19 @@ export async function handleCancelWorkConfirm(context: EventHandlerContext, even
  * Note: Currently most reporting goes through MultiSkillReportModal
  */
 export function handleReportWorkSingle(context: EventHandlerContext, event: CustomEvent) {
+  const routeErr = getInvalidProductionPageContextMessage(
+    {
+      stageCode: context.stageCode,
+      shiftCode: context.shiftCode,
+      selectedDate: context.selectedDate
+    },
+    'Report Work'
+  );
+  if (routeErr) {
+    alert(routeErr);
+    return;
+  }
+
   // Fix 1 & 4: Create a fresh copy of the work object to prevent cache buildup
   const originalWork = event.detail.work || event.detail;
   const freshWork = { ...originalWork };
@@ -569,6 +663,19 @@ export async function handleConvertToDraftReport(context: EventHandlerContext) {
  * Handle multi report
  */
 export async function handleMultiReport(context: EventHandlerContext) {
+  const routeErr = getInvalidProductionPageContextMessage(
+    {
+      stageCode: context.stageCode,
+      shiftCode: context.shiftCode,
+      selectedDate: context.selectedDate
+    },
+    'Reporting'
+  );
+  if (routeErr) {
+    alert(routeErr);
+    return;
+  }
+
   if (!context.selectedRows || context.selectedRows.size === 0) {
     alert('Please select at least one row to report');
     return;
@@ -610,14 +717,10 @@ export async function handleMultiReport(context: EventHandlerContext) {
   }
 
 
-  // Sort selected works by std_work_skill_mapping.sc_name
-  const sortedWorks = [...selectedWorks].sort((a, b) => {
-    const scNameA = a.std_work_skill_mapping?.sc_name || a.sc_required || '';
-    const scNameB = b.std_work_skill_mapping?.sc_name || b.sc_required || '';
-    return scNameA.localeCompare(scNameB);
-  });
-  
-  context.setSelectedWorksForMultiReport(sortedWorks);
+  // Same skill order as Plan tab (not alphabetical) so standard time matches the plan row
+  const orderedWorks = sortPlanningItemsBySkillOrder([...selectedWorks]);
+
+  context.setSelectedWorksForMultiReport(orderedWorks);
   context.setShowMultiReportModal(true);
 }
 
@@ -789,6 +892,19 @@ export async function handleDeleteAllPlansForWork(context: EventHandlerContext, 
  * Edit draft plan - open planning modal with work data
  */
 export function handleEditPlan(context: EventHandlerContext, event: CustomEvent) {
+  const routeErr = getInvalidProductionPageContextMessage(
+    {
+      stageCode: context.stageCode,
+      shiftCode: context.shiftCode,
+      selectedDate: context.selectedDate
+    },
+    'Plan Work'
+  );
+  if (routeErr) {
+    alert(routeErr);
+    return;
+  }
+
   const group = event.detail;
   if (!group || !group.items || group.items.length === 0) return;
   
@@ -1161,6 +1277,7 @@ export async function handleAttendanceMarked(context: EventHandlerContext, event
       : undefined;
   const cOff = cOffPayloadFromEventDetail(status, event.detail as Record<string, unknown>);
   const ot = otPayloadFromEventDetail(status, event.detail as Record<string, unknown>);
+  const holidayAttendance = !!(event.detail as Record<string, unknown>).holidayAttendance;
 
   if (attendanceIsPresent(status)) {
     const netHours =
@@ -1171,16 +1288,24 @@ export async function handleAttendanceMarked(context: EventHandlerContext, event
         : actualHours != null && actualHours !== ''
           ? Number(actualHours)
           : null;
-    const L = await getShiftHourLimitHours();
-    const bal = validateManpowerOtCoffBalance(
-      netHours,
-      L,
-      cOff?.cOffValue != null ? Number(cOff.cOffValue) : 0,
-      ot?.otHours != null ? Number(ot.otHours) : 0
-    );
-    if (!bal.ok) {
-      alert(bal.message);
-      return;
+    if (holidayAttendance) {
+      const hb = validateHolidayManpowerOtCoff(netHours, cOff, ot);
+      if (!hb.ok) {
+        alert(hb.message);
+        return;
+      }
+    } else {
+      const L = await getShiftHourLimitHours();
+      const bal = validateManpowerOtCoffBalance(
+        netHours,
+        L,
+        cOff?.cOffValue != null ? Number(cOff.cOffValue) : 0,
+        ot?.otHours != null ? Number(ot.otHours) : 0
+      );
+      if (!bal.ok) {
+        alert(bal.message);
+        return;
+      }
     }
     if (cOff && Number(cOff.cOffValue) > 0) {
       const spanCheck = validateCOffWithinAttendanceWindow(Number(cOff.cOffValue), {
@@ -1230,7 +1355,8 @@ export async function handleAttendanceMarked(context: EventHandlerContext, event
         attendanceFromDate ?? null,
         attendanceToDate ?? null,
         cOff,
-        ot ?? null
+        ot ?? null,
+        holidayAttendance
       );
       if (!result.success) {
         alert('Error saving planned attendance: ' + (result.error || 'Unknown error'));
@@ -1256,7 +1382,8 @@ export async function handleAttendanceMarked(context: EventHandlerContext, event
         attendanceFromDate ?? null,
         attendanceToDate ?? null,
         cOff,
-        ot ?? null
+        ot ?? null,
+        holidayAttendance
       );
       if (!result.success) {
         alert('Error saving reported attendance: ' + (result.error || 'Unknown error'));
@@ -1294,6 +1421,7 @@ export async function handleBulkAttendanceMarked(context: EventHandlerContext, e
       : undefined;
   const cOff = cOffPayloadFromEventDetail(status, event.detail as Record<string, unknown>);
   const ot = otPayloadFromEventDetail(status, event.detail as Record<string, unknown>);
+  const holidayAttendance = !!(event.detail as Record<string, unknown>).holidayAttendance;
 
   if (attendanceIsPresent(status)) {
     const netHours =
@@ -1304,16 +1432,24 @@ export async function handleBulkAttendanceMarked(context: EventHandlerContext, e
         : actualHours != null && actualHours !== ''
           ? Number(actualHours)
           : null;
-    const L = await getShiftHourLimitHours();
-    const bal = validateManpowerOtCoffBalance(
-      netHours,
-      L,
-      cOff?.cOffValue != null ? Number(cOff.cOffValue) : 0,
-      ot?.otHours != null ? Number(ot.otHours) : 0
-    );
-    if (!bal.ok) {
-      alert(bal.message);
-      return;
+    if (holidayAttendance) {
+      const hb = validateHolidayManpowerOtCoff(netHours, cOff, ot);
+      if (!hb.ok) {
+        alert(hb.message);
+        return;
+      }
+    } else {
+      const L = await getShiftHourLimitHours();
+      const bal = validateManpowerOtCoffBalance(
+        netHours,
+        L,
+        cOff?.cOffValue != null ? Number(cOff.cOffValue) : 0,
+        ot?.otHours != null ? Number(ot.otHours) : 0
+      );
+      if (!bal.ok) {
+        alert(bal.message);
+        return;
+      }
     }
     if (cOff && Number(cOff.cOffValue) > 0) {
       const spanCheck = validateCOffWithinAttendanceWindow(Number(cOff.cOffValue), {
@@ -1370,7 +1506,8 @@ export async function handleBulkAttendanceMarked(context: EventHandlerContext, e
           attendanceFromDate ?? null,
           attendanceToDate ?? null,
           cOff,
-          ot ?? null
+          ot ?? null,
+          holidayAttendance
         );
         results.push(r);
       } else {
@@ -1389,7 +1526,8 @@ export async function handleBulkAttendanceMarked(context: EventHandlerContext, e
           attendanceFromDate ?? null,
           attendanceToDate ?? null,
           cOff,
-          ot ?? null
+          ot ?? null,
+          holidayAttendance
         );
         results.push(r);
       }
@@ -1524,10 +1662,12 @@ export async function handleDeleteStageReassignment(context: EventHandlerContext
         return;
       }
 
-      // Fetch planning row to verify status and linked reporting id
+      // Fetch planning row to verify status, linked reporting id, and window (delete guard)
       const { data: planningRow, error: planningError } = await supabase
         .from('prdn_planning_stage_reassignment')
-        .select('id, status, reporting_reassignment_id')
+        .select(
+          'id, status, reporting_reassignment_id, emp_id, to_stage_code, planning_date, from_time, to_time, shift_code'
+        )
         .eq('id', planningId)
         .maybeSingle();
 
@@ -1544,6 +1684,19 @@ export async function handleDeleteStageReassignment(context: EventHandlerContext
 
       if (planningRow.status !== 'draft') {
         alert('Only draft planning reassignments can be deleted');
+        return;
+      }
+
+      const deleteBlock = await getStageReassignmentDeleteBlockMessage({
+        empId: planningRow.emp_id,
+        toStageCode: planningRow.to_stage_code,
+        shiftCode: planningRow.shift_code || context.shiftCode,
+        planningDate: planningRow.planning_date,
+        fromTime: planningRow.from_time,
+        toTime: planningRow.to_time
+      });
+      if (deleteBlock) {
+        alert(deleteBlock);
         return;
       }
 
@@ -1653,7 +1806,9 @@ export async function handleDeleteStageReassignment(context: EventHandlerContext
 
       const { data: reportingRow, error: reportingError } = await supabase
         .from('prdn_reporting_stage_reassignment')
-        .select('reassignment_id, status, planning_reassignment_id')
+        .select(
+          'reassignment_id, status, planning_reassignment_id, emp_id, to_stage_code, reassignment_date, from_time, to_time, shift_code'
+        )
         .eq('reassignment_id', reportingId)
         .maybeSingle();
 
@@ -1670,6 +1825,19 @@ export async function handleDeleteStageReassignment(context: EventHandlerContext
 
       if (reportingRow.status !== 'draft') {
         alert('Only draft reporting reassignments can be deleted');
+        return;
+      }
+
+      const reportingDeleteBlock = await getStageReassignmentDeleteBlockMessage({
+        empId: reportingRow.emp_id,
+        toStageCode: reportingRow.to_stage_code,
+        shiftCode: reportingRow.shift_code || context.shiftCode,
+        planningDate: reportingRow.reassignment_date,
+        fromTime: reportingRow.from_time,
+        toTime: reportingRow.to_time
+      });
+      if (reportingDeleteBlock) {
+        alert(reportingDeleteBlock);
         return;
       }
 
@@ -1788,6 +1956,18 @@ export async function handleReportOvertime(context: EventHandlerContext, event: 
  * Handle report unplanned work
  */
 export function handleReportUnplannedWork(context: EventHandlerContext) {
+  const routeErr = getInvalidProductionPageContextMessage(
+    {
+      stageCode: context.stageCode,
+      shiftCode: context.shiftCode,
+      selectedDate: context.selectedDate
+    },
+    'Report unplanned work'
+  );
+  if (routeErr) {
+    alert(routeErr);
+    return;
+  }
   console.log('handleReportUnplannedWork called');
   context.setShowReportUnplannedWorkModal(true);
   console.log('showReportUnplannedWorkModal set to true');
@@ -1804,6 +1984,19 @@ export function handleReportUnplannedWorkModalClose(context: EventHandlerContext
  * Handle report unplanned work selected
  */
 export function handleReportUnplannedWorkSelected(context: EventHandlerContext, event: CustomEvent) {
+  const routeErr = getInvalidProductionPageContextMessage(
+    {
+      stageCode: context.stageCode,
+      shiftCode: context.shiftCode,
+      selectedDate: context.selectedDate
+    },
+    'Report unplanned work'
+  );
+  if (routeErr) {
+    alert(routeErr);
+    return;
+  }
+
   const { work } = event.detail;
   
   if (!work) {
@@ -1822,6 +2015,19 @@ export function handleReportUnplannedWorkSelected(context: EventHandlerContext, 
  * Edit draft report - open multi-skill report modal with report data
  */
 export function handleEditReport(context: EventHandlerContext, event: CustomEvent) {
+  const routeErr = getInvalidProductionPageContextMessage(
+    {
+      stageCode: context.stageCode,
+      shiftCode: context.shiftCode,
+      selectedDate: context.selectedDate
+    },
+    'Reporting'
+  );
+  if (routeErr) {
+    alert(routeErr);
+    return;
+  }
+
   const group = event.detail;
   if (!group || !group.items || group.items.length === 0) return;
   

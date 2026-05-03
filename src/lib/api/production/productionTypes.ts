@@ -101,6 +101,7 @@ export interface WorkPlanning {
   planned_hours: number;
   time_worked_till_date: number;
   remaining_time: number;
+  std_time_hours?: number | null;
   status: 'planned' | 'submitted' | 'to_redo' | 'approved';
   notes?: string;
   is_active: boolean;
@@ -143,7 +144,8 @@ export interface CreateWorkPlanningData {
   wo_details_id: number;
   derived_sw_code: string | null;
   sc_required: string;
-  worker_id: string;
+  /** Null when competency is covered by planning deviation `no_worker` (after DDL allows NULL). */
+  worker_id: string | null;
   from_date: string;
   from_time: string;
   to_date: string;
@@ -151,6 +153,8 @@ export interface CreateWorkPlanningData {
   planned_hours: number;
   time_worked_till_date: number;
   remaining_time: number;
+  /** Snapshot from std_vehicle_work_flow when planned (hours, 2 dp); null for non-standard / unknown. */
+  std_time_hours?: number | null;
   status?: 'draft' | 'planned' | 'submitted' | 'to_redo' | 'approved' | 'pending_approval' | 'rejected';
   notes?: string;
   wsm_id?: number | null;

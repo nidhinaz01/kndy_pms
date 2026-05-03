@@ -3,6 +3,7 @@ import { getCurrentUsername, getCurrentTimestamp } from '$lib/utils/userUtils';
 import { calculateBreakTimeInMinutes } from '$lib/utils/breakTimeUtils';
 import { calculateActualTime } from '$lib/utils/multiSkillReportUtils';
 import { calculateLostTime } from '$lib/utils/reportWorkUtils';
+import { getEmbeddedStandardTimeMinutes } from '$lib/utils/standardTimeFromWork';
 
 /**
  * Convert approved plans to draft reports
@@ -108,9 +109,10 @@ export async function convertPlanToDraftReport(
         // Hours worked today = actual time - break time
         const hoursWorkedToday = Math.max(0, (actualTimeMinutes - breakMinutes) / 60);
 
-        // Get standard time
-        const standardTimeMinutes = plan.skill_time_standard?.standard_time_minutes || 
-                                   plan.vehicle_work_flow?.estimated_duration_minutes || 0;
+        // Get standard time (same priority as Plan tab: vehicle workflow, then skill standard)
+        const standardTimeMinutes =
+          getEmbeddedStandardTimeMinutes(plan) ??
+          0;
 
         // Calculate lost time
         // For initial conversion, assume work is not completed (NC) - user can update later
