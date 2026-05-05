@@ -5,6 +5,7 @@ import { submitPlanning, submitReporting } from '$lib/api/production/planningRep
 import { savePlannedAttendance, savePlannedStageReassignment, saveReportedManpower, saveReportedStageReassignment } from '$lib/api/production/manpowerPlanningReportingService';
 import type { ManpowerCOffSave, ManpowerOTSave } from '$lib/api/production/productionTypes';
 import { convertPlanToDraftReport } from '$lib/services/convertPlanToDraftReportService';
+import { reconcileBeforeDraftReportDelete } from '$lib/services/draftReportDeleteReconcileService';
 import { validateReportingAttendance } from '$lib/utils/reportingAttendanceValidation';
 import {
   getAttendanceWallWindowMs,
@@ -1081,6 +1082,12 @@ export async function handleMultiDeleteDraftReports(context: EventHandlerContext
   const reportIds = Array.from(rows).filter(Boolean);
   if (reportIds.length === 0) return;
 
+  const reconcile = await reconcileBeforeDraftReportDelete(reportIds);
+  if (!reconcile.success) {
+    alert(reconcile.error ? `Cannot delete: ${reconcile.error}` : 'Cannot delete: reconcile failed.');
+    return;
+  }
+
   const { error } = await supabase
     .from('prdn_work_reporting')
     .delete()
@@ -2109,13 +2116,18 @@ export async function handleDeleteReport(context: EventHandlerContext, event: Cu
   // Get all report IDs from the group
   const reportIds = group.items.map((item: any) => item.id).filter(Boolean);
   if (reportIds.length === 0) return;
-  
-  // Hard delete all reports
+
+  const reconcile = await reconcileBeforeDraftReportDelete(reportIds);
+  if (!reconcile.success) {
+    alert(reconcile.error ? `Cannot delete: ${reconcile.error}` : 'Cannot delete: reconcile failed.');
+    return;
+  }
+
   const { error } = await supabase
     .from('prdn_work_reporting')
     .delete()
     .in('id', reportIds);
-  
+
   if (!error) {
     // Reload draft report data
     await context.loadDraftReportData();

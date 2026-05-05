@@ -66,10 +66,10 @@ BEGIN
   INSERT INTO archive.rnd_document_submissions SELECT id, sales_order_id, document_type, document_name, file_path, file_size, file_type, submission_date, revised_date, revision_number, is_current, is_deleted, replaced_by_id, uploaded_by, created_dt, modified_by, modified_dt FROM public.rnd_document_submissions WHERE sales_order_id = p_wo_details_id;
   INSERT INTO archive.sales_chassis_receival_records SELECT id, sales_order_id, template_id, inspection_date, inspection_status, inspection_notes, inspector_name, field_responses, is_deleted, created_by, created_dt, modified_by, modified_dt FROM public.sales_chassis_receival_records WHERE sales_order_id = p_wo_details_id;
   INSERT INTO archive.prdn_work_planning (
-    id, planning_submission_id, wo_details_id, stage_code, shift_code, derived_sw_code, other_work_code, worker_id, from_date, from_time, to_date, to_time, planned_hours, time_worked_till_date, remaining_time, status, notes, report_unplanned_work, sc_required, wsm_id, is_active, is_deleted, created_by, created_dt, modified_by, modified_dt
+    id, planning_submission_id, wo_details_id, stage_code, shift_code, derived_sw_code, other_work_code, worker_id, from_date, from_time, to_date, to_time, planned_hours, std_time_hours, time_worked_till_date, remaining_time, status, notes, report_unplanned_work, sc_required, wsm_id, is_active, is_deleted, created_by, created_dt, modified_by, modified_dt
   )
   SELECT
-    id, planning_submission_id, wo_details_id, stage_code, shift_code, derived_sw_code, other_work_code, worker_id, from_date, from_time, to_date, to_time, planned_hours, time_worked_till_date, remaining_time, status, notes, report_unplanned_work, sc_required, wsm_id, is_active, is_deleted, created_by, created_dt, modified_by, modified_dt
+    id, planning_submission_id, wo_details_id, stage_code, shift_code, derived_sw_code, other_work_code, worker_id, from_date, from_time, to_date, to_time, planned_hours, std_time_hours, time_worked_till_date, remaining_time, status, notes, report_unplanned_work, sc_required, wsm_id, is_active, is_deleted, created_by, created_dt, modified_by, modified_dt
   FROM public.prdn_work_planning
   WHERE wo_details_id = p_wo_details_id;
   INSERT INTO archive.prdn_work_planning_deviations SELECT d.id, d.planning_id, d.deviation_type, d.reason, d.is_active, d.is_deleted, d.created_by, d.created_dt, d.modified_by, d.modified_dt FROM public.prdn_work_planning_deviations d JOIN public.prdn_work_planning p ON p.id = d.planning_id WHERE p.wo_details_id = p_wo_details_id;
@@ -104,7 +104,7 @@ EXCEPTION
 END;
 $$;
 
-COMMENT ON FUNCTION public.archive_work_order(integer, text) IS 'Moves one work order and all related rows from public to archive. Audit: archived_by, archived_dt on archive.prdn_wo_details. Copies prdn_work_planning.shift_code into archive.';
+COMMENT ON FUNCTION public.archive_work_order(integer, text) IS 'Moves one work order and all related rows from public to archive. Audit: archived_by, archived_dt on archive.prdn_wo_details. Copies prdn_work_planning.shift_code and std_time_hours into archive.';
 
 -- =============================================================================
 -- List archived work orders (for UI). Use this so the app does not need

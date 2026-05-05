@@ -126,6 +126,7 @@ CREATE TABLE archive.prdn_work_planning (
     to_date date,
     to_time time without time zone,
     planned_hours numeric,
+    std_time_hours numeric,
     time_worked_till_date numeric,
     remaining_time numeric,
     status character varying,
@@ -142,6 +143,8 @@ CREATE TABLE archive.prdn_work_planning (
 );
 
 COMMENT ON COLUMN archive.prdn_work_planning.shift_code IS 'Snapshot of public.prdn_work_planning.shift_code at archive time (shift scope).';
+
+COMMENT ON COLUMN archive.prdn_work_planning.std_time_hours IS 'Snapshot of public.prdn_work_planning.std_time_hours at archive time (decimal hours; standard duration).';
 
 -- -----------------------------------------------------------------------------
 -- 6. archive.prdn_work_planning_deviations

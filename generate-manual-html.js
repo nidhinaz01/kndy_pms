@@ -186,6 +186,29 @@ groupedSections.forEach(group => {
 // Get main title
 const mainTitle = markdownContent.split('\n')[0].replace(/^#\s+/, '');
 
+/** Read footer lines from USER_MANUAL.md so the welcome screen stays in sync. */
+function extractManualFooterMeta(md) {
+  const versionMatch = md.match(/\*\*Document Version\*\*:\s*([^\n\r]+)/);
+  const updatedMatch = md.match(/\*\*Last Updated\*\*:\s*([^\n\r]+)/);
+  return {
+    documentVersion: versionMatch ? versionMatch[1].trim() : '',
+    lastUpdated: updatedMatch ? updatedMatch[1].trim() : ''
+  };
+}
+
+function escapeHtmlText(s) {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+const footerMeta = extractManualFooterMeta(markdownContent);
+const welcomeMetaHtml =
+  footerMeta.documentVersion || footerMeta.lastUpdated
+    ? `<p style="margin-top: 20px; font-size: 0.9rem; color: var(--text-tertiary);">${footerMeta.documentVersion ? `Document Version: ${escapeHtmlText(footerMeta.documentVersion)}<br>` : ''}${footerMeta.lastUpdated ? `Last Updated: ${escapeHtmlText(footerMeta.lastUpdated)}` : ''}</p>`
+    : '';
+
 // Generate TOC HTML
 const tocHTML = generateTOC(groupedSections);
 
@@ -624,7 +647,7 @@ const htmlTemplate = `<!DOCTYPE html>
             <div class="welcome-screen">
                 <h1>${mainTitle}</h1>
                 <p>Select a topic from the sidebar to begin reading</p>
-                <p style="margin-top: 20px; font-size: 0.9rem; color: var(--text-tertiary);">Last Updated: 21 December 2025</p>
+                ${welcomeMetaHtml || '<p style="margin-top: 20px; font-size: 0.9rem; color: var(--text-tertiary);">Last Updated: (see footer in USER_MANUAL.md)</p>'}
             </div>
         </div>
     </main>

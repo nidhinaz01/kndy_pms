@@ -15,6 +15,14 @@ function buildSkillMismatchReason(requiredSkill: string, workerSkill: string): s
   return `Worker skill "${workerSkill}" does not match required skill "${requiredSkill}" at reporting.`;
 }
 
+function reportingDbErrorMessage(error: unknown, fallback: string): string {
+  const e = error as { code?: string; message?: string } | null;
+  if (e?.code === '23505') {
+    return 'This report row already exists for the same worker and time slot. Please refresh and continue.';
+  }
+  return e?.message || fallback;
+}
+
 /**
  * Save unplanned work reports
  * Creates planning records first (with report_unplanned_work = true), then creates reporting records
@@ -310,7 +318,10 @@ export async function saveUnplannedWorkReports(
       
       if (reportError) {
         console.error('Error creating report record:', reportError);
-        return { success: false, error: `Failed to create report: ${reportError.message}` };
+        return {
+          success: false,
+          error: reportingDbErrorMessage(reportError, `Failed to create report: ${reportError.message}`)
+        };
       }
       
       // Create reporting deviation if needed
@@ -412,7 +423,13 @@ export async function saveUnplannedWorkReports(
         
         if (traineeReportError) {
           console.error(`Error creating report for trainee ${trainee.emp_name}:`, traineeReportError);
-          return { success: false, error: `Failed to create report for trainee ${trainee.emp_name}` };
+          return {
+            success: false,
+            error: reportingDbErrorMessage(
+              traineeReportError,
+              `Failed to create report for trainee ${trainee.emp_name}`
+            )
+          };
         }
         
         // Create deviation record for trainee addition
@@ -437,6 +454,9 @@ export async function saveUnplannedWorkReports(
     
     return { success: true, data: createdPlanningRecords };
   } catch (error) {
-    return { success: false, error: (error as Error)?.message || 'Unknown error' };
+    return {
+      success: false,
+      error: reportingDbErrorMessage(error, (error as Error)?.message || 'Unknown error')
+    };
   }
 }

@@ -22,6 +22,14 @@ function buildSkillMismatchReason(requiredSkill: string, workerSkill: string): s
   return `Worker skill "${workerSkill}" does not match required skill "${requiredSkill}" at reporting.`;
 }
 
+function reportingDbErrorMessage(error: unknown, fallback: string): string {
+  const e = error as { code?: string; message?: string } | null;
+  if (e?.code === '23505') {
+    return 'This report row already exists for the same worker and time slot. Please refresh and continue.';
+  }
+  return e?.message || fallback;
+}
+
 export async function saveMultiSkillReports(
   selectedWorks: any[],
   formData: MultiSkillReportFormData,
@@ -477,7 +485,13 @@ export async function saveMultiSkillReports(
 
         if (traineeReportError) {
           console.error(`Error creating report for trainee ${trainee.emp_name}:`, traineeReportError);
-          return { success: false, error: `Failed to create report for trainee ${trainee.emp_name}` };
+          return {
+            success: false,
+            error: reportingDbErrorMessage(
+              traineeReportError,
+              `Failed to create report for trainee ${trainee.emp_name}`
+            )
+          };
         }
 
         const { error: deviationError } = await supabase
@@ -503,7 +517,10 @@ export async function saveMultiSkillReports(
 
     return { success: true, data: savedReports };
   } catch (error) {
-    return { success: false, error: (error as Error)?.message || 'Unknown error' };
+    return {
+      success: false,
+      error: reportingDbErrorMessage(error, (error as Error)?.message || 'Unknown error')
+    };
   }
 }
 
