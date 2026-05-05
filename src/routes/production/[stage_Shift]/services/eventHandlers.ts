@@ -1082,7 +1082,10 @@ export async function handleMultiDeleteDraftReports(context: EventHandlerContext
   const reportIds = Array.from(rows).filter(Boolean);
   if (reportIds.length === 0) return;
 
-  const reconcile = await reconcileBeforeDraftReportDelete(reportIds);
+  const reconcile = await reconcileBeforeDraftReportDelete(reportIds, {
+    shiftCode: context.shiftCode,
+    selectedDate: context.selectedDate
+  });
   if (!reconcile.success) {
     alert(reconcile.error ? `Cannot delete: ${reconcile.error}` : 'Cannot delete: reconcile failed.');
     return;
@@ -2117,7 +2120,10 @@ export async function handleDeleteReport(context: EventHandlerContext, event: Cu
   const reportIds = group.items.map((item: any) => item.id).filter(Boolean);
   if (reportIds.length === 0) return;
 
-  const reconcile = await reconcileBeforeDraftReportDelete(reportIds);
+  const reconcile = await reconcileBeforeDraftReportDelete(reportIds, {
+    shiftCode: context.shiftCode,
+    selectedDate: context.selectedDate
+  });
   if (!reconcile.success) {
     alert(reconcile.error ? `Cannot delete: ${reconcile.error}` : 'Cannot delete: reconcile failed.');
     return;

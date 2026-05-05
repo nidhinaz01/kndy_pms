@@ -4,35 +4,14 @@ import { getCurrentUsername, getCurrentTimestamp } from '$lib/utils/userUtils';
 const REPORT_PAGE = 1000;
 
 /**
- * Hours driving `prdn_work_planning.time_worked_till_date` after save — matches
- * `multiSkillReportSaveService.updatePlanningStatus` (till + today).
- */
-export function impliedCumulativeHoursForReportingRow(r: {
-  hours_worked_till_date?: number | null;
-  hours_worked_today?: number | null;
-}): number {
-  const till = Number(r.hours_worked_till_date) || 0;
-  const today = Number(r.hours_worked_today) || 0;
-  return till + today;
-}
-
-function sortReportsChronological(reports: { id?: number; from_date?: string | null }[]): any[] {
-  return [...reports].sort((a, b) => {
-    const da = String(a.from_date || '');
-    const db = String(b.from_date || '');
-    if (da !== db) return da < db ? -1 : da > db ? 1 : 0;
-    return (Number(a.id) || 0) - (Number(b.id) || 0);
-  });
-}
-
-/**
- * After deletes, planning cumulative for this competency line is taken from the
- * chronologically last remaining report (same convention as save: last session total).
+ * Recompute cumulative worked hours from remaining reporting rows.
+ * For delete flows across day-2/day-3, summing per-row worked hours is stable.
  */
 function cumulativeFromRemainingReportsForPlanning(remaining: any[]): number {
-  if (remaining.length === 0) return 0;
-  const last = sortReportsChronological(remaining)[remaining.length - 1];
-  return impliedCumulativeHoursForReportingRow(last);
+  return (remaining || []).reduce(
+    (sum: number, row: any) => sum + (Number(row?.hours_worked_today) || 0),
+    0
+  );
 }
 
 export type WorkKey = {
@@ -50,7 +29,7 @@ function workKeyString(k: WorkKey): string {
 function planningRowsQuery(k: WorkKey) {
   let q = supabase
     .from('prdn_work_planning')
-    .select('id, status')
+    .select('id, status, shift_code, from_date')
     .eq('stage_code', k.stage_code)
     .eq('wo_details_id', k.wo_details_id)
     .eq('is_deleted', false)
@@ -64,33 +43,23 @@ function planningRowsQuery(k: WorkKey) {
 }
 
 /**
- * When there are no reporting rows left for this work on the stage, align with
- * `worksTableService.checkWorkStatus`: planned vs unplanned vs draft-only.
+ * When there are no reporting rows left for this work on the stage:
+ * - approved planning in active stage+shift+date context -> Planned
+ * - any planning but no approved in context -> Draft Plan
+ * - no planning -> To be Planned
  */
-function prdnStatusWhenNoReports(planningRows: { status: string }[]): string {
+function prdnStatusWhenNoReports(
+  planningRows: Array<{ status: string; shift_code?: string | null; from_date?: string | null }>,
+  shiftCode: string,
+  selectedDate: string
+): string {
   if (!planningRows.length) return 'To be Planned';
-
-  const hasPending = planningRows.some((p) => p.status === 'pending_approval');
-  const hasApproved = planningRows.some((p) => p.status === 'approved');
-  const hasDraft = planningRows.some((p) => p.status === 'draft');
-  const hasRejected = planningRows.some((p) => p.status === 'rejected');
-
-  if (hasPending && !hasApproved) {
-    return 'Planned';
-  }
-  if (hasDraft && !hasPending && !hasApproved) {
-    return 'Draft Plan';
-  }
-  if (hasRejected && !hasPending && !hasApproved && !hasDraft) {
-    return 'Draft Plan';
-  }
-  if (hasApproved) {
-    return 'Planned';
-  }
-  if (hasDraft) {
-    return 'Draft Plan';
-  }
-  return 'To be Planned';
+  const selectedDateStr = String(selectedDate || '').split('T')[0];
+  const hasApprovedInContext = planningRows.some((p) => {
+    const pDate = String(p.from_date || '').split('T')[0];
+    return p.status === 'approved' && p.shift_code === shiftCode && pDate === selectedDateStr;
+  });
+  return hasApprovedInContext ? 'Planned' : 'Draft Plan';
 }
 
 async function fetchAllReportingForPlanningIds(
@@ -164,7 +133,8 @@ async function fetchAllRemainingReportsForWorkKey(
  * On failure, callers must not delete.
  */
 export async function reconcileBeforeDraftReportDelete(
-  reportIds: (number | string)[]
+  reportIds: (number | string)[],
+  options: { shiftCode: string; selectedDate: string }
 ): Promise<{ success: boolean; error?: string }> {
   const ids = [
     ...new Set(
@@ -275,10 +245,25 @@ export async function reconcileBeforeDraftReportDelete(
         if (plErr) {
           return { success: false, error: plErr.message };
         }
-        newStatus = prdnStatusWhenNoReports((plans || []).map((p: any) => ({ status: p.status })));
+        newStatus = prdnStatusWhenNoReports(
+          (plans || []).map((p: any) => ({
+            status: p.status,
+            shift_code: p.shift_code,
+            from_date: p.from_date
+          })),
+          options.shiftCode,
+          options.selectedDate
+        );
       } else {
-        const allC = remainingReports.every((r: any) => r.completion_status === 'C');
-        newStatus = allC ? 'Completed' : 'In Progress';
+        const hasNC = remainingReports.some((r: any) => r.completion_status === 'NC');
+        const hasC = remainingReports.some((r: any) => r.completion_status === 'C');
+        if (hasNC) {
+          newStatus = 'In Progress';
+        } else if (hasC) {
+          newStatus = 'Completed';
+        } else {
+          newStatus = 'In Progress';
+        }
       }
 
       let statusUpdateQuery = supabase

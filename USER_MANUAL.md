@@ -810,13 +810,13 @@ If a work has multiple skill competencies planned, you can delete all at once:
 **Important Notes**:
 - You can only delete plans in "Draft Plan" status
 - Once submitted, plans cannot be deleted (they must be cancelled instead - see Plan Tab section)
-- Deleting a plan returns the work status to "To be Planned"
+- Deleting planning rows sets work status to **"To be Planned"** (including multi-skill work groups; deleting even one planned competency row resets the work status)
 - The work itself is not deleted, only the plan
 
 **What Happens Behind the Scenes**:
 - Marks planning records as deleted (`is_deleted = true`)
 - Removes worker assignments
-- Updates work status back to "To be Planned"
+- Updates `prdn_work_status.current_status` to **"To be Planned"** for the affected work key (stage + WO + work code)
 - Frees up worker time slots
 
 **Prerequisites**:
@@ -1075,6 +1075,12 @@ Overtime can be reported from the Draft Report tab:
    - Click **"Save Report"** or **"Report"** button
    - The report is saved as "Draft Report"
 
+9. **How remaining time is recalculated**:
+   - On each save, planning time fields are recomputed from reported hours:
+     - **`time_worked_till_date`** = `hoursWorkedTillDate + hoursWorkedToday`
+     - **`remaining_time`** = `max(0, planned_hours - time_worked_till_date)`
+   - This keeps remaining time non-negative and aligned with cumulative work reported so far.
+
 8. **Verify Report Created**:
    - Go to **"Draft Report"** tab
    - You should see your reported work
@@ -1091,6 +1097,14 @@ Overtime can be reported from the Draft Report tab:
    - Click **"Edit"** for the work
    - Modify any details
    - Save changes
+
+3. **If you delete draft report rows**:
+   - The system first reconciles related planning rows before deletion:
+     - Recomputes `prdn_work_planning.time_worked_till_date` from remaining report rows
+     - Recomputes `prdn_work_planning.remaining_time` as `max(0, planned_hours - recomputed cumulative)`
+   - Then it recalculates `prdn_work_status.current_status` for the affected work key:
+     - If no reporting rows remain: status falls back from planning context (`Planned` when approved plan exists for current stage/shift/date; otherwise `Draft Plan`; if no planning rows, `To be Planned`)
+     - If reporting rows remain: **`NC` present => `In Progress`**, else **`C` present => `Completed`**, otherwise `In Progress`
 
 #### Step 7.4: Report Unplanned Work
 

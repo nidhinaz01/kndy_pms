@@ -469,14 +469,14 @@
               <td class="px-6 py-4 whitespace-nowrap text-sm">
                 {#if typedGroup.items && typedGroup.items.length > 0}
                   {@const isCancelled = typedGroup.items.some((item: any) => item.status === 'cancelled' || item.isCancelled)}
-                  {@const allReported = typedGroup.items.every((item: any) => item.workLifecycleStatus && item.workLifecycleStatus !== 'Planned')}
                   {@const anyReported = typedGroup.items.some((item: any) => item.workLifecycleStatus && item.workLifecycleStatus !== 'Planned')}
+                  {@const hasNC = typedGroup.items.some((item: any) => item.workLifecycleStatus === 'In progress')}
                   {#if isCancelled}
                     <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-400">Cancelled</span>
-                  {:else if allReported}
-                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-400">Reported</span>
+                  {:else if hasNC}
+                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-800 dark:bg-orange-900/20 dark:text-orange-400">Reported (NC)</span>
                   {:else if anyReported}
-                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-800 dark:bg-orange-900/20 dark:text-orange-400">Partially Reported</span>
+                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-400">Reported (C)</span>
                   {:else}
                     <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-400">Planned</span>
                   {/if}

@@ -10,6 +10,7 @@
 	import Button from '$lib/components/common/Button.svelte';
 	import DuplicateAttendanceModal from './components/DuplicateAttendanceModal.svelte';
 	import DuplicateDraftWorkModal from './components/DuplicateDraftWorkModal.svelte';
+	import DeleteRecordsModal from './components/DeleteRecordsModal.svelte';
 
 	let showSidebar = false;
 	let menus: unknown[] = [];
@@ -21,6 +22,7 @@
 
 	let showDuplicateAttendanceModal = false;
 	let showDuplicateDraftWorkModal = false;
+	let showDeleteRecordsModal = false;
 
 	function assertAdminClient(): boolean {
 		try {
@@ -216,6 +218,23 @@
 			</section>
 
 			<section class="theme-bg-primary border theme-border rounded-lg p-6 shadow-lg opacity-90 flex flex-col">
+				<h2 class="text-lg font-medium theme-text-primary mb-2">Delete records</h2>
+				<p class="text-sm theme-text-secondary mb-4 flex-1">
+					Hard delete a single row by table + primary key lookup. Supports
+					<code class="text-xs">prdn_work_planning</code> and <code class="text-xs">prdn_work_reporting</code>.
+					Load records, select one, then confirm with <code class="text-xs">DELETE</code>.
+				</p>
+				<Button
+					variant="danger"
+					size="md"
+					class="self-start"
+					on:click={() => (showDeleteRecordsModal = true)}
+				>
+					Open delete records tool
+				</Button>
+			</section>
+
+			<section class="theme-bg-primary border theme-border rounded-lg p-6 shadow-lg opacity-90 flex flex-col">
 				<h2 class="text-lg font-medium theme-text-primary mb-2">More jobs</h2>
 				<p class="text-sm theme-text-secondary flex-1">
 					Additional cron-aligned actions can be added here as separate buttons, each calling the same API with a different
@@ -231,6 +250,10 @@
 		<DuplicateDraftWorkModal
 			show={showDuplicateDraftWorkModal}
 			onClose={() => (showDuplicateDraftWorkModal = false)}
+		/>
+		<DeleteRecordsModal
+			show={showDeleteRecordsModal}
+			onClose={() => (showDeleteRecordsModal = false)}
 		/>
 	</div>
 </div>

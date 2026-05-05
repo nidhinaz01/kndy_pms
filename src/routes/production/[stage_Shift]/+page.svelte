@@ -490,8 +490,9 @@
   }
 
   async function handlePlanModalSave() {
-    if (activeReplanSession) {
-      const gate = await validateReplanTargetDate(activeReplanSession.targetDate);
+    const replanSession = activeReplanSession;
+    if (replanSession) {
+      const gate = await validateReplanTargetDate(replanSession.targetDate);
       if (!gate.allowed) {
         alert(gate.reason || 'Target date is not allowed for replan.');
         activeReplanSession = null;
@@ -499,11 +500,41 @@
         await Promise.all([dataLoading.loadPlannedWorksData(dataLoadingContext), dataLoading.loadDraftPlanData(dataLoadingContext)]);
         return;
       }
-      alert(`Replan completed successfully. New draft was created for ${activeReplanSession.targetDate}.`);
+      alert(`Replan completed successfully. New draft was created for ${replanSession.targetDate}.`);
+    }
+    await eventHandlers.handlePlanSave(eventHandlerContext);
+    if (replanSession) {
+      const { getCurrentUsername, getCurrentTimestamp } = await import('$lib/utils/userUtils');
+      const currentUser = getCurrentUsername();
+      const now = getCurrentTimestamp();
+      const sourcePlanIds = replanSession.sourcePlanningIds || [];
+      if (sourcePlanIds.length > 0) {
+        const { data: sourcePlans } = await supabase
+          .from('prdn_work_planning')
+          .select('stage_code, wo_details_id, derived_sw_code, other_work_code')
+          .in('id', sourcePlanIds);
+        const uniqueKeys = new Set<string>();
+        for (const p of sourcePlans || []) {
+          const key = `${p.stage_code}_${p.wo_details_id}_${p.derived_sw_code || ''}_${p.other_work_code || ''}`;
+          if (uniqueKeys.has(key)) continue;
+          uniqueKeys.add(key);
+          let q = supabase
+            .from('prdn_work_status')
+            .update({
+              current_status: 'Draft Plan',
+              modified_by: currentUser,
+              modified_dt: now
+            })
+            .eq('stage_code', p.stage_code)
+            .eq('wo_details_id', p.wo_details_id);
+          if (p.derived_sw_code) q = q.eq('derived_sw_code', p.derived_sw_code);
+          else if (p.other_work_code) q = q.eq('other_work_code', p.other_work_code);
+          await q;
+        }
+      }
       activeReplanSession = null;
       replanBusyKey = null;
     }
-    await eventHandlers.handlePlanSave(eventHandlerContext);
   }
 
   function handlePlanModalCloseForCurrentSession() {

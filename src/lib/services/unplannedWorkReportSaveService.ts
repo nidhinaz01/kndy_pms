@@ -208,6 +208,7 @@ export async function saveUnplannedWorkReports(
     
     // Step 1: Create planning records for each skill competency
     const createdPlanningRecords: any[] = [];
+    const createdPlanningIds: number[] = [];
     
     for (const virtualWork of virtualWorks) {
       const workerId = formData.skillEmployees[virtualWork.id];
@@ -252,6 +253,7 @@ export async function saveUnplannedWorkReports(
       const { createWorkPlanning } = await import('$lib/api/production');
       const planningRecord = await createWorkPlanning(planningData, currentUser);
       createdPlanningRecords.push(planningRecord);
+      if (planningRecord?.id) createdPlanningIds.push(planningRecord.id);
       
       // Create deviation record if needed
       const requiredSkill = String(virtualWork.sc_required || '');
@@ -391,6 +393,7 @@ export async function saveUnplannedWorkReports(
         };
         
         const traineePlan = await createWorkPlanning(traineePlanData, currentUser);
+        if (traineePlan?.id) createdPlanningIds.push(traineePlan.id);
         
         // Create reporting record for trainee
         const traineeLtDetails = calculateLtDetailsForWorker(trainee.emp_id);
@@ -452,6 +455,11 @@ export async function saveUnplannedWorkReports(
       }
     }
     
+    if (createdPlanningIds.length > 0) {
+      const { updateWorkStatus } = await import('$lib/services/multiSkillReportSaveService');
+      await updateWorkStatus(createdPlanningIds, formData.completionStatus);
+    }
+
     return { success: true, data: createdPlanningRecords };
   } catch (error) {
     return {

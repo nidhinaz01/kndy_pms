@@ -111,21 +111,19 @@ export async function canPlanWork(
       };
     }
     
-    let planningQuery = supabase
-      .from('prdn_work_planning')
-      .select('*')
-      .eq('stage_code', stageCode)
-      .eq('is_active', true)
-      .eq('is_deleted', false)
-      .order('created_dt', { ascending: false })
-      .limit(1);
+    let statusQuery = supabase
+      .from('prdn_work_status')
+      .select('current_status')
+      .eq('stage_code', stageCode);
 
-    if (derivedSwCode && otherWorkCode) {
-      planningQuery = planningQuery.or(`derived_sw_code.eq.${derivedSwCode},other_work_code.eq.${otherWorkCode}`);
-    } else if (derivedSwCode) {
-      planningQuery = planningQuery.eq('derived_sw_code', derivedSwCode);
+    if (woDetailsId) {
+      statusQuery = statusQuery.eq('wo_details_id', woDetailsId);
+    }
+
+    if (derivedSwCode) {
+      statusQuery = statusQuery.eq('derived_sw_code', derivedSwCode);
     } else if (otherWorkCode) {
-      planningQuery = planningQuery.eq('other_work_code', otherWorkCode);
+      statusQuery = statusQuery.eq('other_work_code', otherWorkCode);
     } else {
       console.warn(`⚠️ Cannot check planning status: no derived_sw_code or other_work_code provided`);
       return {
@@ -134,88 +132,48 @@ export async function canPlanWork(
       };
     }
 
-    // Filter by wo_details_id to check plans for this specific work order
-    if (woDetailsId) {
-      planningQuery = planningQuery.eq('wo_details_id', woDetailsId);
+    const { data: statusRecord, error: statusError } = await statusQuery.maybeSingle();
+    if (statusError && statusError.code !== 'PGRST116') {
+      console.error('❌ Error checking work status:', statusError);
+      throw statusError;
     }
 
-    const { data, error } = await planningQuery;
-
-    if (error) {
-      console.error('❌ Error checking work planning status:', error);
-      throw error;
-    }
-
-    console.log(`📊 Found ${data?.length || 0} previous plans for work ${workCode}`);
-
-    if (!data || data.length === 0) {
-      console.log(`✅ No previous plans found for ${workCode} - can plan`);
+    const status = statusRecord?.current_status || null;
+    if (status === 'In Progress' || status === 'To be Planned') {
       return { canPlan: true };
     }
-
-    const lastPlan = data[0];
-    console.log(`📋 Last plan found: ID ${lastPlan.id}, Date: ${lastPlan.from_date}, Status: ${lastPlan.status}`);
-
-    // Check if the last plan is still in draft or pending_approval status
-    // If so, don't allow new planning until it's approved/rejected
-    if (lastPlan.status === 'draft' || lastPlan.status === 'pending_approval') {
-      console.log(`❌ Work has a ${lastPlan.status} plan - cannot plan again`);
+    if (status === 'Draft Plan') {
       return {
         canPlan: false,
-        reason: `Work already has a ${lastPlan.status === 'draft' ? 'draft' : 'pending approval'} plan from ${new Date(lastPlan.from_date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' })}. Please wait for approval or delete the existing plan first.`,
-        lastPlan
+        reason: 'Work already has a draft plan. Please complete or delete the draft first.'
+      };
+    }
+    if (status === 'Plan Pending Approval') {
+      return {
+        canPlan: false,
+        reason: 'Work already has a plan pending approval.'
+      };
+    }
+    if (status === 'Planned') {
+      return {
+        canPlan: false,
+        reason: 'Work is already planned for the selected context.'
+      };
+    }
+    if (status === 'Completed') {
+      return {
+        canPlan: false,
+        reason: 'Work is already completed.'
+      };
+    }
+    if (status === 'Removed') {
+      return {
+        canPlan: false,
+        reason: 'This work has been removed from production.'
       };
     }
 
-    // If the plan is approved, check if it has been reported
-    if (lastPlan.status === 'approved') {
-      const { data: reportData, error: reportError } = await supabase
-        .from('prdn_work_reporting')
-        .select('*')
-        .eq('planning_id', lastPlan.id)
-        .eq('is_active', true)
-        .eq('is_deleted', false)
-        .maybeSingle();
-
-      if (reportError) {
-        console.error('❌ Error checking work reporting:', reportError);
-        throw reportError;
-      }
-
-      console.log(`📋 Report data for plan ${lastPlan.id}:`, reportData ? 'Found' : 'Not found');
-
-      if (!reportData) {
-        console.log(`❌ Approved plan ${lastPlan.id} has not been reported yet - cannot plan`);
-        return {
-          canPlan: false,
-          reason: `Work already has an approved plan from ${new Date(lastPlan.from_date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' })} that has not been reported yet. Please report the existing plan first.`,
-          lastPlan
-        };
-      }
-
-      console.log(`📊 Report completion status: ${reportData.completion_status}`);
-      
-      if (reportData.completion_status === 'NC') {
-        console.log(`✅ Work was not completed (NC) - can plan again`);
-        return { canPlan: true };
-      } else {
-        console.log(`❌ Work was completed (${reportData.completion_status}) - cannot plan again`);
-        return {
-          canPlan: false,
-          reason: `Work was already completed on ${new Date(reportData.from_date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' })} with status '${reportData.completion_status}'.`,
-          lastPlan
-        };
-      }
-    }
-
-    // If plan is rejected, allow new planning
-    if (lastPlan.status === 'rejected') {
-      console.log(`✅ Last plan was rejected - can plan again`);
-      return { canPlan: true };
-    }
-
-    // Default: allow planning if status is unknown
-    console.log(`✅ Unknown plan status (${lastPlan.status}) - allowing planning`);
+    // No status row / unknown status: allow and let save-path validations decide.
     return { canPlan: true };
   } catch (error) {
     console.error('❌ Error in canPlanWork:', error);
